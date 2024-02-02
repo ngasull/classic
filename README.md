@@ -40,8 +40,8 @@ Components are great to scope complex UI behaviors. In other cases, components b
     ]
   },
   "imports": {
-    "jsx-machine/": "../jsx-machine/",
-    "jsx-machine/jsx-runtime": "../jsx-machine/jsx-runtime.ts"
+    "jsx-machine/": "https://raw.githubusercontent.com/ngasull/jsx-machine/master/",
+    "jsx-machine/jsx-runtime": "https://raw.githubusercontent.com/ngasull/jsx-machine/master/jsx-runtime.ts",
     "hono/": "https://deno.land/x/hono@v3.8.0-rc.2/"
   }
 }
