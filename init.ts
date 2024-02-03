@@ -1,6 +1,29 @@
 import { join } from "./deps/std/path.ts";
 
+const fetches = fetch(
+  "https://api.github.com/repos/ngasull/jsx-machine/branches/master",
+)
+  .then((res) => res.json())
+  .then(({ commit: { sha } }) => sha)
+  .then((sha) => {
+    const base =
+      `https://raw.githubusercontent.com/ngasull/jsx-machine/${sha}/examples/hello-world`;
+    return Promise.all([
+      fetch(`${base}/deno.json`)
+        .then((res) => res.text())
+        .then((denoJson) =>
+          denoJson.replaceAll(
+            /("jsx-machine\/(jsx-runtime)?": "[^"]+)"/g,
+            (_, row) => row.replace("master", sha),
+          )
+        ),
+      fetch(`${base}/src/main.tsx`).then((res) => res.text()),
+    ]);
+  });
+
 const projectName = prompt("What folder name do you want to create?");
+
+const [denoJson, main] = await fetches;
 
 if (!projectName) Deno.exit(1);
 if (projectName.includes("/")) {
@@ -12,31 +35,11 @@ const src = join(projectName, "src");
 
 await Deno.mkdir(projectName);
 await Promise.all([
-  fetch(
-    new URL(import.meta.resolve("./examples/hello-world/deno.json")),
-  )
-    .then((res) => res.text())
-    .then((denoJson) =>
-      Deno.writeTextFile(
-        join(projectName, "deno.json"),
-        denoJson.replaceAll(
-          /"jsx-machine\/(jsx-runtime)?": "([^"]+)"/g,
-          (_, runtime) =>
-            `"jsx-machine/${runtime ?? ""}": "${
-              runtime
-                ? import.meta.resolve("./jsx-runtime.ts")
-                : `${import.meta.resolve("./")}`
-            }"`,
-        ),
-      )
-    ),
-  Deno.mkdir(src),
-]);
+  Deno.writeTextFile(
+    join(projectName, "deno.json"),
+    denoJson,
+  ),
 
-await Promise.all([
-  fetch(
-    new URL(import.meta.resolve("./examples/hello-world/src/main.tsx")),
-  )
-    .then((res) => res.text())
-    .then((main) => Deno.writeTextFile(join(src, "main.tsx"), main)),
+  Deno.mkdir(src)
+    .then(() => Deno.writeTextFile(join(src, "main.tsx"), main)),
 ]);
