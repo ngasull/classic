@@ -110,8 +110,16 @@ const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
           head.append(adoptNode(el));
         }
       },
-    content = adoptNode(receivedDoc.body.children[0]),
-    copy;
+    children = receivedDoc.body.children,
+    content,
+    script = null;
+
+  if (children.length > 1) {
+    content = adoptNode(receivedDoc.body.children[1]);
+    script = adoptNode(receivedDoc.body.children[0]) as HTMLScriptElement;
+  } else {
+    content = receivedDoc.body.children[0];
+  }
 
   forEach(
     querySelectorAll<HTMLTemplateElement>(`template[data-head]`, receivedDoc),
@@ -132,17 +140,24 @@ const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
   trackChildren(content);
   replaceWith(slot, content);
 
+  if (script) {
+    content.parentNode!.insertBefore(script, content);
+    reviveScript(script);
+  }
+
   // To be executed, scripts must be created manually in main document
   forEach(
     querySelectorAll<HTMLScriptElement>("script", content),
-    (script) => {
-      copy = doc.createElement("script");
-      copy.text = script.text;
-      replaceWith(script, copy);
-    },
+    reviveScript,
   );
 
   return querySelector<HTMLElement>(`[${dataRoute}]`, content);
+};
+
+const reviveScript = (script: HTMLScriptElement) => {
+  let copy = doc.createElement("script");
+  copy.text = script.text;
+  replaceWith(script, copy);
 };
 
 export const navigate = (path: string) => {

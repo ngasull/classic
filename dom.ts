@@ -32,7 +32,7 @@ export type LifecycleFunctions = {
 const targetSymbol = Symbol();
 
 const activateNode = (
-  node: Node,
+  nodes: NodeList | Node[],
   activation: Activation,
   modules: Record<string, unknown>,
   resources: string[],
@@ -54,11 +54,11 @@ const activateNode = (
   },
 ): ReadonlyArray<() => void> =>
   activation.flatMap(([childIndex, h1, ...rs]) => {
-    let child = node.childNodes[childIndex];
+    let child = nodes[childIndex];
 
     return isArray(h1)
       ? activateNode(
-        child,
+        child.childNodes,
         h1,
         modules,
         resources,
@@ -97,12 +97,14 @@ const activateNode = (
       }];
   });
 
-/** Attach JS hooks produced by a jsx render */
+/**
+ * Attach JS hooks produced by a jsx render
+ */
 export const a = (
   activation: Activation,
   modules: string[],
   resources: [string, JSONable][],
-  node: ParentNode,
+  nodes: NodeList | Node[],
 ): Promise<void> => (
   trackChildren(doc),
     setResources(resources),
@@ -111,7 +113,12 @@ export const a = (
       .then((ms) =>
         forEach(
           // Batch activations so that nodes are correctly read, allowing DOM manipulation
-          activateNode(node, activation, fromEntries(ms), resources.map(first)),
+          activateNode(
+            nodes,
+            activation,
+            fromEntries(ms),
+            resources.map(first),
+          ),
           call,
         )
       )

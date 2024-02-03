@@ -149,7 +149,7 @@ const writeActivationScript = (
     );
     write(")(");
     write(
-      partial ? `document.currentScript.parentNode.parentNode` : `document`,
+      partial ? `[document.currentScript.nextSibling]` : `document.childNodes`,
     );
     write(")</script>");
   }
@@ -233,6 +233,11 @@ export const writeDOMTree = (
       }
 
       case DOMNodeKind.Tag: {
+        if (partialRoot && node.tag !== "script") {
+          write("<html><body>");
+          writeRootActivation(true);
+        }
+
         write("<");
         write(escapeTag(node.tag));
 
@@ -267,9 +272,7 @@ export const writeDOMTree = (
           } else {
             writeDOMTree(node.children, write, writeRootActivation, false);
 
-            if (partialRoot) {
-              writeRootActivation(true);
-            } else if (node.tag === "head") {
+            if (!partialRoot && node.tag === "head") {
               writeRootActivation();
             }
           }
@@ -277,6 +280,10 @@ export const writeDOMTree = (
           write("</");
           write(node.tag);
           write(">");
+        }
+
+        if (partialRoot && node.tag !== "script") {
+          write("</body></html>");
         }
         break;
       }
