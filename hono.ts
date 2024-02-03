@@ -31,7 +31,10 @@ export const serveRoutes = <
     if (e[0] === "/") e[0] = "";
   }
 
-  const layoutRoutes: Record<string, JSX.Component> = Object.fromEntries(
+  const layoutRoutes: Record<
+    string,
+    JSX.Component<{ children: JSX.Children }>
+  > = Object.fromEntries(
     routeEntries.flatMap(([path, route]) =>
       typeof route === "function"
         ? [[path, route]]
@@ -52,7 +55,7 @@ export const serveRoutes = <
 
   const handleRoute = (
     routePath: keyof typeof indexRoutes | keyof typeof layoutRoutes,
-    Layout?: JSX.Component | null,
+    Layout?: JSX.Component<{ children: JSX.Children }> | null,
     Index?: JSX.Component | null,
     status = 200,
   ) =>
@@ -75,7 +78,9 @@ export const serveRoutes = <
             const layoutPaths = segments.map((_, i) =>
               segments.slice(0, i + 1).join("/")
             );
-            const layoutComponents: JSX.Component[] = layoutPaths.map(
+            const layoutComponents: JSX.Component<
+              { children: JSX.Children }
+            >[] = layoutPaths.map(
               (path) =>
                 layoutRoutes[path] ||
                 (({ children }) => Fragment({ children })),
