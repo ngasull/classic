@@ -74,7 +74,12 @@ serveRoutes({
             <title>Hello world</title>
             <meta charset="utf-8" />
           </head>
-          <body>{children}</body>
+          <body
+            // Optional: client-side dynamic routing _à la_ Remix
+            ref={(body) => web.module("jsx-machine/dom/router.ts").register(body)}
+          >
+            {children}
+          </body>
         </html>
       ),
       index: () => (
@@ -95,14 +100,4 @@ serveRoutes({
 });
 
 Deno.serve({ port: 3000 }, app.fetch);
-```
-
-## Add client-side dynamic routing _à la_ Remix
-
-```tsx
-<body
-  ref={(body) => web.module("jsx-machine/dom/router.ts").register(body)}
->
-  {children}
-</body>
 ```
