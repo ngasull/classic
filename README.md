@@ -27,7 +27,7 @@ Components are great to scope complex UI behaviors. In other cases, components b
 ## Get started with Hono
 
 ```jsonc
-// deno.jsonc
+// deno.json
 {
   "compilerOptions": {
     "jsx": "react-jsx",
@@ -40,15 +40,15 @@ Components are great to scope complex UI behaviors. In other cases, components b
     ]
   },
   "imports": {
-    "jsx-machine/": "https://raw.githubusercontent.com/ngasull/jsx-machine/master/",
-    "jsx-machine/jsx-runtime": "https://raw.githubusercontent.com/ngasull/jsx-machine/master/jsx-runtime.ts",
+    "jsx-machine/": "https://raw.githubusercontent.com/ngasull/jsx-machine/f3b53f850e390246f25420f82fb67dc35c5349a4/",
+    "jsx-machine/jsx-runtime": "https://raw.githubusercontent.com/ngasull/jsx-machine/f3b53f850e390246f25420f82fb67dc35c5349a4/jsx-runtime.ts",
     "hono/": "https://deno.land/x/hono@v3.8.0-rc.2/"
   }
 }
 ```
 
 ```tsx
-// main.tsx
+// src/main.tsx
 import { Hono } from "hono/mod.ts";
 import { bundleWebImports } from "jsx-machine/js/web.ts";
 import { serveBundle, serveRoutes } from "jsx-machine/hono.ts";
@@ -61,7 +61,7 @@ serveBundle(
 );
 
 // Your bundle is built by scanning calls to this import
-import { web } from "./web-modules.gen.ts";
+const { web } = await import(`${"./web-modules.gen.ts"}`);
 
 serveRoutes({
   hono: app,

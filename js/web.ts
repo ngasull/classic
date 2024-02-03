@@ -1,5 +1,6 @@
 import * as esbuild from "../deps/esbuild.ts";
-import { join, resolve, toFileUrl } from "../deps/std.ts";
+import { exists } from "../deps/std/fs.ts";
+import { join, resolve, toFileUrl } from "../deps/std/path.ts";
 
 export type WebBundle = Record<string, { contents: Uint8Array; hash: string }>;
 
@@ -8,7 +9,7 @@ export const bundleWebImports = async (
     name = "web",
     src = "src",
     publicRoot = "/m",
-    importMapURL = toFileUrl(resolve("deno.jsonc")).toString(),
+    importMapURL,
     dev = true,
   }: {
     name?: string;
@@ -18,6 +19,18 @@ export const bundleWebImports = async (
     dev?: boolean;
   } = {},
 ): Promise<WebBundle> => {
+  importMapURL ??= toFileUrl(
+    resolve(
+      await exists("import_map.json")
+        ? "import_map.json"
+        : await exists("deno.json")
+        ? "deno.json"
+        : await exists("deno.jsonc")
+        ? "deno.jsonc"
+        : "import_map.json",
+    ),
+  ).toString();
+
   const srcFiles = await (async function scanDir(parent: string) {
     const tasks = [];
 
@@ -142,7 +155,11 @@ ${modulesMap}export const ${name} = {
 };
 `;
 
-  if (await Deno.readTextFile("src/web-modules.gen.ts") !== webModulesContent) {
+  try {
+    if (
+      await Deno.readTextFile("src/web-modules.gen.ts") !== webModulesContent
+    ) throw 1;
+  } catch (_) {
     await Deno.writeTextFile("src/web-modules.gen.ts", webModulesContent);
   }
 
