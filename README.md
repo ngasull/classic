@@ -4,7 +4,7 @@
 
 ```sh
 # Will prompt you a folder name to create
-deno run --allow-write=. --allow-net=github.com https://raw.githubusercontent.com/ngasull/jsx-machine/master/jsx-machine/init.ts
+deno run --allow-write=. --allow-net=raw.githubusercontent.com https://raw.githubusercontent.com/ngasull/jsx-machine/master/init.ts
 ```
 
 ## Principles
