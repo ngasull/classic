@@ -31,35 +31,18 @@ export const serveRoutes = <
     if (e[0] === "/") e[0] = "";
   }
 
-  const layoutRoutes: Record<
-    string,
-    JSX.Component<{ children: JSX.Children }>
-  > = Object.fromEntries(
-    routeEntries.flatMap(([path, route]) =>
-      typeof route === "function"
-        ? [[path, route]]
-        : route.layout
-        ? [[path, route.layout]]
-        : []
-    ),
-  );
-  const indexRoutes: Record<string, JSX.Component> = Object.fromEntries(
-    routeEntries.flatMap(([path, route]) =>
-      typeof route === "function"
-        ? [[path, route]]
-        : route.index
-        ? [[path, route.index]]
-        : []
-    ),
-  );
-
-  const handleRoute = (
-    routePath: keyof typeof indexRoutes | keyof typeof layoutRoutes,
-    Layout?: JSX.Component<{ children: JSX.Children }> | null,
-    Index?: JSX.Component | null,
-    status = 200,
+  const handleRoute = <K extends KS>(
+    routePath: "" | K,
+    Layout?:
+      | JSX.Component<
+        { children: JSX.Children } & { [k in ParamKeys<K>]: string }
+      >
+      | null,
+    Index: JSX.Component<{ [k in ParamKeys<K>]: string }> = NotFound,
   ) =>
-  async (c: Context) => {
+  async (c: Context<E, ParamKeys<K>>) => {
+    const params = c.req.param() as Record<ParamKeys<K>, string>;
+
     const isLayout = c.req.query("_layout") != null;
     const isIndex = c.req.query("_index") != null;
 
@@ -67,60 +50,66 @@ export const serveRoutes = <
       ? Layout
         ? jsx("div", {
           "data-route": "/" + routePath.split("/").pop(),
-          children: jsx(Layout, null),
+          children: jsx(Layout, { ...params, children: undefined }),
         })
         : jsx("progress", { "data-route": "" })
-      : Index &&
-        (isIndex
-          ? jsx("div", { "data-route": "/", children: jsx(Index, null) })
-          : (() => {
-            const segments = routePath.split("/");
-            const layoutPaths = segments.map((_, i) =>
-              segments.slice(0, i + 1).join("/")
-            );
-            const layoutComponents: JSX.Component<
-              { children: JSX.Children }
-            >[] = layoutPaths.map(
-              (path) =>
-                layoutRoutes[path] ||
-                (({ children }) => Fragment({ children })),
-            );
+      : (isIndex
+        ? jsx("div", { "data-route": "/", children: jsx(Index, null) })
+        : (() => {
+          const segments = routePath.split("/");
+          const layoutPaths = segments.map((_, i) =>
+            segments.slice(0, i + 1).join("/")
+          ) as K[];
+          const layoutComponents: JSX.Component<
+            { children: JSX.Children } & { [k in ParamKeys<K>]: string }
+          >[] = layoutPaths.map(
+            (path) =>
+              extractRoute(routes[path])[0] ||
+              (({ children }) => Fragment({ children })),
+          );
 
-            return layoutComponents.reduceRight(
-              (prev, SegmentLayout, i) =>
-                jsx(SegmentLayout, {
-                  children: jsx("div", {
-                    "data-route": "/" + (segments[i + 1] || ""),
-                    children: prev,
-                  }),
+          return layoutComponents.reduceRight(
+            (prev, SegmentLayout, i) =>
+              jsx(SegmentLayout, {
+                ...params,
+                children: jsx("div", {
+                  "data-route": "/" + (segments[i + 1] || ""),
+                  children: prev,
                 }),
-              jsx(Index, null),
-            );
-          })());
+              }),
+            jsx(Index, params),
+          );
+        })());
 
-    c.status(status);
-
-    return element
-      ? c.html(await renderToString(element, { domPath }))
-      : c.text("Not found", 404);
+    return c.html(
+      await renderToString(element, { domPath }),
+      Index === NotFound ? 404 : 200,
+    );
   };
 
-  for (const [path, Index] of Object.entries(indexRoutes)) {
+  for (const [path, route] of Object.entries(routes) as [KS, Route<KS>][]) {
+    const [Layout, Index] = extractRoute(route);
     hono.get(
       path,
-      handleRoute(path as keyof typeof indexRoutes, layoutRoutes[path], Index),
+      handleRoute(path as keyof typeof routes, Layout, Index),
     );
   }
 
-  for (const [path, Layout] of Object.entries(layoutRoutes)) {
-    hono.get(path, handleRoute(path, Layout, null));
-  }
-
-  hono.get(
-    "*",
-    handleRoute("", null, () => Fragment({ children: "Not found" }), 404),
-  );
+  hono.get("*", handleRoute(""));
 };
+
+const extractRoute = <K extends string>(
+  route: Route<K>,
+): [
+  | JSX.Component<{ children: JSX.Children } & { [k in ParamKeys<K>]: string }>
+  | undefined,
+  JSX.Component<{ [k in ParamKeys<K>]: string }> | undefined,
+] =>
+  typeof route === "function"
+    ? [undefined, route]
+    : [route.layout, route.index];
+
+const NotFound = () => Fragment({ children: "Not found" });
 
 export const serveBundle = (app: Hono, webBundle: WebBundle) =>
   app.get("/m/:filename{.+}", (c) => {
