@@ -5,7 +5,6 @@ import type {
   JSFn,
   JSFnBody,
   JSMeta,
-  JSNoReturn,
   JSONable,
   JSReturn,
   JSStatements,
@@ -24,6 +23,8 @@ const resourcesArg = "_$";
 
 const targetSymbol = Symbol("target");
 
+const safeRecordKeyRegExp = /^[A-z_$][\w_$]*$/;
+
 const jsProxyHandler: ProxyHandler<{
   (...argArray: ReadonlyArray<JSable<unknown> | JSONable>): JSable<unknown>;
   [targetSymbol]: JSable<unknown>;
@@ -37,11 +38,43 @@ const jsProxyHandler: ProxyHandler<{
     const expr = target[targetSymbol];
     return typeof p === "symbol"
       ? expr[p as typeof jsSymbol]
+      : !isNaN(parseInt(p))
+      ? js`${expr}[${unsafe(p as string)}]`
       : safeRecordKeyRegExp.test(p as string)
       ? js`${expr}.${unsafe(p as string)}`
       : js`${expr}[${JSON.stringify(p)}]`;
   },
 };
+
+const mapCallArg = (
+  store: (res: Resource<JSONable>) => number,
+  a: JSable<unknown> | JSONable,
+): string =>
+  a == null
+    ? String(a)
+    : isEvaluable(a)
+    ? a[jsSymbol].resources.length
+      ? `((${a[jsSymbol].resources.map((_, i) => `$${i}`).join(",")})=>(${
+        a[jsSymbol].rawJS
+      }))(${a[jsSymbol].resources.map((r) => `$${store(r)}`)})`
+      : a[jsSymbol].rawJS
+    : typeof a === "function"
+    ? mapCallArg(store, fn(a))
+    : Array.isArray(a)
+    ? `[${a.map((a) => mapCallArg(store, a)).join(",")}]`
+    : typeof a === "object"
+    ? `{${
+      Object.entries(a as { [k: string | number]: typeof a })
+        .map(([k, v]) =>
+          `${
+            typeof k === "number" || safeRecordKeyRegExp.test(k)
+              ? k
+              : JSON.stringify(k)
+          }:${mapCallArg(store, v)}`
+        )
+        .join(",")
+    }}`
+    : JSON.stringify(a);
 
 export const js = (<T>(
   tpl: ReadonlyArray<string>,
@@ -127,23 +160,7 @@ export const js = (<T>(
     };
 
     const jsArgs = unsafe(
-      argArray
-        .map(function mapArg(a): string {
-          return isEvaluable(a)
-            ? a[jsSymbol].resources.length
-              ? `((${
-                a[jsSymbol].resources.map((_, i) => `$${i}`).join(",")
-              })=>(${a[jsSymbol].rawJS}))(${
-                a[jsSymbol].resources.map((r) => `$${store(r)}`)
-              })`
-              : a[jsSymbol].rawJS
-            : typeof a === "function"
-            ? mapArg(fn(a))
-            : a === undefined
-            ? "undefined"
-            : JSON.stringify(a);
-        })
-        .join(","),
+      argArray.map((a) => mapCallArg(store, a)).join(","),
     ) as unknown as { [jsSymbol]: JSMeta<unknown> };
     jsArgs[jsSymbol].resources = Object.values(resStore).map(([, r]) => r) as [
       Resource<JSONable>,
@@ -233,8 +250,6 @@ js.return = <T, E extends JSable<T>>(expr: E) =>
   js`return ${expr}` as JS<T> & JSReturn;
 
 js.symbol = jsSymbol;
-
-const safeRecordKeyRegExp = /^\w+$/;
 
 export const unsafe = (js: string) => mkPureJS(js);
 

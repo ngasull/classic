@@ -10,6 +10,11 @@ export type JS<T> =
           | JSable<Args[I]>
           | (Args[I] extends infer N extends null | undefined ? N
             : never)
+          | (Args[I] extends infer It extends (
+            | readonly unknown[]
+            | { readonly [k: string | number | symbol]: unknown }
+          ) ? { [K in keyof It]: JSable<It[K]> }
+            : never)
           | (Args[I] extends
             ((...args: infer AArgs) => infer AR) | null | undefined ? ((
               ...args: { [AI in keyof AArgs]: JS<AArgs[AI]> }

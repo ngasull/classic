@@ -51,7 +51,7 @@ export const bundleWebImports = async (
   })(src);
 
   const moduleImportRegExp = new RegExp(
-    `${name}\\s*\\.(?:import|module|path)\\(\\s*('[^']+'|"[^"]+")\\s*\\)`,
+    `${name}\\s*\\.(?:import|module|path)\\(\\s*('[^']+'|"[^"]+")\\s*(?:,\\s*)?\\)`,
     "g",
   );
 
@@ -74,7 +74,6 @@ export const bundleWebImports = async (
     ),
   ];
 
-  const sourcemap = dev;
   const absoluteOutdir = resolve("dist");
   const bundle = await esbuild.build({
     entryPoints: modules,
@@ -82,7 +81,8 @@ export const bundleWebImports = async (
     bundle: true,
     splitting: true,
     minify: !dev,
-    sourcemap,
+    sourcemap: dev,
+    metafile: true,
     write: false,
     outdir: absoluteOutdir,
     format: "esm",
@@ -95,19 +95,26 @@ export const bundleWebImports = async (
     hash: string;
   }[] = bundle.outputFiles;
 
+  let m = 0;
+  const bundledModules = Object.values(bundle.metafile.outputs)
+    .flatMap((meta, i) =>
+      meta.entryPoint
+        ? [{
+          local: modules[m++],
+          pub: toPublicPath(bundle.outputFiles[i].path),
+          contents: bundle.outputFiles[i].contents,
+          hash: bundle.outputFiles[i].hash,
+        }]
+        : []
+    );
+
   const modulesMap = modules.length > 0
     ? `const modules = {${
-      modules
-        .map((path, i) =>
-          `\n  ${JSON.stringify(path)}: { local: ${
-            JSON.stringify(path)
-          }, pub: ${
-            JSON.stringify(
-              `${publicRoot}${
-                toPublicPath(outputFiles[sourcemap ? i * 2 + 1 : i].path)
-              }`,
-            )
-          } },`
+      bundledModules
+        .map(({ local, pub }) =>
+          `\n  ${JSON.stringify(local)}: { local: ${
+            JSON.stringify(local)
+          }, pub: ${JSON.stringify(`${publicRoot}${pub}`)} },`
         )
         .join("")
     }
