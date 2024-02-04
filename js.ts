@@ -36,7 +36,9 @@ const jsProxyHandler: ProxyHandler<{
 
   get(target, p) {
     const expr = target[targetSymbol];
-    return typeof p === "symbol"
+    return p === Symbol.iterator
+      ? () => jsIterator(expr)
+      : typeof p === "symbol"
       ? expr[p as typeof jsSymbol]
       : !isNaN(parseInt(p))
       ? js`${expr}[${unsafe(p as string)}]`
@@ -44,6 +46,26 @@ const jsProxyHandler: ProxyHandler<{
       ? js`${expr}.${unsafe(p as string)}`
       : js`${expr}[${JSON.stringify(p)}]`;
   },
+};
+
+const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
+  let i = -1;
+
+  const r: IteratorResult<JS<T>> = {
+    done: false as boolean,
+    get value() {
+      return js<T>`${expr}[${i}]`;
+    },
+  };
+
+  return {
+    next() {
+      i += 1;
+      // Iterator is meant for destructuring through JS. Prevent infinite iteration
+      if (i > 50) r.done = true;
+      return r;
+    },
+  };
 };
 
 const mapCallArg = (

@@ -26,6 +26,9 @@ export type JS<T> =
     : unknown)
   & (T extends JSONLiteral ? unknown
     : { readonly [K in keyof Omit<T, typeof jsSymbol>]: JS<T[K]> })
+  & (T extends infer Arr extends readonly unknown[]
+    ? { readonly [A in keyof Arr]: JS<Arr[A]> }
+    : unknown)
   & JSable<T>;
 
 export type JSMeta<T> = {
