@@ -1,7 +1,7 @@
 /// <reference path="./dom.types.ts" />
 
 import type { LifecycleFunctions } from "../dom.ts";
-import type { EvaluableJS, JS, JSONable, WrappedPureJS } from "../js/types.ts";
+import type { JS, JSable, JSONable } from "../js/types.ts";
 import { jsSymbol } from "../js/types.ts";
 
 declare global {
@@ -12,7 +12,7 @@ declare global {
       [K in keyof DOMElements]: {
         [P in keyof DOMElements[K]]?:
           | DOMElements[K][P]
-          | EvaluableJS<DOMElements[K][P]>;
+          | JSable<DOMElements[K][P]>;
       };
     };
 
@@ -27,14 +27,14 @@ declare global {
       | DOMLiteral
       | null
       | undefined
-      | EvaluableJS<DOMLiteral | null | undefined>
+      | JSable<DOMLiteral | null | undefined>
       | Array<Children>;
 
     type SyncElement =
       | { kind: ElementKind.Comment; element: string }
       | { kind: ElementKind.Component; element: ComponentElement }
       | { kind: ElementKind.Intrinsic; element: IntrinsicElement }
-      | { kind: ElementKind.JS; element: EvaluableJS<DOMLiteral> }
+      | { kind: ElementKind.JS; element: JSable<DOMLiteral> }
       | { kind: ElementKind.Text; element: TextElement }
       | { kind: ElementKind.HTMLNode; element: HTMLNodeElement };
 
@@ -42,7 +42,7 @@ declare global {
       tag: IntrinsicTag;
       props: Record<
         string,
-        | EvaluableJS<string | number | boolean | null>
+        | JSable<string | number | boolean | null>
         | string
         | number
         | boolean
@@ -94,8 +94,8 @@ declare global {
     type DOMLiteral = string | number;
 
     type Ref<N> = (
-      ref: WrappedPureJS<N>,
-      lifecycle: WrappedPureJS<LifecycleFunctions>,
+      ref: JS<N>,
+      lifecycle: JS<LifecycleFunctions>,
     ) => JS<any>;
   }
 }

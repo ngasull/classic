@@ -1,55 +1,26 @@
 import type {
-  EvaluableJS,
+  ImplicitlyJSable,
   JS,
+  JSable,
+  JSMeta,
   JSONable,
   ModuleMeta,
   ParamKeys,
-  PureJS,
-  PureJSable,
-  PureJSMeta,
-  ReactiveJS,
-  ReactiveJSable,
-  ReactiveJSMeta,
   Resource,
   ResourceGroup,
   Resources,
-  WrappedPureJS,
-  WrappedReactiveJS,
 } from "./js/types.ts";
 import { isEvaluable, isReactive, jsSymbol } from "./js/types.ts";
 
-export const modulesArg = "__";
+const modulesArg = "__";
 
-export const resourcesArg = "_$";
-
-export const evalJS = async <T>(expr: EvaluableJS<T>): Promise<T> => {
-  const argsBody = [`return(${expr[jsSymbol].rawJS})`];
-  const args: unknown[] = [];
-
-  if (isReactive(expr)) {
-    argsBody.unshift(resourcesArg);
-    args.unshift(
-      await Promise.all(expr[jsSymbol].resources.map((r) => r.value)),
-    );
-  }
-
-  if (expr[jsSymbol].modules.length > 0) {
-    argsBody.unshift(modulesArg);
-    args.unshift(
-      await Promise.all(expr[jsSymbol].modules.map((m) => import(m.local))),
-    );
-  }
-
-  return new Function(...argsBody)(...args);
-};
+const resourcesArg = "_$";
 
 const targetSymbol = Symbol("target");
 
 const jsProxyHandler: ProxyHandler<{
-  (
-    ...argArray: ReadonlyArray<EvaluableJS<unknown> | JSONable>
-  ): EvaluableJS<unknown>;
-  [targetSymbol]: EvaluableJS<unknown>;
+  (...argArray: ReadonlyArray<JSable<unknown> | JSONable>): JSable<unknown>;
+  [targetSymbol]: JSable<unknown>;
 }> = {
   has(target, p) {
     const expr = target[targetSymbol];
@@ -68,7 +39,7 @@ const jsProxyHandler: ProxyHandler<{
 
 export const js = (<T>(
   tpl: TemplateStringsArray,
-  ...exprs: ReactiveJSable[]
+  ...exprs: ImplicitlyJSable[]
 ) => {
   const modules: Record<string, ModuleMeta> = {};
 
@@ -81,7 +52,7 @@ export const js = (<T>(
     return resources.get(res)!;
   };
 
-  const handleExpression = (expr: ReactiveJSable): string => {
+  const handleExpression = (expr: ImplicitlyJSable): string => {
     if (expr === null) {
       return `null`;
     } else if (expr === undefined) {
@@ -106,7 +77,7 @@ export const js = (<T>(
       return `[${expr.map(handleExpression).join(",")}]`;
     } else if (typeof expr === "object") {
       return `{${
-        Object.entries(expr as { [k: string]: ReactiveJSable })
+        Object.entries(expr as { [k: string]: ImplicitlyJSable })
           .map(
             ([k, expr]) =>
               `${
@@ -129,7 +100,7 @@ export const js = (<T>(
 
   if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
 
-  const expr = mkPureJS(rawParts.join("")) as unknown as EvaluableJS<T>;
+  const expr = mkPureJS(rawParts.join("")) as unknown as JSable<T>;
   expr[jsSymbol].expression = true;
   expr[jsSymbol].modules = Object.values(modules);
 
@@ -141,7 +112,7 @@ export const js = (<T>(
   }
 
   const callExpr = (
-    ...argArray: ReadonlyArray<EvaluableJS<unknown> | JSONable>
+    ...argArray: ReadonlyArray<JSable<unknown> | JSONable>
   ) => {
     let lastIndex = 0;
     const resStore: Record<string, [number, Resource<JSONable>]> = {};
@@ -168,7 +139,7 @@ export const js = (<T>(
             : JSON.stringify(a);
         })
         .join(","),
-    ) as unknown as { [jsSymbol]: ReactiveJSMeta<unknown> };
+    ) as unknown as { [jsSymbol]: JSMeta<unknown> };
     jsArgs[jsSymbol].resources = Object.values(resStore).map(([, r]) => r) as [
       Resource<JSONable>,
       ...Resource<JSONable>[],
@@ -179,24 +150,17 @@ export const js = (<T>(
 
   callExpr[targetSymbol] = expr;
 
-  return new Proxy(callExpr, jsProxyHandler) as unknown as WrappedReactiveJS<T>;
+  return new Proxy(callExpr, jsProxyHandler) as unknown as JS<T>;
 }) as {
-  <T>(
-    tpl: TemplateStringsArray,
-    ...exprs: PureJSable[]
-  ): WrappedPureJS<T>;
-  <T>(
-    tpl: TemplateStringsArray,
-    ...exprs: ReactiveJSable[]
-  ): WrappedReactiveJS<T>;
+  <T>(tpl: TemplateStringsArray, ...exprs: ImplicitlyJSable[]): JS<T>;
 } & {
-  eval: <T>(expr: EvaluableJS<T>) => Promise<T>;
-  import: <M>(url: string) => WrappedPureJS<Promise<M>>;
-  module: <M>(local: string, pub: string) => WrappedPureJS<M>;
+  eval: <T>(expr: JSable<T>) => Promise<T>;
+  import: <M>(url: string) => JS<Promise<M>>;
+  module: <M>(local: string, pub: string) => JS<M>;
   "symbol": typeof jsSymbol;
 };
 
-js.eval = async <T>(expr: EvaluableJS<T>): Promise<T> => {
+js.eval = async <T>(expr: JSable<T>): Promise<T> => {
   const argsBody = [`return(${expr[jsSymbol].rawJS})`];
   const args: unknown[] = [];
 
@@ -246,9 +210,7 @@ const mkPureJS = (rawJS: string) => ({
     rawJS,
     modules: [] as const,
     resources: [] as const,
-  }) as unknown as PureJSMeta<
-    unknown
-  >,
+  }) as unknown as JSMeta<unknown>,
 });
 
 export const resource = <T extends Record<string, JSONable>>(
@@ -264,7 +226,7 @@ export const resource = <T extends Record<string, JSONable>>(
     },
   } as Resource<T>;
 
-  const expr = js`${unsafe(resourcesArg)}[0]` as unknown as WrappedReactiveJS<
+  const expr = js`${unsafe(resourcesArg)}[0]` as unknown as JS<
     T
   >;
   expr[jsSymbol].expression = true;
@@ -279,7 +241,7 @@ export const resources = <T extends Record<string, JSONable>, U extends string>(
 ) => {
   const make = (
     params: { [k in ParamKeys<U>]: string | number },
-  ): WrappedReactiveJS<T> => {
+  ): JS<T> => {
     const stringParams = Object.fromEntries(
       Object.entries(params).map(([k, v]) => [k, String(v)]),
     ) as { [k in ParamKeys<U>]: string };
@@ -307,15 +269,15 @@ export const resources = <T extends Record<string, JSONable>, U extends string>(
 };
 
 export const statements = {
-  js: <T>(tpl: TemplateStringsArray, ...exprs: PureJSable[]) => {
-    const self = js(tpl, ...exprs) as unknown as PureJS<T>;
+  js: <T>(tpl: TemplateStringsArray, ...exprs: ImplicitlyJSable[]) => {
+    const self = js(tpl, ...exprs) as unknown as JSable<T>;
     self[jsSymbol].expression = false;
     return self;
   },
 };
 
-export const fn = (<Args extends unknown[], T = void>(
-  cb: (...args: { [I in keyof Args]: WrappedPureJS<Args[I]> }) => JS<T>,
+export const fn = <Args extends unknown[], T = void>(
+  cb: (...args: { [I in keyof Args]: JS<Args[I]> }) => JSable<T>,
 ) => {
   const argList = unsafe(
     Array(cb.length).fill(0)
@@ -327,7 +289,7 @@ export const fn = (<Args extends unknown[], T = void>(
     ...(Array(cb.length)
       .fill(0)
       .map((_, i) => js`${unsafe(`$${i}`)}`) as {
-        [I in keyof Args]: WrappedPureJS<Args[I]>;
+        [I in keyof Args]: JS<Args[I]>;
       }),
   );
 
@@ -339,20 +301,8 @@ export const fn = (<Args extends unknown[], T = void>(
 
   jsfnExpr[jsSymbol].body = body;
 
-  return jsfnExpr;
-}) as {
-  <Args extends unknown[], T = void>(
-    cb: (...args: { [I in keyof Args]: WrappedPureJS<Args[I]> }) => PureJS<T>,
-  ): WrappedPureJS<(...args: Args) => T> & {
-    [jsSymbol]: { body: PureJS<unknown> };
-  };
-
-  <Args extends unknown[], T = void>(
-    cb: (
-      ...args: { [I in keyof Args]: WrappedPureJS<Args[I]> }
-    ) => ReactiveJS<T>,
-  ): WrappedReactiveJS<(...args: Args) => T> & {
-    [jsSymbol]: { body: ReactiveJS<unknown> };
+  return jsfnExpr as JS<(...args: Args) => T> & {
+    [jsSymbol]: { body: JSable<unknown> };
   };
 };
 

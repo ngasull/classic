@@ -3,77 +3,40 @@ export type Resource<T extends JSONable> = {
   value: T | Promise<T>;
 };
 
-export type JS<T> = WrappedPureJS<T> | WrappedReactiveJS<T>;
-
-export type WrappedPureJS<T> =
+export type JS<T> =
   & (T extends (...args: infer Args) => infer R ? ((
       ...args: {
         [I in keyof Args]:
-          | PureJS<Args[I]>
+          | JSable<Args[I]>
           | (Args[I] extends JSONable ? Args[I] : never)
           | (Args[I] extends (...args: infer AArgs) => infer AR ? (
-              ...args: { [AI in keyof AArgs]: WrappedPureJS<AArgs[AI]> }
+              ...args: { [AI in keyof AArgs]: JS<AArgs[AI]> }
             ) => JS<AR>
             : never);
       }
-    ) => WrappedPureJS<R>)
+    ) => JS<R>)
     : unknown)
   & (T extends JSONLiteral ? unknown
-    : { readonly [K in keyof Omit<T, typeof jsSymbol>]: WrappedPureJS<T[K]> })
-  & PureJS<T>;
-
-export type WrappedReactiveJS<T> =
-  & (T extends (...args: infer Args) => infer R ? ((
-      ...args: {
-        [I in keyof Args]:
-          | EvaluableJS<Args[I]>
-          | (Args[I] extends JSONable ? Args[I] : never)
-          | (Args[I] extends (...args: infer AArgs) => infer AR ? (
-              ...args: { [AI in keyof AArgs]: WrappedReactiveJS<AArgs[AI]> }
-            ) => JS<AR>
-            : never);
-      }
-    ) => WrappedReactiveJS<R>)
-    : unknown)
-  & (T extends JSONLiteral ? unknown
-    : {
-      readonly [K in keyof Omit<T, typeof jsSymbol>]: WrappedReactiveJS<T[K]>;
-    })
-  & ReactiveJS<T>;
-
-export type RawJSMeta = {
-  rawJS: string;
-  modules: readonly ModuleMeta[];
-  resources: readonly [];
-  body?: JS<unknown>;
-};
-// Front: Map<hash, { module: Promise, deps: hash[] }>
+    : { readonly [K in keyof Omit<T, typeof jsSymbol>]: JS<T[K]> })
+  & JSable<T>;
 
 export type ModuleMeta = { local: string; pub: string };
 
-export type PureJSMeta<T> = RawJSMeta & {
+export type JSMeta<T> = {
   _type: T;
+  rawJS: string;
+  modules: readonly ModuleMeta[];
+  resources: readonly Resource<JSONable>[]; // ReactiveJSExpression expects an array variable `_$` that contains these resources' value
+  body?: JS<unknown>;
   expression: boolean;
 };
 
-export type ReactiveJSMeta<T> =
-  & Omit<PureJSMeta<T>, "resources">
-  & {
-    resources: readonly [Resource<JSONable>, ...Resource<JSONable>[]]; // ReactiveJSExpression expects an array variable `_$` that contains these resources' value
-  };
-
-export type RawJS = { [jsSymbol]: RawJSMeta };
-
-export type PureJS<T> = { [jsSymbol]: PureJSMeta<T> };
-
-export type ReactiveJS<T> = { [jsSymbol]: ReactiveJSMeta<T> };
-
-export type EvaluableJS<T> = ReactiveJS<T> | PureJS<T>;
+export type JSable<T> = { [jsSymbol]: JSMeta<T> };
 
 export type ResourceGroup<
   T extends Record<string, JSONable>,
   U extends string,
-> = ((v: { [k in ParamKeys<U>]: string | number }) => WrappedReactiveJS<T>) & {
+> = ((v: { [k in ParamKeys<U>]: string | number }) => JS<T>) & {
   pattern: U;
   each: (values: { [k in ParamKeys<U>]: string | number }[]) => Resources<T, U>;
 };
@@ -94,37 +57,27 @@ export type JSONArray = ReadonlyArray<JSONLiteral | JSONArray | JSONRecord>;
 
 export type JSONable = JSONLiteral | JSONRecord | JSONArray;
 
-export type PureJSable =
-  | JSONable
+export type ImplicitlyJSable =
+  | JSONLiteral
   | undefined
-  | PureJSable[]
-  | { [k: string]: PureJSable; [jsSymbol]?: never }
-  | PureJS<any>;
-
-export type ReactiveJSable =
-  | JSONable
-  | undefined
-  | ReactiveJSable[]
-  | { [k: string]: ReactiveJSable; [jsSymbol]?: never }
-  | PureJS<any>
-  | ReactiveJS<any>;
+  | JSable<any>
+  | ImplicitlyJSable[]
+  | { [k: string]: ImplicitlyJSable; [jsSymbol]?: never };
 
 export const jsSymbol = Symbol("js");
 
-export const isPureJS = (v: unknown): v is RawJS =>
+export const isJSable = <T>(v: unknown): v is JSable<T> =>
   v != null && (typeof v === "object" || typeof v === "function") &&
   jsSymbol in v;
 
-export const isEvaluable = <T>(v: unknown): v is EvaluableJS<T> =>
-  isPureJS(v) && "expression" in v[jsSymbol] && v[jsSymbol].expression === true;
+export const isEvaluable = <T>(v: unknown): v is JSable<T> =>
+  isJSable(v) && "expression" in v[jsSymbol] && v[jsSymbol].expression === true;
 
-export const isJSExpression = <T>(v: unknown): v is PureJS<T> =>
-  isPureJS(v) && "expression" in v[jsSymbol] &&
-  v[jsSymbol].expression === true && !v[jsSymbol].resources.length;
+export const isPure = <T>(v: unknown): v is JSable<T> =>
+  isEvaluable(v) && !v[jsSymbol].resources.length;
 
-export const isReactive = <T>(v: unknown): v is ReactiveJS<T> =>
-  isPureJS(v) && "expression" in v[jsSymbol] &&
-  v[jsSymbol].expression === true && v[jsSymbol].resources.length > 0;
+export const isReactive = <T>(v: unknown): v is JSable<T> =>
+  isEvaluable(v) && v[jsSymbol].resources.length > 0;
 
 // From Hono
 // https://github.com/honojs/hono/blob/db3387353f23e0914faf8169323c06e9d9658c20/src/types.ts#L560C1-L572C19

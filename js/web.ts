@@ -124,17 +124,15 @@ const module = (path: keyof typeof modules) =>
 
   const webModulesContent = `// AUTO-GENERATED FILE, DO NOT MODIFY
 import { js } from ${JSON.stringify(import.meta.resolve("../js.ts"))};
-import type { WrappedPureJS } from ${
-    JSON.stringify(import.meta.resolve("./types.ts"))
-  };
+import type { JS } from ${JSON.stringify(import.meta.resolve("./types.ts"))};
 
 ${modulesMap}export const ${name} = {
   import: ${modules.length > 0 ? `impt` : `((_) => undefined)`} as {${
     modules
       .map((path) =>
-        `\n    (mod: ${
+        `\n    (mod: ${JSON.stringify(path)}): JS<Promise<typeof import(${
           JSON.stringify(path)
-        }): WrappedPureJS<Promise<typeof import(${JSON.stringify(path)})>>;`
+        })>>;`
       )
       .join("")
   }
@@ -143,7 +141,7 @@ ${modulesMap}export const ${name} = {
   module: ${modules.length > 0 ? `module` : `((_) => undefined)`} as {${
     modules
       .map((path) =>
-        `\n    (mod: ${JSON.stringify(path)}): WrappedPureJS<typeof import(${
+        `\n    (mod: ${JSON.stringify(path)}): JS<typeof import(${
           JSON.stringify(path)
         })>;`
       )

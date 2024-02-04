@@ -1,12 +1,11 @@
 import type { Activation, LifecycleFunctions } from "../dom.ts";
 import { fn, js, sync } from "../js.ts";
 import {
-  EvaluableJS,
   isEvaluable,
+  JSable,
   JSONable,
   jsSymbol,
   ModuleMeta,
-  PureJS,
   Resource,
 } from "../js/types.ts";
 import { contextSymbol, DOMNode, DOMNodeKind, ElementKind } from "./types.ts";
@@ -340,7 +339,7 @@ const nodeToDOMTree = async (
       const attributes: Record<string, string | number | boolean> = {};
       const reactiveAttributes: [
         string,
-        EvaluableJS<string | number | boolean | null>,
+        JSable<string | number | boolean | null>,
       ][] = [];
 
       const propEntries = Object.entries(props);
@@ -355,7 +354,7 @@ const nodeToDOMTree = async (
             | boolean
             | null
             | undefined
-            | EvaluableJS<string | number | boolean | null>,
+            | JSable<string | number | boolean | null>,
         ) {
           if (value != null) {
             if (isEvaluable<string | number | boolean | null>(value)) {
@@ -395,7 +394,7 @@ const nodeToDOMTree = async (
                     (ref as unknown as JSX.Ref<Element>)(
                       elRef,
                       lifecycle,
-                    ) as PureJS<void>
+                    ) as JSable<void>
                   ),
                 ),
               ]
@@ -435,7 +434,7 @@ const nodeToDOMTree = async (
             ? [
               await sync(
                 fn((ref, lifecycle) =>
-                  syncRoot.element.ref!(ref, lifecycle) as PureJS<void>
+                  syncRoot.element.ref!(ref, lifecycle) as JSable<void>
                 ),
               ),
             ]
@@ -453,7 +452,7 @@ const nodeToDOMTree = async (
             ? [
               await sync(
                 fn((ref, lifecycle) =>
-                  syncRoot.element.ref!(ref, lifecycle) as PureJS<void>
+                  syncRoot.element.ref!(ref, lifecycle) as JSable<void>
                 ),
               ),
             ]
