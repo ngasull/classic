@@ -1,9 +1,11 @@
 import type { Activation, LifecycleFunctions } from "../dom.ts";
-import { fn, js, sync } from "../js.ts";
+import { fn, js, statements, sync } from "../js.ts";
 import {
   isEvaluable,
+  JS,
   JSable,
   JSONable,
+  JSStatements,
   jsSymbol,
   ModuleMeta,
   Resource,
@@ -142,7 +144,7 @@ const writeActivationScript = (
           activation,
           modules,
           store,
-          js<ParentNode>`p`,
+          js<NodeList | Node[]>`p`,
         )
       )[jsSymbol].rawJS,
     );
@@ -189,9 +191,12 @@ const domActivation = (
         storeModule(m);
       }
 
+      const { body } = ref.fn[jsSymbol];
       activation.push([
         i,
-        ref.fn[jsSymbol].body[jsSymbol].rawJS,
+        (Array.isArray(body)
+          ? statements(body as JSStatements<unknown>)
+          : body)[jsSymbol].rawJS,
         ...(ref.fn[jsSymbol].resources?.map((r, i) =>
           store(r, ref.values[i])
         ) ??
@@ -379,7 +384,7 @@ const nodeToDOMTree = async (
             ...(await Promise.all(
               reactiveAttributes.map(([name, reactive]) =>
                 sync(
-                  fn<[Element, LifecycleFunctions]>((node, lifecycle) =>
+                  fn((node: JS<Element>, lifecycle: JS<LifecycleFunctions>) =>
                     lifecycle.track(() =>
                       js`let k=${name},v=${reactive};!v&&v!==""?${node}.removeAttribute(k):${node}.setAttribute(k,v===true?"":String(v))`
                     )
@@ -390,7 +395,7 @@ const nodeToDOMTree = async (
             ...(ref
               ? [
                 await sync(
-                  fn<[Element, LifecycleFunctions]>((elRef, lifecycle) =>
+                  fn((elRef: JS<Element>, lifecycle: JS<LifecycleFunctions>) =>
                     (ref as unknown as JSX.Ref<Element>)(
                       elRef,
                       lifecycle,
@@ -413,11 +418,10 @@ const nodeToDOMTree = async (
           },
           refs: [
             await sync(
-              fn<[Text, LifecycleFunctions]>(
-                (node, lifecycle) =>
-                  lifecycle.track(() =>
-                    js`${node}.textContent=${(syncRoot.element)}`
-                  ),
+              fn((node: JS<Text>, lifecycle: JS<LifecycleFunctions>) =>
+                lifecycle.track(() =>
+                  js`${node}.textContent=${(syncRoot.element)}`
+                )
               ),
             ),
           ],

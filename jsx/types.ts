@@ -1,7 +1,7 @@
 /// <reference path="./dom.types.ts" />
 
 import type { LifecycleFunctions } from "../dom.ts";
-import type { JS, JSable, JSONable } from "../js/types.ts";
+import type { JS, JSable, JSFn, JSFnBody, JSONable } from "../js/types.ts";
 import { jsSymbol } from "../js/types.ts";
 
 declare global {
@@ -93,16 +93,13 @@ declare global {
 
     type DOMLiteral = string | number;
 
-    type Ref<N> = (
-      ref: JS<N>,
-      lifecycle: JS<LifecycleFunctions>,
-    ) => JS<any>;
+    type Ref<N> = JSFn<[N, LifecycleFunctions], unknown>;
   }
 }
 
 export type SyncRef<N> = {
   fn: JS<(ref: N, lifecycle: LifecycleFunctions) => void> & {
-    [jsSymbol]: { body: JS<unknown> };
+    [jsSymbol]: { body: JSFnBody<unknown> };
   };
   values: JSONable[];
 };

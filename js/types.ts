@@ -8,10 +8,13 @@ export type JS<T> =
       ...args: {
         [I in keyof Args]:
           | JSable<Args[I]>
-          | (Args[I] extends JSONable ? Args[I] : never)
-          | (Args[I] extends (...args: infer AArgs) => infer AR ? (
+          | (Args[I] extends infer N extends null | undefined ? N
+            : never)
+          | (Args[I] extends
+            ((...args: infer AArgs) => infer AR) | null | undefined ? ((
               ...args: { [AI in keyof AArgs]: JS<AArgs[AI]> }
-            ) => JS<AR>
+            ) => JSable<AR>)
+            : Args[I] extends JSONable ? Args[I]
             : never);
       }
     ) => JS<R>)
@@ -20,18 +23,39 @@ export type JS<T> =
     : { readonly [K in keyof Omit<T, typeof jsSymbol>]: JS<T[K]> })
   & JSable<T>;
 
-export type ModuleMeta = { local: string; pub: string };
-
 export type JSMeta<T> = {
-  _type: T;
+  [typeSymbol]: T;
+  [returnSymbol]: false;
   rawJS: string;
   modules: readonly ModuleMeta[];
   resources: readonly Resource<JSONable>[]; // ReactiveJSExpression expects an array variable `_$` that contains these resources' value
-  body?: JS<unknown>;
-  expression: boolean;
+  body?: JSFnBody<unknown>;
 };
+declare const typeSymbol: unique symbol;
+
+export type ModuleMeta = { local: string; pub: string };
 
 export type JSable<T> = { [jsSymbol]: JSMeta<T> };
+
+export type JSFn<Args extends unknown[], T = void> = (
+  ...args: { [I in keyof Args]: JS<Args[I]> }
+) => JSFnBody<T>;
+
+export type JSFnBody<T> = JSable<T> | JSStatements<T>;
+
+export type JSStatements<T> = [
+  JSable<unknown> | (JSable<T> & JSReturn),
+  ...(JSable<unknown> | (JSable<T> & JSReturn))[],
+];
+
+export type JSStatementsReturn<S extends JSStatements<unknown>> = S extends
+  JSNoReturn[] ? JS<void> & JSNoReturn
+  : S extends JSStatements<infer T> ? JS<T> & JSReturn
+  : never;
+
+export type JSReturn = { [returnSymbol]: true };
+export type JSNoReturn = { [returnSymbol]: false };
+declare const returnSymbol: unique symbol;
 
 export type ResourceGroup<
   T extends Record<string, JSONable>,
@@ -71,7 +95,7 @@ export const isJSable = <T>(v: unknown): v is JSable<T> =>
   jsSymbol in v;
 
 export const isEvaluable = <T>(v: unknown): v is JSable<T> =>
-  isJSable(v) && "expression" in v[jsSymbol] && v[jsSymbol].expression === true;
+  isJSable(v) && !(v[jsSymbol].body && Array.isArray(v[jsSymbol].body));
 
 export const isPure = <T>(v: unknown): v is JSable<T> =>
   isEvaluable(v) && !v[jsSymbol].resources.length;

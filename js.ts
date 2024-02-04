@@ -2,8 +2,14 @@ import type {
   ImplicitlyJSable,
   JS,
   JSable,
+  JSFn,
+  JSFnBody,
   JSMeta,
+  JSNoReturn,
   JSONable,
+  JSReturn,
+  JSStatements,
+  JSStatementsReturn,
   ModuleMeta,
   ParamKeys,
   Resource,
@@ -38,7 +44,7 @@ const jsProxyHandler: ProxyHandler<{
 };
 
 export const js = (<T>(
-  tpl: TemplateStringsArray,
+  tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
 ) => {
   const modules: Record<string, ModuleMeta> = {};
@@ -101,7 +107,6 @@ export const js = (<T>(
   if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
 
   const expr = mkPureJS(rawParts.join("")) as unknown as JSable<T>;
-  expr[jsSymbol].expression = true;
   expr[jsSymbol].modules = Object.values(modules);
 
   if (resources.size > 0) {
@@ -152,11 +157,21 @@ export const js = (<T>(
 
   return new Proxy(callExpr, jsProxyHandler) as unknown as JS<T>;
 }) as {
-  <T>(tpl: TemplateStringsArray, ...exprs: ImplicitlyJSable[]): JS<T>;
+  <T>(tpl: ReadonlyArray<string>, ...exprs: ImplicitlyJSable[]): JS<T>;
 } & {
   eval: <T>(expr: JSable<T>) => Promise<T>;
+  if: <S extends JSStatements<unknown>>(
+    test: ImplicitlyJSable,
+    stmts: S,
+  ) => JSStatementsReturn<S>;
+  elseif: <S extends JSStatements<unknown>>(
+    test: ImplicitlyJSable,
+    stmts: S,
+  ) => JSStatementsReturn<S>;
+  else: <S extends JSStatements<unknown>>(stmts: S) => JSStatementsReturn<S>;
   import: <M>(url: string) => JS<Promise<M>>;
   module: <M>(local: string, pub: string) => JS<M>;
+  return: <T, E extends JSable<T>>(expr: E) => JS<T> & JSReturn;
   "symbol": typeof jsSymbol;
 };
 
@@ -199,6 +214,24 @@ js.module = <M>(local: string, pub: string) => {
   return expr;
 };
 
+js.if = <S extends JSStatements<unknown>>(
+  test: ImplicitlyJSable,
+  stmts: S,
+): JSStatementsReturn<S> =>
+  js`if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>;
+
+js.elseif = <S extends JSStatements<unknown>>(
+  test: ImplicitlyJSable,
+  stmts: S,
+): JSStatementsReturn<S> =>
+  js`else if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>;
+
+js.else = <S extends JSStatements<unknown>>(stmts: S) =>
+  js`else{${statements(stmts)}}` as JSStatementsReturn<S>;
+
+js.return = <T, E extends JSable<T>>(expr: E) =>
+  js`return ${expr}` as JS<T> & JSReturn;
+
 js.symbol = jsSymbol;
 
 const safeRecordKeyRegExp = /^\w+$/;
@@ -229,7 +262,6 @@ export const resource = <T extends Record<string, JSONable>>(
   const expr = js`${unsafe(resourcesArg)}[0]` as unknown as JS<
     T
   >;
-  expr[jsSymbol].expression = true;
   expr[jsSymbol].resources = [r];
 
   return expr;
@@ -268,16 +300,17 @@ export const resources = <T extends Record<string, JSONable>, U extends string>(
   return group;
 };
 
-export const statements = {
-  js: <T>(tpl: TemplateStringsArray, ...exprs: ImplicitlyJSable[]) => {
-    const self = js(tpl, ...exprs) as unknown as JSable<T>;
-    self[jsSymbol].expression = false;
-    return self;
-  },
+export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
+  const tpl = Array(stmts.length).fill(";");
+  tpl[0] = "";
+  return js(
+    tpl,
+    ...stmts,
+  ) as JSStatementsReturn<S>;
 };
 
-export const fn = <Args extends unknown[], T = void>(
-  cb: (...args: { [I in keyof Args]: JS<Args[I]> }) => JSable<T>,
+export const fn = <Cb extends (...args: any[]) => JSFnBody<any>>(
+  cb: Cb,
 ) => {
   const argList = unsafe(
     Array(cb.length).fill(0)
@@ -288,22 +321,20 @@ export const fn = <Args extends unknown[], T = void>(
   const body = cb(
     ...(Array(cb.length)
       .fill(0)
-      .map((_, i) => js`${unsafe(`$${i}`)}`) as {
-        [I in keyof Args]: JS<Args[I]>;
-      }),
+      .map((_, i) => js`${unsafe(`$${i}`)}`)),
   );
 
-  const jsfnExpr = body[jsSymbol].expression
-    ? js<(...args: Args) => T>`((${argList})=>(${body}))`
-    : js<
-      (...args: Args) => T
-    >`((${argList})=>{${body}}})`;
+  const jsfnExpr = Array.isArray(body)
+    ? js`((${argList})=>{${statements(body)}}})`
+    : js`((${argList})=>(${body}))`;
 
   jsfnExpr[jsSymbol].body = body;
 
-  return jsfnExpr as JS<(...args: Args) => T> & {
-    [jsSymbol]: { body: JSable<unknown> };
-  };
+  return jsfnExpr as Cb extends JSFn<infer Args, infer T>
+    ? JS<(...args: Args) => T> & {
+      [jsSymbol]: { body: JSFnBody<T> };
+    }
+    : never;
 };
 
 export const sync = async <J extends JS<(...args: any[]) => any>>(
