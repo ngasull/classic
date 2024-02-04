@@ -4,7 +4,7 @@ export type Resource<T extends JSONable> = {
 };
 
 export type JS<T> =
-  & (T extends (...args: infer Args) => infer R ? ((
+  & (T extends (...args: infer Args) => infer R ? <Ret = R>(
       ...args: {
         [I in keyof Args]:
           | JSable<Args[I]>
@@ -22,7 +22,7 @@ export type JS<T> =
             : Args[I] extends JSONable ? Args[I]
             : never);
       }
-    ) => JS<R>)
+    ) => JS<Ret>
     : unknown)
   & (T extends JSONLiteral ? unknown
     : { readonly [K in keyof Omit<T, typeof jsSymbol>]: JS<T[K]> })
