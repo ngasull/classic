@@ -98,6 +98,16 @@ const mapCallArg = (
     }}`
     : JSON.stringify(a);
 
+export const unsafe = (js: string) => mkPureJS(js);
+
+const mkPureJS = (rawJS: string) => ({
+  [jsSymbol]: ({
+    rawJS,
+    modules: [] as const,
+    resources: [] as const,
+  }) as unknown as JSMeta<unknown>,
+});
+
 export const js = (<T>(
   tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
@@ -210,6 +220,17 @@ export const js = (<T>(
   else: <S extends JSStatements<unknown>>(stmts: S) => JSStatementsReturn<S>;
   import: <M>(url: string) => JS<Promise<M>>;
   module: <M>(local: string, pub: string) => JS<M>;
+  Promise: {
+    all<P>(
+      promises: P,
+    ): Promise<
+      P extends readonly JSable<unknown>[] ? {
+          [I in keyof P]: P[I] extends JSable<infer P> ? JS<Awaited<P>> : never;
+        }
+        : P extends JSable<infer P>[] ? JS<Awaited<P>>[]
+        : never
+    >;
+  };
   return: <T, E extends JSable<T>>(expr: E) => JS<T> & JSReturn;
   "symbol": typeof jsSymbol;
 };
@@ -268,20 +289,12 @@ js.elseif = <S extends JSStatements<unknown>>(
 js.else = <S extends JSStatements<unknown>>(stmts: S) =>
   js`else{${statements(stmts)}}` as JSStatementsReturn<S>;
 
+js.Promise = js`Promise` as any;
+
 js.return = <T, E extends JSable<T>>(expr: E) =>
   js`return ${expr}` as JS<T> & JSReturn;
 
 js.symbol = jsSymbol;
-
-export const unsafe = (js: string) => mkPureJS(js);
-
-const mkPureJS = (rawJS: string) => ({
-  [jsSymbol]: ({
-    rawJS,
-    modules: [] as const,
-    resources: [] as const,
-  }) as unknown as JSMeta<unknown>,
-});
 
 export const resource = <T extends Record<string, JSONable>>(
   uri: string,

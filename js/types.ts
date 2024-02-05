@@ -6,28 +6,26 @@ export type Resource<T extends JSONable> = {
 export type JS<T> =
   & (T extends (...args: infer Args) => infer R ? <Ret = R>(
       ...args: {
-        [I in keyof Args]:
-          | JSable<Args[I]>
-          | (Args[I] extends infer N extends null | undefined ? N
-            : never)
-          | (Args[I] extends infer It extends (
-            | readonly unknown[]
-            | { readonly [k: string | number | symbol]: unknown }
-          ) ? { [K in keyof It]: JSable<It[K]> }
-            : never)
-          | (Args[I] extends
-            ((...args: infer AArgs) => infer AR) | null | undefined ? ((
-              ...args: { [AI in keyof AArgs]: JS<AArgs[AI]> }
-            ) => JSable<AR>)
-            : Args[I] extends JSONable ? Args[I]
-            : never);
+        [I in keyof Args]: Args[I] extends infer Arg ?
+            | JSable<Arg>
+            | (Arg extends null | undefined ? Arg : never)
+            | { [AI in keyof Arg]: JSable<Arg[AI]> }
+            | (Arg extends
+              ((...args: infer AArgs) => infer AR) | null | undefined ? (
+                (
+                  ...args: { [AI in keyof AArgs]: JS<AArgs[AI]> }
+                ) => JSable<AR>
+              )
+              : Arg extends JSONable ? Arg
+              : never)
+          : never;
       }
     ) => JS<Ret>
     : unknown)
   & (T extends JSONLiteral ? unknown
     : { readonly [K in keyof Omit<T, typeof jsSymbol>]: JS<T[K]> })
-  & (T extends infer Arr extends readonly unknown[]
-    ? { readonly [A in keyof Arr]: JS<Arr[A]> }
+  & (T extends readonly unknown[]
+    ? { readonly [I in Exclude<keyof T, typeof jsSymbol>]: JS<T[I]> }
     : unknown)
   & JSable<T>;
 
@@ -45,15 +43,19 @@ export type ModuleMeta = { local: string; pub: string };
 
 export type JSable<T> = { [jsSymbol]: JSMeta<T> };
 
+type JSableFunctor<T> = Promise<T>;
+
+type JSableLike<T> = JSable<T> | JSableFunctor<JSable<T>>;
+
 export type JSFn<Args extends unknown[], T = void> = (
   ...args: { [I in keyof Args]: JS<Args[I]> }
 ) => JSFnBody<T>;
 
-export type JSFnBody<T> = JSable<T> | JSStatements<T>;
+export type JSFnBody<T> = JSableLike<T> | JSStatements<T>;
 
 export type JSStatements<T> = [
-  JSable<unknown> | (JSable<T> & JSReturn),
-  ...(JSable<unknown> | (JSable<T> & JSReturn))[],
+  JSableLike<unknown> | (JSable<T> & JSReturn),
+  ...(JSableLike<unknown> | (JSable<T> & JSReturn))[],
 ];
 
 export type JSStatementsReturn<S extends JSStatements<unknown>> = S extends
