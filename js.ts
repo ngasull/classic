@@ -41,10 +41,10 @@ const jsProxyHandler: ProxyHandler<{
       : typeof p === "symbol"
       ? expr[p as typeof jsSymbol]
       : !isNaN(parseInt(p))
-      ? js`${expr}[${unsafe(p as string)}]`
+      ? jsFn`${expr}[${unsafe(p as string)}]`
       : safeRecordKeyRegExp.test(p as string)
-      ? js`${expr}.${unsafe(p as string)}`
-      : js`${expr}[${JSON.stringify(p)}]`;
+      ? jsFn`${expr}.${unsafe(p as string)}`
+      : jsFn`${expr}[${JSON.stringify(p)}]`;
   },
 };
 
@@ -54,7 +54,7 @@ const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
   const r: IteratorResult<JS<T>> = {
     done: false as boolean,
     get value() {
-      return js<T>`${expr}[${i}]`;
+      return jsFn<T>`${expr}[${i}]`;
     },
   };
 
@@ -108,7 +108,7 @@ const mkPureJS = (rawJS: string) => ({
   }) as unknown as JSMeta<unknown>,
 });
 
-export const js = (<T>(
+const jsFn = (<T>(
   tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
 ) => {
@@ -199,7 +199,7 @@ export const js = (<T>(
       ...Resource<JSONable>[],
     ];
 
-    return js`${expr}(${jsArgs})`;
+    return jsFn`${expr}(${jsArgs})`;
   };
 
   callExpr[targetSymbol] = expr;
@@ -207,94 +207,110 @@ export const js = (<T>(
   return new Proxy(callExpr, jsProxyHandler) as unknown as JS<T>;
 }) as {
   <T>(tpl: ReadonlyArray<string>, ...exprs: ImplicitlyJSable[]): JS<T>;
-} & {
-  eval: <T>(expr: JSable<T>) => Promise<T>;
+};
+
+const jsUtils = {
+  eval: async <T>(expr: JSable<T>): Promise<T> => {
+    const argsBody = [`return(${expr[jsSymbol].rawJS})`];
+    const args: unknown[] = [];
+
+    if (isReactive(expr)) {
+      argsBody.unshift(resourcesArg);
+      args.unshift((function mkResProxy(resources): JSONable[] {
+        return new Proxy(
+          ((...argArray: number[]) =>
+            mkResProxy(
+              argArray.map((r) => resources[r]),
+            )) as unknown as JSONable[],
+          {
+            get(_, p) {
+              return resources[p as any];
+            },
+          },
+        );
+      })(await Promise.all(expr[jsSymbol].resources.map((r) => r.value))));
+    }
+
+    if (expr[jsSymbol].modules.length > 0) {
+      argsBody.unshift(modulesArg);
+      args.unshift(
+        await Promise.all(expr[jsSymbol].modules.map((m) => import(m.local))),
+      );
+    }
+
+    return new Function(...argsBody)(...args);
+  },
+
+  nonNullable: <T>(v: T) =>
+    v as T extends JS<infer T> ? JS<NonNullable<T>> : never,
+
+  module: <M>(local: string, pub: string) => {
+    const expr = jsFn<M>`${unsafe(modulesArg)}[${pub}]`;
+    expr[jsSymbol].modules = [{ local, pub }];
+    return expr;
+  },
+
   if: <S extends JSStatements<unknown>>(
     test: ImplicitlyJSable,
     stmts: S,
-  ) => JSStatementsReturn<S>;
+  ): JSStatementsReturn<S> =>
+    jsFn`if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>,
+
   elseif: <S extends JSStatements<unknown>>(
     test: ImplicitlyJSable,
     stmts: S,
-  ) => JSStatementsReturn<S>;
-  else: <S extends JSStatements<unknown>>(stmts: S) => JSStatementsReturn<S>;
+  ): JSStatementsReturn<S> =>
+    jsFn`else if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>,
+
+  else: <S extends JSStatements<unknown>>(stmts: S) =>
+    jsFn`else{${statements(stmts)}}` as JSStatementsReturn<S>,
+
+  return: <T, E extends JSable<T>>(expr: E) =>
+    jsFn`return ${expr}` as JS<T> & JSReturn,
+
+  symbol: jsSymbol,
+};
+
+export const js = new Proxy(jsFn, {
+  get(_, p) {
+    return p in jsUtils
+      ? jsUtils[p as keyof typeof jsUtils]
+      : js`${unsafe(p as string)}`;
+  },
+}) as
+  & typeof jsFn
+  & typeof jsUtils
+  & JSWindowOverrides
+  & {
+    [
+      K in Exclude<keyof Window, keyof typeof jsUtils | keyof JSWindowOverrides>
+    ]: JS<Window[K]>;
+  };
+
+type JSWindowOverrides = {
   import: <M>(url: string) => JS<Promise<M>>;
-  module: <M>(local: string, pub: string) => JS<M>;
   Promise: {
     all<P>(
       promises: P,
-    ): Promise<
-      P extends readonly JSable<unknown>[] ? {
-          [I in keyof P]: P[I] extends JSable<infer P> ? JS<Awaited<P>> : never;
-        }
-        : P extends JSable<infer P>[] ? JS<Awaited<P>>[]
-        : never
-    >;
+    ): P extends readonly JSable<unknown>[] ? JS<
+        Promise<
+          { [I in keyof P]: P[I] extends JSable<infer P> ? Awaited<P> : never }
+        >
+      >
+      : P extends readonly JSable<infer P>[] ? JS<Promise<Awaited<P>[]>>
+      : never;
+    allSettled: JSWindowOverrides["Promise"]["all"];
+    any: JSWindowOverrides["Promise"]["all"];
+    race<P>(
+      promises: P,
+    ): P extends readonly JSable<infer P>[] ? JS<Promise<Awaited<P>>> : never;
+    withResolvers<P>(): {
+      promise: Promise<P>;
+      resolve: (value: P) => void;
+      reject: (reason: any) => void;
+    };
   };
-  return: <T, E extends JSable<T>>(expr: E) => JS<T> & JSReturn;
-  "symbol": typeof jsSymbol;
 };
-
-js.eval = async <T>(expr: JSable<T>): Promise<T> => {
-  const argsBody = [`return(${expr[jsSymbol].rawJS})`];
-  const args: unknown[] = [];
-
-  if (isReactive(expr)) {
-    argsBody.unshift(resourcesArg);
-    args.unshift((function mkResProxy(resources): JSONable[] {
-      return new Proxy(
-        ((...argArray: number[]) =>
-          mkResProxy(
-            argArray.map((r) => resources[r]),
-          )) as unknown as JSONable[],
-        {
-          get(_, p) {
-            return resources[p as any];
-          },
-        },
-      );
-    })(await Promise.all(expr[jsSymbol].resources.map((r) => r.value))));
-  }
-
-  if (expr[jsSymbol].modules.length > 0) {
-    argsBody.unshift(modulesArg);
-    args.unshift(
-      await Promise.all(expr[jsSymbol].modules.map((m) => import(m.local))),
-    );
-  }
-
-  return new Function(...argsBody)(...args);
-};
-
-js.import = <M>(url: string) => js<Promise<M>>`import(${url})`;
-
-js.module = <M>(local: string, pub: string) => {
-  const expr = js<M>`${unsafe(modulesArg)}[${pub}]`;
-  expr[jsSymbol].modules = [{ local, pub }];
-  return expr;
-};
-
-js.if = <S extends JSStatements<unknown>>(
-  test: ImplicitlyJSable,
-  stmts: S,
-): JSStatementsReturn<S> =>
-  js`if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>;
-
-js.elseif = <S extends JSStatements<unknown>>(
-  test: ImplicitlyJSable,
-  stmts: S,
-): JSStatementsReturn<S> =>
-  js`else if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>;
-
-js.else = <S extends JSStatements<unknown>>(stmts: S) =>
-  js`else{${statements(stmts)}}` as JSStatementsReturn<S>;
-
-js.Promise = js`Promise` as any;
-
-js.return = <T, E extends JSable<T>>(expr: E) =>
-  js`return ${expr}` as JS<T> & JSReturn;
-
-js.symbol = jsSymbol;
 
 export const resource = <T extends Record<string, JSONable>>(
   uri: string,
@@ -309,9 +325,10 @@ export const resource = <T extends Record<string, JSONable>>(
     },
   } as Resource<T>;
 
-  const expr = js`${unsafe(resourcesArg)}[0]` as unknown as JS<
+  const expr = jsFn`${unsafe(resourcesArg)}[0]` as unknown as JS<
     T
   >;
+  // @ts-ignore: infinte instantiation cannot happen and doesn't seem fixable
   expr[jsSymbol].resources = [r];
 
   return expr;
@@ -353,7 +370,7 @@ export const resources = <T extends Record<string, JSONable>, U extends string>(
 export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
   const tpl = Array(stmts.length).fill(";");
   tpl[0] = "";
-  return js(
+  return jsFn(
     tpl,
     ...stmts,
   ) as JSStatementsReturn<S>;
@@ -371,12 +388,12 @@ export const fn = <Cb extends (...args: any[]) => JSFnBody<any>>(
   const body = cb(
     ...(Array(cb.length)
       .fill(0)
-      .map((_, i) => js`${unsafe(`$${i}`)}`)),
+      .map((_, i) => jsFn`${unsafe(`$${i}`)}`)),
   );
 
   const jsfnExpr = Array.isArray(body)
-    ? js`((${argList})=>{${statements(body)}}})`
-    : js`((${argList})=>(${body}))`;
+    ? jsFn`((${argList})=>{${statements(body)}}})`
+    : jsFn`((${argList})=>(${body}))`;
 
   jsfnExpr[jsSymbol].body = body;
 

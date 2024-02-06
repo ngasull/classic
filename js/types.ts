@@ -3,31 +3,50 @@ export type Resource<T extends JSONable> = {
   value: T | Promise<T>;
 };
 
-export type JS<T> =
-  & (T extends (...args: infer Args) => infer R ? <Ret = R>(
-      ...args: {
-        [I in keyof Args]: Args[I] extends infer Arg ?
-            | JSable<Arg>
-            | (Arg extends null | undefined ? Arg : never)
-            | { [AI in keyof Arg]: JSable<Arg[AI]> }
-            | (Arg extends
-              ((...args: infer AArgs) => infer AR) | null | undefined ? (
-                (
-                  ...args: { [AI in keyof AArgs]: JS<AArgs[AI]> }
-                ) => JSable<AR>
-              )
-              : Arg extends JSONable ? Arg
-              : never)
-          : never;
+export type JS<T> = T extends Promise<infer T> ? JS<SimplifiedPromise<T>>
+  : (
+    & (T extends (...args: infer Args) => infer R ? <Ret = R>(
+        ...args: {
+          [I in keyof Args]: Args[I] extends infer Arg ?
+              | JSable<Arg>
+              | (Arg extends null | undefined ? Arg : never)
+              | { [AI in keyof Arg]: JSable<Arg[AI]> }
+              | (Arg extends
+                ((...args: infer AArgs) => infer AR) | null | undefined
+                ? JSFn<AArgs, AR>
+                : Arg extends JSONable ? Arg
+                : never)
+            : never;
+        }
+      ) => JS<Ret>
+      : unknown)
+    & (T extends readonly unknown[] ? { readonly [I in keyof T]: JS<T[I]> }
+      : unknown)
+    & (T extends string ? {
+        readonly [K in keyof typeof String["prototype"]]: JS<
+          typeof String["prototype"][K]
+        >;
       }
-    ) => JS<Ret>
-    : unknown)
-  & (T extends JSONLiteral ? unknown
-    : { readonly [K in keyof Omit<T, typeof jsSymbol>]: JS<T[K]> })
-  & (T extends readonly unknown[]
-    ? { readonly [I in Exclude<keyof T, typeof jsSymbol>]: JS<T[I]> }
-    : unknown)
-  & JSable<T>;
+      : T extends number ? {
+          readonly [K in keyof typeof Number["prototype"]]: JS<
+            typeof Number["prototype"][K]
+          >;
+        }
+      : T extends bigint ? {
+          readonly [K in keyof typeof BigInt["prototype"]]: JS<
+            typeof BigInt["prototype"][K]
+          >;
+        }
+      : T extends boolean ? {
+          readonly [K in keyof typeof Boolean["prototype"]]: JS<
+            typeof Boolean["prototype"][K]
+          >;
+        }
+      : T extends JSONLiteral ? unknown
+      : T extends Record<any, any> ? { readonly [K in keyof T]: JS<T[K]> }
+      : unknown)
+    & JSable<T>
+  );
 
 export type JSMeta<T> = {
   [typeSymbol]: T;
@@ -43,9 +62,12 @@ export type ModuleMeta = { local: string; pub: string };
 
 export type JSable<T> = { [jsSymbol]: JSMeta<T> };
 
-type JSableFunctor<T> = Promise<T>;
+type SimplifiedGeneric<G> = G extends Promise<infer T> ? SimplifiedPromise<T>
+  : never;
 
-type JSableLike<T> = JSable<T> | JSableFunctor<JSable<T>>;
+type JSableLike<T> =
+  | JSable<T>
+  | (T extends infer S extends SimplifiedGeneric<T> ? JSable<S> : never);
 
 export type JSFn<Args extends unknown[], T = void> = (
   ...args: { [I in keyof Args]: JS<Args[I]> }
@@ -112,6 +134,19 @@ export const isPure = <T>(v: unknown): v is JSable<T> =>
 
 export const isReactive = <T>(v: unknown): v is JSable<T> =>
   isEvaluable(v) && v[jsSymbol].resources.length > 0;
+
+type SimplifiedPromise<T> = {
+  then<R>(
+    onFulfilled: (value: T) => R | PromiseLike<R> | null | undefined,
+    onRejected?: (reason: any) => R | PromiseLike<R> | null | undefined,
+  ): SimplifiedPromise<R>;
+  catch<R>(
+    onRejected: (reason: any) => R | PromiseLike<R> | null | undefined,
+  ): SimplifiedPromise<R>;
+  finally<R>(
+    onFinally: () => R | PromiseLike<R> | null | undefined,
+  ): SimplifiedPromise<R>;
+};
 
 // From Hono
 // https://github.com/honojs/hono/blob/db3387353f23e0914faf8169323c06e9d9658c20/src/types.ts#L560C1-L572C19
