@@ -53,7 +53,7 @@ export type JSMeta<T> = {
   [returnSymbol]: false;
   rawJS: string;
   modules: readonly ModuleMeta[];
-  resources: readonly Resource<JSONable>[]; // ReactiveJSExpression expects an array variable `_$` that contains these resources' value
+  resources: readonly Resource<JSONable>[];
   body?: JSFnBody<unknown>;
 };
 declare const typeSymbol: unique symbol;

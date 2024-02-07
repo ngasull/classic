@@ -1,4 +1,4 @@
-import { cleanup, trackChildren } from "./store.ts";
+import { cleanup, trackChildren } from "./lifecycle.ts";
 import {
   adoptNode,
   call,

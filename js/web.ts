@@ -86,6 +86,7 @@ export const bundleWebImports = async (
     write: false,
     outdir: absoluteOutdir,
     format: "esm",
+    charset: "utf8",
     plugins: esbuild.denoPlugins({ importMapURL }),
   });
 

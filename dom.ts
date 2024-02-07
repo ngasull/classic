@@ -1,11 +1,12 @@
 import {
-  JSONable,
-  peek,
-  registerCleanup,
-  setResources,
-  subStore,
-  trackChildren,
-} from "./dom/store.ts";
+  argn,
+  lifecycleArg,
+  modulesArg,
+  nodeArg,
+  resourcesArg,
+} from "./dom/arg-alias.ts";
+import { onCleanup, track, trackChildren } from "./dom/lifecycle.ts";
+import { JSONable, peek, setResources } from "./dom/store.ts";
 import { call, doc, first, forEach, fromEntries, isArray } from "./dom/util.ts";
 
 /**
@@ -19,17 +20,11 @@ export type ActivationInfo =
   | [string, ...number[]] // [Raw JS, ...Resources]
   | [Activation];
 
-/**
- * Lifecycle functions exposed through jsx `ref`.
- */
-export type LifecycleFunctions = {
-  /** Registers callback to execute when current node would be removed. */
-  cleanup: (cb: () => void) => void;
-  /** Registers callback to execute when any dependent resource changes. */
-  track: (cb: () => void) => void;
-};
-
 const targetSymbol = Symbol();
+
+const arg0 = argn(0);
+
+const lifecycleFns = { t: track, c: onCleanup };
 
 const activateNode = (
   nodes: NodeList | Node[],
@@ -41,16 +36,10 @@ const activateNode = (
   > = {
     get: (target, i) =>
       i == "u"
-        ? target.u ??= new Proxy(
-          target[targetSymbol],
-          resourcesUriProxyHandler,
-        ) as unknown as string[]
+        ? target.u ??= target[targetSymbol].map((i) => resources[i])
         : i in Array.prototype
         ? target[targetSymbol][i as any]
         : peek(resources[target[targetSymbol][i as any]]),
-  },
-  resourcesUriProxyHandler: ProxyHandler<number[]> = {
-    get: (target, i) => resources[target[i as any]],
   },
 ): ReadonlyArray<() => void> =>
   activation.flatMap(([childIndex, h1, ...rs]) => {
@@ -63,34 +52,26 @@ const activateNode = (
         modules,
         resources,
         resourcesProxyHandler,
-        resourcesUriProxyHandler,
       )
       : [() => {
         let resourcesProxy = (function mkResProxy(rs: number[]) {
-            let callArray = (...argArray: number[]) =>
-              mkResProxy(argArray.map((r) => rs[r]));
-            callArray[targetSymbol] = rs;
-            return new Proxy(
-              callArray as unknown as JSONable[] & {
-                (rs: number[]): JSONable[];
-                [targetSymbol]: number[];
-                u: string[];
-              },
-              resourcesProxyHandler,
-            );
-          })(rs as number[]),
-          lifecycleFunctions: LifecycleFunctions = {
-            cleanup: (cb: () => void) => registerCleanup(child, cb),
-            track: (cb: () => void) =>
-              registerCleanup(
-                child,
-                subStore((rs as number[]).map((i) => resources[i]), cb),
-              ),
-          };
+          let callArray = (...argArray: number[]) =>
+            mkResProxy(argArray.map((r) => rs[r]));
+          callArray[targetSymbol] = rs;
+          return new Proxy(
+            callArray as unknown as JSONable[] & {
+              (rs: number[]): JSONable[];
+              [targetSymbol]: number[];
+              u: string[];
+            },
+            resourcesProxyHandler,
+          );
+        })(rs as number[]);
 
-        new Function("$0", "$1", "__", "_$", h1)(
+        new Function(arg0, nodeArg, lifecycleArg, modulesArg, resourcesArg, h1)(
           child,
-          lifecycleFunctions,
+          child,
+          lifecycleFns,
           modules,
           resourcesProxy,
         );

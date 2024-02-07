@@ -1,3 +1,10 @@
+import {
+  argn,
+  lifecycleArg,
+  modulesArg,
+  nodeArg,
+  resourcesArg,
+} from "./dom/arg-alias.ts";
 import type {
   ImplicitlyJSable,
   JS,
@@ -17,9 +24,13 @@ import type {
 } from "./js/types.ts";
 import { isEvaluable, isReactive, jsSymbol } from "./js/types.ts";
 
-const modulesArg = "__";
+export const track = (cb: JSFn<[], void>) =>
+  js<void>`${unsafe(lifecycleArg)}.t(${unsafe(nodeArg)},${
+    unsafe(resourcesArg)
+  }.u,${fn(cb)})`;
 
-const resourcesArg = "_$";
+export const onCleanup = (cb: JSFn<[], void>) =>
+  js<void>`${unsafe(lifecycleArg)}.c(${unsafe(nodeArg)},${fn(cb)})`;
 
 const targetSymbol = Symbol("target");
 
@@ -76,9 +87,9 @@ const mapCallArg = (
     ? String(a)
     : isEvaluable(a)
     ? a[jsSymbol].resources.length
-      ? `((${a[jsSymbol].resources.map((_, i) => `$${i}`).join(",")})=>(${
+      ? `((${a[jsSymbol].resources.map((_, i) => argn(i)).join(",")})=>(${
         a[jsSymbol].rawJS
-      }))(${a[jsSymbol].resources.map((r) => `$${store(r)}`)})`
+      }))(${a[jsSymbol].resources.map((r) => argn(store(r)))})`
       : a[jsSymbol].rawJS
     : typeof a === "function"
     ? mapCallArg(store, fn(a))
@@ -381,14 +392,14 @@ export const fn = <Cb extends (...args: any[]) => JSFnBody<any>>(
 ) => {
   const argList = unsafe(
     Array(cb.length).fill(0)
-      .map((_, i) => `$${i}`)
+      .map((_, i) => argn(i))
       .join(","),
   );
 
   const body = cb(
     ...(Array(cb.length)
       .fill(0)
-      .map((_, i) => jsFn`${unsafe(`$${i}`)}`)),
+      .map((_, i) => jsFn`${unsafe(argn(i))}`)),
   );
 
   const jsfnExpr = Array.isArray(body)

@@ -1,5 +1,5 @@
-import type { Activation, LifecycleFunctions } from "../dom.ts";
-import { fn, js, statements, sync } from "../js.ts";
+import type { Activation } from "../dom.ts";
+import { fn, js, statements, sync, track } from "../js.ts";
 import {
   isEvaluable,
   JS,
@@ -384,8 +384,8 @@ const nodeToDOMTree = async (
             ...(await Promise.all(
               reactiveAttributes.map(([name, reactive]) =>
                 sync(
-                  fn((node: JS<Element>, lifecycle: JS<LifecycleFunctions>) =>
-                    lifecycle.track(() =>
+                  fn((node: JS<Element>) =>
+                    track(() =>
                       js`let k=${name},v=${reactive};!v&&v!==""?${node}.removeAttribute(k):${node}.setAttribute(k,v===true?"":String(v))`
                     )
                   ),
@@ -395,11 +395,8 @@ const nodeToDOMTree = async (
             ...(ref
               ? [
                 await sync(
-                  fn((elRef: JS<Element>, lifecycle: JS<LifecycleFunctions>) =>
-                    (ref as unknown as JSX.Ref<Element>)(
-                      elRef,
-                      lifecycle,
-                    ) as JSable<void>
+                  fn((elRef: JS<Element>) =>
+                    (ref as unknown as JSX.Ref<Element>)(elRef) as JSable<void>
                   ),
                 ),
               ]
@@ -418,10 +415,8 @@ const nodeToDOMTree = async (
           },
           refs: [
             await sync(
-              fn((node: JS<Text>, lifecycle: JS<LifecycleFunctions>) =>
-                lifecycle.track(() =>
-                  js`${node}.textContent=${(syncRoot.element)}`
-                )
+              fn((node: JS<Text>) =>
+                track(() => js`${node}.textContent=${(syncRoot.element)}`)
               ),
             ),
           ],
@@ -437,9 +432,7 @@ const nodeToDOMTree = async (
           refs: syncRoot.element.ref
             ? [
               await sync(
-                fn((ref, lifecycle) =>
-                  syncRoot.element.ref!(ref, lifecycle) as JSable<void>
-                ),
+                fn((ref) => syncRoot.element.ref!(ref) as JSable<void>),
               ),
             ]
             : [],
@@ -455,9 +448,7 @@ const nodeToDOMTree = async (
           refs: syncRoot.element.ref
             ? [
               await sync(
-                fn((ref, lifecycle) =>
-                  syncRoot.element.ref!(ref, lifecycle) as JSable<void>
-                ),
+                fn((ref) => syncRoot.element.ref!(ref) as JSable<void>),
               ),
             ]
             : [],

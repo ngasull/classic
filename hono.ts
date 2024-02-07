@@ -120,7 +120,7 @@ export const serveBundle = (app: Hono, webBundle: WebBundle) =>
 
     const { contents } = bundle;
 
-    c.header("Content-Type", "text/javascript");
+    c.header("Content-Type", "text/javascript; charset=UTF-8");
     return c.body(contents);
   });
 
