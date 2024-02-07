@@ -1,8 +1,30 @@
 import * as esbuild from "../deps/esbuild.ts";
 import { exists } from "../deps/std/fs.ts";
+import {
+  ImportMap,
+  resolveImportMap,
+  resolveModuleSpecifier,
+} from "../deps/importmap.ts";
+import { parse as JSONCParse } from "../deps/std/jsonc.ts";
 import { join, resolve, toFileUrl } from "../deps/std/path.ts";
 
-export type WebBundle = Record<string, { contents: Uint8Array; hash: string }>;
+export type WebBundle = {
+  name: string;
+  publicRoot: string;
+  outputFiles: OutputFile[];
+  modules: Record<string, { entryPoint: URL; output: OutputFile }>;
+  dev: boolean;
+  lib: {
+    dom: string;
+  };
+};
+
+type OutputFile = {
+  path: string;
+  publicPath: string;
+  contents: Uint8Array;
+  hash: string;
+};
 
 export const bundleWebImports = async (
   {
@@ -31,6 +53,20 @@ export const bundleWebImports = async (
     ),
   ).toString();
 
+  const importMapAsURL = new URL(importMapURL);
+  const importMap = await fetch(importMapURL)
+    .then(async (res) =>
+      resolveImportMap(
+        JSONCParse(await res.text()) as ImportMap,
+        importMapAsURL,
+      )
+    );
+
+  const absoluteOutDir = resolve("dist");
+  const absoluteOutDirRegExp = new RegExp(
+    `^${absoluteOutDir.replaceAll(/[/[.\\]/g, (m) => `\\${m}`)}`,
+  );
+
   const srcFiles = await (async function scanDir(parent: string) {
     const tasks = [];
 
@@ -55,7 +91,7 @@ export const bundleWebImports = async (
     "g",
   );
 
-  const modules = [
+  const webDotModules = [
     ...new Set<string>(
       await Promise.all(srcFiles.map(async (file) => {
         const contents = await Deno.readTextFile(file);
@@ -74,9 +110,8 @@ export const bundleWebImports = async (
     ),
   ];
 
-  const absoluteOutdir = resolve("dist");
   const bundle = await esbuild.build({
-    entryPoints: modules,
+    entryPoints: [import.meta.resolve("../dom.ts"), ...webDotModules],
     entryNames: "[name]-[hash]",
     bundle: true,
     splitting: true,
@@ -84,39 +119,43 @@ export const bundleWebImports = async (
     sourcemap: dev,
     metafile: true,
     write: false,
-    outdir: absoluteOutdir,
+    outdir: absoluteOutDir,
     format: "esm",
     charset: "utf8",
     plugins: esbuild.denoPlugins({ importMapURL }),
   });
 
-  const outputFiles: {
-    path: string;
-    contents: Uint8Array;
-    hash: string;
-  }[] = bundle.outputFiles;
+  const outputFiles: OutputFile[] = bundle.outputFiles
+    .map(({ path, contents, hash }) => ({
+      path,
+      publicPath: toPublicPath(path),
+      contents,
+      hash,
+    }));
 
-  let m = 0;
-  const bundledModules = Object.values(bundle.metafile.outputs)
-    .flatMap((meta, i) =>
-      meta.entryPoint
-        ? [{
-          local: modules[m++],
-          pub: toPublicPath(bundle.outputFiles[i].path),
-          contents: bundle.outputFiles[i].contents,
-          hash: bundle.outputFiles[i].hash,
-        }]
-        : []
-    );
+  const modules = Object.fromEntries(
+    Object.values(bundle.metafile.outputs)
+      .flatMap((meta, i) =>
+        meta.entryPoint
+          ? [{
+            entryPoint: new URL(meta.entryPoint, importMapAsURL),
+            output: outputFiles[i],
+          }]
+          : []
+      )
+      .map((m) => [m.entryPoint.toString(), m]),
+  );
 
-  const modulesMap = modules.length > 0
+  const modulesMap = webDotModules.length > 0
     ? `const modules = {${
-      bundledModules
-        .map(({ local, pub }) =>
-          `\n  ${JSON.stringify(local)}: { local: ${
-            JSON.stringify(local)
-          }, pub: ${JSON.stringify(`${publicRoot}${pub}`)} },`
-        )
+      webDotModules
+        .map((spec) => {
+          const url = resolveModuleSpecifier(spec, importMap, importMapAsURL);
+          const module = modules[url];
+          return `\n  ${JSON.stringify(spec)}: { local: ${
+            JSON.stringify(url)
+          }, pub: ${JSON.stringify(module.output.publicPath)} },`;
+        })
         .join("")
     }
 } as const;
@@ -135,8 +174,8 @@ import { js } from ${JSON.stringify(import.meta.resolve("../js.ts"))};
 import type { JS } from ${JSON.stringify(import.meta.resolve("./types.ts"))};
 
 ${modulesMap}export const ${name} = {
-  import: ${modules.length > 0 ? `impt` : `((_) => undefined)`} as {${
-    modules
+  import: ${webDotModules.length > 0 ? `impt` : `((_) => undefined)`} as {${
+    webDotModules
       .map((path) =>
         `\n    (mod: ${JSON.stringify(path)}): JS<Promise<typeof import(${
           JSON.stringify(path)
@@ -146,8 +185,8 @@ ${modulesMap}export const ${name} = {
   }
     (mod: string): never;
   },
-  module: ${modules.length > 0 ? `module` : `((_) => undefined)`} as {${
-    modules
+  module: ${webDotModules.length > 0 ? `module` : `((_) => undefined)`} as {${
+    webDotModules
       .map((path) =>
         `\n    (mod: ${JSON.stringify(path)}): JS<typeof import(${
           JSON.stringify(path)
@@ -169,13 +208,16 @@ ${modulesMap}export const ${name} = {
     await Deno.writeTextFile("src/web-modules.gen.ts", webModulesContent);
   }
 
-  return Object.fromEntries(
-    outputFiles.map((
-      { path, contents, hash },
-    ) => [toPublicPath(path), { contents, hash }]),
-  );
+  return {
+    name,
+    publicRoot,
+    outputFiles,
+    modules,
+    dev,
+    lib: { dom: modules[import.meta.resolve("../dom.ts")].output.publicPath },
+  };
 
   function toPublicPath(path: string): string {
-    return path.replace(absoluteOutdir, "");
+    return publicRoot + path.replace(absoluteOutDirRegExp, "");
   }
 };

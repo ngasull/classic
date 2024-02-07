@@ -10,6 +10,7 @@ import {
   ModuleMeta,
   Resource,
 } from "../js/types.ts";
+import { WebBundle } from "../js/web.ts";
 import { contextSymbol, DOMNode, DOMNodeKind, ElementKind } from "./types.ts";
 
 const id = <T>(v: T) => v;
@@ -53,12 +54,12 @@ export const escapeScriptContent = (node: JSX.DOMLiteral) =>
 
 export const renderToString = async (
   root: JSX.Element,
-  opts: { domPath: string },
+  opts: { bundle: WebBundle },
 ) => DOMTreeToString(await toDOMTree(root), opts);
 
 export const DOMTreeToString = (
   tree: DOMNode[],
-  { domPath }: { domPath: string },
+  { bundle }: { bundle: WebBundle },
 ) => {
   const acc: string[] = [];
   writeDOMTree(
@@ -66,7 +67,7 @@ export const DOMTreeToString = (
     (chunk) => acc.push(chunk),
     (partial) =>
       writeActivationScript((chunk) => acc.push(chunk), tree, {
-        domPath,
+        domPath: bundle.lib.dom,
         partial,
       }),
   );
@@ -75,7 +76,7 @@ export const DOMTreeToString = (
 
 export const renderToStream = (
   root: JSX.Element,
-  { domPath }: { domPath: string },
+  { bundle }: { bundle: WebBundle },
 ) =>
   new ReadableStream<string>({
     async start(controller) {
@@ -84,7 +85,10 @@ export const renderToStream = (
         tree,
         controller.enqueue,
         (partial) =>
-          writeActivationScript(controller.enqueue, tree, { domPath, partial }),
+          writeActivationScript(controller.enqueue, tree, {
+            domPath: bundle.lib.dom,
+            partial,
+          }),
       );
       controller.close();
     },

@@ -20,10 +20,10 @@ export const serveRoutes = <
   BasePath extends string,
   KS extends string,
 >(
-  { hono, routes, domPath }: {
-    hono: Hono<E, S, BasePath>;
+  { app, routes, bundle }: {
+    app: Hono<E, S, BasePath>;
     routes: Routes<KS>;
-    domPath: string;
+    bundle: WebBundle;
   },
 ) => {
   const routeEntries = Object.entries(routes) as [string, Route<string>][];
@@ -82,20 +82,20 @@ export const serveRoutes = <
         })());
 
     return c.html(
-      await renderToString(element, { domPath }),
+      await renderToString(element, { bundle }),
       Index === NotFound ? 404 : 200,
     );
   };
 
   for (const [path, route] of Object.entries(routes) as [KS, Route<KS>][]) {
     const [Layout, Index] = extractRoute(route);
-    hono.get(
+    app.get(
       path,
       handleRoute(path as keyof typeof routes, Layout, Index),
     );
   }
 
-  hono.get("*", handleRoute(""));
+  app.get("*", handleRoute(""));
 };
 
 const extractRoute = <K extends string>(
@@ -111,11 +111,13 @@ const extractRoute = <K extends string>(
 
 const NotFound = () => Fragment({ children: "Not found" });
 
-export const serveBundle = (app: Hono, webBundle: WebBundle) =>
-  app.get("/m/:filename{.+}", (c) => {
-    const { filename } = c.req.param();
+export const serveBundle = (app: Hono, webBundle: WebBundle) => {
+  const outputMap = Object.fromEntries(
+    webBundle.outputFiles.map((f) => [f.publicPath, f]),
+  );
 
-    const bundle = webBundle[`/${filename}`];
+  app.get(`${webBundle.publicRoot}/:filename{.+}`, (c) => {
+    const bundle = outputMap[c.req.path];
     if (!bundle) return c.text("Not found", 404);
 
     const { contents } = bundle;
@@ -123,6 +125,7 @@ export const serveBundle = (app: Hono, webBundle: WebBundle) =>
     c.header("Content-Type", "text/javascript; charset=UTF-8");
     return c.body(contents);
   });
+};
 
 export const HTMLRoot = ({ lang, title }: {
   lang?: string;
