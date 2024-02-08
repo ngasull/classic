@@ -319,6 +319,9 @@ const jsUtils = {
     // @ts-ignore: Don't worry, be happy TS
     jsFn`return ${expr}` as JS<ExtractImplicitlyJSable<E>> & JSReturn,
 
+  set: <T>(receiver: JSable<T>, value: ImplicitlyJSable<T>) =>
+    jsFn<never>`${receiver}=${value}`,
+
   symbol: jsSymbol,
 
   window: new Proxy({}, {
