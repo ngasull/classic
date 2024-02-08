@@ -154,7 +154,9 @@ const writeActivationScript = (
     );
     write(")(");
     write(
-      partial ? `[document.currentScript.nextSibling]` : `document.childNodes`,
+      partial
+        ? `[document.currentScript.previousSibling]`
+        : `document.childNodes`,
     );
     write(")</script>");
   }
@@ -243,7 +245,6 @@ export const writeDOMTree = (
       case DOMNodeKind.Tag: {
         if (partialRoot && node.tag !== "script") {
           write("<html><body>");
-          writeRootActivation(true);
         }
 
         write("<");
@@ -291,6 +292,7 @@ export const writeDOMTree = (
         }
 
         if (partialRoot && node.tag !== "script") {
+          writeRootActivation(true);
           write("</body></html>");
         }
         break;

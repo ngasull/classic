@@ -27,7 +27,7 @@ import {
 
 const suspenseDelay = 500;
 const routeAttr = "route";
-const dataRoute = `data-${routeAttr}`;
+const routeElSelector = `[data-${routeAttr}]`;
 const routeIndexParam = "_index";
 const routeLayoutParam = "_layout";
 
@@ -38,7 +38,7 @@ const findObsolete = (
   parent?: HTMLElement,
   path = "",
 ): [string[], HTMLElement] | null => {
-  let routeEl = querySelector<HTMLElement>(`[${dataRoute}]`, parent),
+  let routeEl = querySelector<HTMLElement>(routeElSelector, parent),
     subPath = routeEl ? path + dataset(routeEl)[routeAttr] : path;
   return routeEl
     ? startsWith(url, subPath) ? findObsolete(url, routeEl, subPath) : [
@@ -110,15 +110,14 @@ const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
           head.append(adoptNode(el));
         }
       },
-    children = receivedDoc.body.children,
+    receivedChildren = receivedDoc.body.children,
+    children,
     content,
-    script = null;
+    script = 0 as Element | 0;
 
-  if (children.length > 1) {
-    content = adoptNode(receivedDoc.body.children[1]);
-    script = adoptNode(receivedDoc.body.children[0]) as HTMLScriptElement;
-  } else {
-    content = receivedDoc.body.children[0];
+  children = [content = adoptNode(receivedChildren[0])];
+  if (receivedChildren.length) {
+    children.push(script = adoptNode(receivedChildren[0]));
   }
 
   forEach(
@@ -138,20 +137,19 @@ const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
 
   cleanup(slot);
   trackChildren(content);
-  replaceWith(slot, content);
+  replaceWith(slot, ...children);
 
+  // Scripts parsed with DOMParser are not marked to be run
   if (script) {
-    content.parentNode!.insertBefore(script, content);
-    reviveScript(script);
+    reviveScript(script as HTMLScriptElement);
   }
 
-  // To be executed, scripts must be created manually in main document
   forEach(
     querySelectorAll<HTMLScriptElement>("script", content),
     reviveScript,
   );
 
-  return querySelector<HTMLElement>(`[${dataRoute}]`, content);
+  return querySelector<HTMLElement>(routeElSelector, content);
 };
 
 const reviveScript = (script: HTMLScriptElement) => {
@@ -198,7 +196,7 @@ export const register = (root = doc.body) => {
 
       subEvent(win, "popstate", handleLocationChange),
 
-      ...[...querySelectorAll(`[${dataRoute}]`)]
+      ...[...querySelectorAll(routeElSelector)]
         .map(trackChildren)
         .reverse(),
     ];
