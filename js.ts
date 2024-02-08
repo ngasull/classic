@@ -6,6 +6,7 @@ import {
   resourcesArg,
 } from "./dom/arg-alias.ts";
 import type {
+  ExtractImplicitlyJSable,
   ImplicitlyJSable,
   JS,
   JSable,
@@ -24,13 +25,47 @@ import type {
 } from "./js/types.ts";
 import { isEvaluable, isReactive, jsSymbol } from "./js/types.ts";
 
-export const track = (cb: JSFn<[], void>) =>
-  js<void>`${unsafe(lifecycleArg)}.t(${unsafe(nodeArg)},${
-    unsafe(resourcesArg)
-  }.u,${fn(cb)})`;
+export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
+  const tpl = Array(stmts.length).fill(";");
+  tpl[0] = "";
+  return jsFn(
+    tpl,
+    ...stmts,
+  ) as JSStatementsReturn<S>;
+};
 
-export const onCleanup = (cb: JSFn<[], void>) =>
-  js<void>`${unsafe(lifecycleArg)}.c(${unsafe(nodeArg)},${fn(cb)})`;
+export const fn = <Cb extends (...args: any[]) => JSFnBody<any>>(
+  cb: Cb,
+) => {
+  const argList = unsafe(
+    Array(cb.length).fill(0)
+      .map((_, i) => argn(i))
+      .join(","),
+  );
+
+  const body = cb(
+    ...(Array(cb.length)
+      .fill(0)
+      .map((_, i) => jsFn`${unsafe(argn(i))}`)),
+  );
+
+  const jsfnExpr = Array.isArray(body)
+    ? jsFn`((${argList})=>{${statements(body)}})`
+    : jsFn`((${argList})=>(${body}))`;
+
+  jsfnExpr[jsSymbol].body = body;
+
+  return jsfnExpr as Cb extends JSFn<infer Args, infer T>
+    ? JS<(...args: Args) => T> & {
+      [jsSymbol]: { body: JSFnBody<T> };
+    }
+    : never;
+};
+
+export const effect = (cb: JSFn<[], void | (() => void)>) =>
+  js<void>`${unsafe(lifecycleArg)}.e(${unsafe(nodeArg)},${
+    unsafe(resourcesArg)
+  }.u,${cb})`;
 
 const targetSymbol = Symbol("target");
 
@@ -155,6 +190,8 @@ const jsFn = (<T>(
       } else {
         return expr[jsSymbol].rawJS;
       }
+    } else if (typeof expr === "function") {
+      return handleExpression(fn(expr));
     } else if (Array.isArray(expr)) {
       return `[${expr.map(handleExpression).join(",")}]`;
     } else if (typeof expr === "object") {
@@ -252,14 +289,16 @@ const jsUtils = {
     return new Function(...argsBody)(...args);
   },
 
-  nonNullable: <T>(v: T) =>
-    v as T extends JS<infer T> ? JS<NonNullable<T>> : never,
+  import: <M>(url: string) => jsFn<Promise<M>>`import(${url})`,
 
   module: <M>(local: string, pub: string) => {
     const expr = jsFn<M>`${unsafe(modulesArg)}[${pub}]`;
     expr[jsSymbol].modules = [{ local, pub }];
     return expr;
   },
+
+  nonNullable: <T>(v: T) =>
+    v as T extends JS<infer T> ? JS<NonNullable<T>> : never,
 
   if: <S extends JSStatements<unknown>>(
     test: ImplicitlyJSable,
@@ -276,30 +315,24 @@ const jsUtils = {
   else: <S extends JSStatements<unknown>>(stmts: S) =>
     jsFn`else{${statements(stmts)}}` as JSStatementsReturn<S>,
 
-  return: <T, E extends JSable<T>>(expr: E) =>
-    jsFn`return ${expr}` as JS<T> & JSReturn,
+  return: <E extends ImplicitlyJSable>(expr: E) =>
+    // @ts-ignore: Don't worry, be happy TS
+    jsFn`return ${expr}` as JS<ExtractImplicitlyJSable<E>> & JSReturn,
 
   symbol: jsSymbol,
+
+  window: new Proxy({}, {
+    get(_, p) {
+      return jsFn`${unsafe(p as string)}`;
+    },
+  }) as Omit<JS<Window>, keyof JSWindowOverrides> & JSWindowOverrides,
 };
 
-export const js = new Proxy(jsFn, {
-  get(_, p) {
-    return p in jsUtils
-      ? jsUtils[p as keyof typeof jsUtils]
-      : js`${unsafe(p as string)}`;
-  },
-}) as
+export const js = Object.assign(jsFn, jsUtils) as
   & typeof jsFn
-  & typeof jsUtils
-  & JSWindowOverrides
-  & {
-    [
-      K in Exclude<keyof Window, keyof typeof jsUtils | keyof JSWindowOverrides>
-    ]: JS<Window[K]>;
-  };
+  & typeof jsUtils;
 
 type JSWindowOverrides = {
-  import: <M>(url: string) => JS<Promise<M>>;
   Promise: {
     all<P>(
       promises: P,
@@ -376,43 +409,6 @@ export const resources = <T extends Record<string, JSONable>, U extends string>(
     }),
   });
   return group;
-};
-
-export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
-  const tpl = Array(stmts.length).fill(";");
-  tpl[0] = "";
-  return jsFn(
-    tpl,
-    ...stmts,
-  ) as JSStatementsReturn<S>;
-};
-
-export const fn = <Cb extends (...args: any[]) => JSFnBody<any>>(
-  cb: Cb,
-) => {
-  const argList = unsafe(
-    Array(cb.length).fill(0)
-      .map((_, i) => argn(i))
-      .join(","),
-  );
-
-  const body = cb(
-    ...(Array(cb.length)
-      .fill(0)
-      .map((_, i) => jsFn`${unsafe(argn(i))}`)),
-  );
-
-  const jsfnExpr = Array.isArray(body)
-    ? jsFn`((${argList})=>{${statements(body)}}})`
-    : jsFn`((${argList})=>(${body}))`;
-
-  jsfnExpr[jsSymbol].body = body;
-
-  return jsfnExpr as Cb extends JSFn<infer Args, infer T>
-    ? JS<(...args: Args) => T> & {
-      [jsSymbol]: { body: JSFnBody<T> };
-    }
-    : never;
 };
 
 export const sync = async <J extends JS<(...args: any[]) => any>>(

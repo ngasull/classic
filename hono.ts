@@ -2,6 +2,7 @@ import type { Context, Env, Hono, ParamKeys, Schema } from "./deps/hono.ts";
 import { renderToString } from "./jsx/render.ts";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import { WebBundle } from "./js/web.ts";
+import { ChildrenProp } from "./jsx/types.ts";
 
 export type Routes<KS extends string> = { [Path in KS]: Route<Path> };
 
@@ -35,10 +36,10 @@ export const serveRoutes = <
     routePath: "" | K,
     Layout?:
       | JSX.Component<
-        { children: JSX.Children } & { [k in ParamKeys<K>]: string }
+        { children: JSX.Children } & Record<ParamKeys<K>, string>
       >
       | null,
-    Index: JSX.Component<{ [k in ParamKeys<K>]: string }> = NotFound,
+    Index: JSX.Component<Record<ParamKeys<K>, string>> = NotFound,
   ) =>
   async (c: Context<E, ParamKeys<K>>) => {
     const params = c.req.param() as Record<ParamKeys<K>, string>;
@@ -61,7 +62,7 @@ export const serveRoutes = <
             segments.slice(0, i + 1).join("/")
           ) as K[];
           const layoutComponents: JSX.Component<
-            { children: JSX.Children } & { [k in ParamKeys<K>]: string }
+            Record<ParamKeys<K>, string> & ChildrenProp
           >[] = layoutPaths.map(
             (path) =>
               extractRoute(routes[path])[0] ||

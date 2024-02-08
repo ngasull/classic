@@ -1,5 +1,6 @@
 import type { Activation } from "../dom.ts";
-import { fn, js, statements, sync, track } from "../js.ts";
+import { voidElements } from "../dom/void.ts";
+import { effect, fn, js, statements, sync, unsafe } from "../js.ts";
 import {
   isEvaluable,
   JS,
@@ -11,26 +12,17 @@ import {
   Resource,
 } from "../js/types.ts";
 import { WebBundle } from "../js/web.ts";
-import { contextSymbol, DOMNode, DOMNodeKind, ElementKind } from "./types.ts";
+import {
+  contextSymbol,
+  DOMNode,
+  DOMNodeKind,
+  ElementKind,
+  SyncRef,
+} from "./types.ts";
 
 const id = <T>(v: T) => v;
 
-const voidElements = {
-  area: true,
-  base: true,
-  br: true,
-  col: true,
-  embed: true,
-  hr: true,
-  img: true,
-  input: true,
-  link: true,
-  meta: true,
-  param: true,
-  source: true,
-  track: true,
-  wbr: true,
-};
+const eventPropRegExp = /^on([A-Z]\w+)$/;
 
 // Only escape when necessary ; avoids inline JS like "a && b" to become "a &amp;&amp; b"
 const escapesRegex = /&(#\d{2,4}|[A-z][A-z\d]+);/g;
@@ -352,6 +344,15 @@ const nodeToDOMTree = async (
         string,
         JSable<string | number | boolean | null>,
       ][] = [];
+      const refs: SyncRef<Element>[] = ref
+        ? [
+          await sync(
+            fn((elRef: JS<Element>) =>
+              (ref as unknown as JSX.Ref<Element>)(elRef) as JSable<void>
+            ),
+          ),
+        ]
+        : [];
 
       const propEntries = Object.entries(props);
       let entry;
@@ -368,7 +369,21 @@ const nodeToDOMTree = async (
             | JSable<string | number | boolean | null>,
         ) {
           if (value != null) {
-            if (isEvaluable<string | number | boolean | null>(value)) {
+            const eventMatch = name.match(eventPropRegExp);
+            if (eventMatch) {
+              const eventType = eventMatch[1].toLowerCase();
+              refs.push(
+                await sync(fn((elRef: JS<Element>) =>
+                  effect(() => [
+                    js`let c=${value}`,
+                    elRef.addEventListener(eventType, unsafe("c")),
+                    js.return(() =>
+                      elRef.removeEventListener(eventType, unsafe("c"))
+                    ),
+                  ])
+                )),
+              );
+            } else if (isEvaluable<string | number | boolean | null>(value)) {
               await recordAttr(name, await js.eval(value));
               reactiveAttributes.push([name, value]);
             } else {
@@ -378,6 +393,20 @@ const nodeToDOMTree = async (
         })(name, value);
       }
 
+      refs.push(
+        ...(await Promise.all(
+          reactiveAttributes.map(([name, reactive]) =>
+            sync(
+              fn((node: JS<Element>) =>
+                effect(() =>
+                  js`let k=${name},v=${reactive};!v&&v!==""?${node}.removeAttribute(k):${node}.setAttribute(k,v===true?"":String(v))`
+                )
+              ),
+            )
+          ),
+        )),
+      );
+
       return [
         {
           kind: DOMNodeKind.Tag,
@@ -386,28 +415,7 @@ const nodeToDOMTree = async (
             attributes,
             children: await nodeToDOMTree(children, ctxData),
           },
-          refs: [
-            ...(await Promise.all(
-              reactiveAttributes.map(([name, reactive]) =>
-                sync(
-                  fn((node: JS<Element>) =>
-                    track(() =>
-                      js`let k=${name},v=${reactive};!v&&v!==""?${node}.removeAttribute(k):${node}.setAttribute(k,v===true?"":String(v))`
-                    )
-                  ),
-                )
-              ),
-            )),
-            ...(ref
-              ? [
-                await sync(
-                  fn((elRef: JS<Element>) =>
-                    (ref as unknown as JSX.Ref<Element>)(elRef) as JSable<void>
-                  ),
-                ),
-              ]
-              : []),
-          ],
+          refs,
         },
       ];
     }
@@ -422,7 +430,7 @@ const nodeToDOMTree = async (
           refs: [
             await sync(
               fn((node: JS<Text>) =>
-                track(() => js`${node}.textContent=${(syncRoot.element)}`)
+                effect(() => js`${node}.textContent=${(syncRoot.element)}`)
               ),
             ),
           ],

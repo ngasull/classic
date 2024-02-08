@@ -1,4 +1,3 @@
-import { subStore } from "./store.ts";
 import {
   call,
   customEvent,
@@ -49,12 +48,6 @@ export const trackChildren = (node: Node) => {
   return cleanup;
 };
 
-export const track = (node: Node, uris: string[], cb: () => void) =>
-  registerCleanup(
-    node,
-    subStore(uris, cb),
-  );
-
 // Tells the closest lifecycle-tracking parent to attach a cleanup to a Node
 export const registerCleanup = (node: Node, cleanup: () => void) => {
   dispatchPrevented(node, customEvent(trackEvent, cleanup));
@@ -62,6 +55,3 @@ export const registerCleanup = (node: Node, cleanup: () => void) => {
 
 export const cleanup = (node: Node) =>
   dispatchPrevented(node, customEvent(untrackEvent));
-
-export const onCleanup = (node: Node, cb: () => void) =>
-  registerCleanup(node, cb);

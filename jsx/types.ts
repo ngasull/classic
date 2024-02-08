@@ -1,18 +1,28 @@
-/// <reference path="./dom.types.ts" />
-
 import type { JS, JSable, JSFn, JSFnBody, JSONable } from "../js/types.ts";
 import { jsSymbol } from "../js/types.ts";
+import type { JSXInternal } from "./dom.d.ts";
 
 declare global {
   namespace JSX {
-    type IntrinsicTag = Exclude<keyof IntrinsicElements, number>;
+    type IntrinsicTag = keyof JSXInternal.IntrinsicElements;
 
     type IntrinsicElements = {
-      [K in keyof DOMElements]: {
-        [P in keyof DOMElements[K]]?:
-          | DOMElements[K][P]
-          | JSable<DOMElements[K][P]>;
-      };
+      [K in keyof JSXInternal.IntrinsicElements]:
+        & {
+          [P in keyof JSXInternal.IntrinsicElements[K]]?:
+            | JSXInternal.IntrinsicElements[K][P]
+            | JSable<JSXInternal.IntrinsicElements[K][P]>;
+        }
+        & {
+          children?: JSX.Children;
+          ref?: JSX.Ref<
+            JSXInternal.IntrinsicElements[K] extends
+              JSXInternal.HTMLAttributes<infer E> ? E
+              : JSXInternal.IntrinsicElements[K] extends
+                JSXInternal.SVGAttributes<infer E> ? E
+              : Element
+          >;
+        };
     };
 
     type Element = SyncElement | AsyncElement | Fragment;
@@ -62,23 +72,20 @@ declare global {
     }
 
     interface ComponentElement<
-      O extends Record<string, unknown> = Record<string, unknown>,
+      O extends Record<never, never> = Record<never, never>,
     > {
       Component: Component<O>;
       props: O;
     }
 
-    type Component<
-      O extends ElementProps = ElementProps & Partial<ChildrenProp>,
-    > = GenericComponent<O>;
-
-    type ParentComponent<O extends ElementProps = ElementProps> =
-      GenericComponent<O & ChildrenProp>;
-
-    type GenericComponent<O extends ElementProps> = (
+    type Component<O extends Record<never, never> = Record<never, never>> = (
       props: O,
       ctx: ContextAPI,
     ) => Element;
+
+    type ParentComponent<O extends ElementProps = ElementProps> = Component<
+      O & ChildrenProp
+    >;
 
     type Context<T> = Record<typeof contextSymbol, symbol> & Record<symbol, T>;
 
@@ -151,6 +158,6 @@ export type DOMNode =
 
 export const contextSymbol = Symbol("context");
 
-export type ElementProps = { [k: Exclude<string, "children">]: unknown };
+export type ElementProps = Omit<Record<string, unknown>, "children">;
 
 export type ChildrenProp = Record<"children", JSX.Children>;

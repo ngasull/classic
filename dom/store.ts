@@ -15,7 +15,7 @@ const store: ResourceStore = {};
 export const peek = (uri: string) => store[uri]?.[0];
 export const getValues = (uris: string[]) => uris.map((uri) => store[uri]![0]);
 
-export const subStore = (uris: string[], cb: () => void) => {
+export const subStore = (uris: string[], cb: ResourceListener) => {
   forEach(uris, (uri) => (store[uri] ??= [undefined!, new Set()])![1].add(cb));
   return () => forEach(uris, (uri) => store[uri]![1].delete(cb));
 };
@@ -28,7 +28,7 @@ export const setResources = (
       .filter((r) => r[1] != null) as [string, JSONable][];
   }
 
-  let batch = new Set<() => void>(),
+  let batch = new Set<ResourceListener>(),
     rollbacks: (() => void)[] = [];
 
   forEach(resources, ([uri, v]) => {
@@ -57,6 +57,6 @@ export const setResources = (
 
 type ResourceStore = Record<string, StoredResource | undefined>;
 
-type StoredResource = [JSONable, Set<ResouceListener>];
+type StoredResource = [JSONable, Set<ResourceListener>];
 
-type ResouceListener = () => void;
+type ResourceListener = () => void;

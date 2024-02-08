@@ -5,8 +5,8 @@ import {
   nodeArg,
   resourcesArg,
 } from "./dom/arg-alias.ts";
-import { onCleanup, track, trackChildren } from "./dom/lifecycle.ts";
-import { JSONable, peek, setResources } from "./dom/store.ts";
+import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
+import { JSONable, peek, setResources, subStore } from "./dom/store.ts";
 import { call, doc, first, forEach, fromEntries, isArray } from "./dom/util.ts";
 
 /**
@@ -24,7 +24,26 @@ const targetSymbol = Symbol();
 
 const arg0 = argn(0);
 
-const lifecycleFns = { t: track, c: onCleanup };
+const effect = (
+  node: Node,
+  uris: string[],
+  cb: () => void | (() => void),
+) => {
+  let cleanup: (() => void) | void = cb(),
+    unsubStore = subStore(uris, () => {
+      cleanup?.();
+      cleanup = cb();
+    });
+  registerCleanup(
+    node,
+    () => {
+      unsubStore();
+      cleanup?.();
+    },
+  );
+};
+
+const lifecycleFns = { e: effect };
 
 const activateNode = (
   nodes: NodeList | Node[],

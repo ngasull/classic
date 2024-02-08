@@ -113,12 +113,24 @@ export type JSONArray = ReadonlyArray<JSONLiteral | JSONArray | JSONRecord>;
 
 export type JSONable = JSONLiteral | JSONRecord | JSONArray;
 
-export type ImplicitlyJSable =
+export type ImplicitlyJSable<T = any> =
+  | JSFn<any, any>
+  | JSable<T>
   | JSONLiteral
   | undefined
-  | JSable<any>
   | ImplicitlyJSable[]
   | { [k: string]: ImplicitlyJSable; [jsSymbol]?: never };
+
+export type ExtractImplicitlyJSable<T extends ImplicitlyJSable> = T extends
+  JSable<infer T> ? T
+  : T extends JSFn<infer Args, infer R> ? (...args: Args) => R
+  : T extends {} | unknown[]
+    ? {
+      [K in keyof T]: T[K] extends ImplicitlyJSable
+        ? ExtractImplicitlyJSable<T[K]>
+        : T[K];
+    }
+  : T;
 
 export const jsSymbol = Symbol("js");
 

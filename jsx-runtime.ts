@@ -1,9 +1,10 @@
+import { VoidElement } from "./dom/void.ts";
 import { isEvaluable } from "./js/types.ts";
 import { ChildrenProp, ElementKind, ElementProps } from "./jsx/types.ts";
 
 const jsx = ((
-  tag: JSX.IntrinsicTag | JSX.GenericComponent<ElementProps>,
-  props: (ElementProps & Partial<ChildrenProp>) | null,
+  tag: JSX.IntrinsicTag | JSX.Component<any>,
+  props: (ElementProps & Partial<ChildrenProp>) | null | undefined,
   ...children: JSX.Children[]
 ): JSX.Element => {
   props ??= {};
@@ -26,26 +27,30 @@ const jsx = ((
       },
     };
 }) as {
-  <Tag extends JSX.IntrinsicTag>(
+  <Tag extends JSX.Component<any> | JSX.IntrinsicTag>(
     tag: Tag,
-    props: JSX.IntrinsicElements[Tag],
+    props:
+      | (Tag extends JSX.Component<infer O> ? O
+        : Tag extends JSX.IntrinsicTag ? JSX.IntrinsicElements[Tag]
+        : never)
+      | null
+      | undefined,
   ): JSX.Element;
 
-  <Tag extends JSX.IntrinsicTag>(
+  <
+    Tag extends
+      | JSX.ParentComponent<any>
+      | Exclude<JSX.IntrinsicTag, VoidElement>,
+    Props extends Tag extends JSX.ParentComponent<infer O> ? O
+      : Tag extends JSX.IntrinsicTag
+        ? Omit<JSX.IntrinsicElements[Tag], "children">
+      : never,
+  >(
     tag: Tag,
-    props: JSX.IntrinsicElements[Tag],
-    ...children: JSX.Children[]
-  ): JSX.Element;
-
-  <O extends ElementProps>(
-    tag: JSX.Component<O>,
-    props: O & Partial<ChildrenProp>,
-  ): JSX.Element;
-
-  <O extends ElementProps>(
-    tag: JSX.Component<O>,
-    props: O | null | undefined,
-    ...children: JSX.Children[]
+    props: Props | null | undefined,
+    ...children: Props extends Record<"children", infer Children>
+      ? Children extends readonly unknown[] ? Children : [Children]
+      : never
   ): JSX.Element;
 };
 
