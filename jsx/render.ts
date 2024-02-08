@@ -313,9 +313,21 @@ const nodeToDOMTree = async (
   const syncRoot = await root;
 
   if (Array.isArray(syncRoot)) {
-    return Promise.all(
-      syncRoot.map((child) => nodeToDOMTree(child, ctxData)),
-    ).then((children) => children.flatMap(id));
+    const children = await Promise
+      .all(syncRoot.map((child) => nodeToDOMTree(child, ctxData)))
+      .then((children) => children.flatMap(id));
+
+    // Make sure we have no adjacent text nodes (would be parsed as only one)
+    for (let i = children.length - 1; i > 0; i--) {
+      if (
+        children[i].kind === DOMNodeKind.Text &&
+        children[i - 1].kind === DOMNodeKind.Text
+      ) {
+        children.splice(i, 0, { kind: DOMNodeKind.Comment, node: "" });
+      }
+    }
+
+    return children;
   }
 
   switch (syncRoot.kind) {
