@@ -1,7 +1,6 @@
 import type {
   ContextVariableMap,
   Env,
-  HonoRequest,
   Input,
   MiddlewareHandler,
   ParamKeys,
@@ -43,14 +42,17 @@ async (c, next) => {
     if (c.req.query("_layout") != null && !Layout) return c.notFound();
 
     content = jsx("div", { "data-route": c.req.path, children: content });
-    const params = reqParamProxy(c.req);
 
     return c.body(
       renderToStream(
         c.req.query("_layout") != null
-          ? jsx(Layout!, params, jsx("progress", { "data-route": "" }))
+          ? jsx(
+            Layout!,
+            c.req.param() as any,
+            jsx("progress", { "data-route": "" }),
+          )
           : c.req.query("_index") == null && ComposedLayout
-          ? jsx(ComposedLayout, params, content)
+          ? jsx(ComposedLayout, null, content)
           : content,
         {
           context: c.get(jsxContextSymbol),
@@ -84,7 +86,7 @@ export const layout = <
 ): MiddlewareHandler<E, P, I> =>
 async (c, next) => {
   const { routePath } = c.req;
-  const params = reqParamProxy(c.req);
+  const params = c.req.param() as any;
 
   const ParentLayout = c.get(layoutSymbol);
   const ParentComposed = c.get(composedLayoutSymbol);
@@ -92,7 +94,7 @@ async (c, next) => {
     ? ({ children }: ChildrenProp) =>
       jsx(
         ParentComposed,
-        params,
+        null,
         jsx(
           "div",
           {
@@ -128,15 +130,5 @@ export const route = <
 ): MiddlewareHandler<E, P, I> =>
 (c) =>
   Promise.resolve(
-    c.render(Index(reqParamProxy(c.req), contextAPI(c.get(jsxContextSymbol)))),
+    c.render(Index(c.req.param() as any, contextAPI(c.get(jsxContextSymbol)))),
   );
-
-const reqParamProxy = <P extends string>(
-  req: HonoRequest<P>,
-): Record<ParamKeys<P>, string> => new Proxy(req, reqParamProxyHandler) as any;
-
-const reqParamProxyHandler: ProxyHandler<HonoRequest> = {
-  get(target, p) {
-    return target.param(p as never);
-  },
-};
