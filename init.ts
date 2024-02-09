@@ -13,17 +13,19 @@ const fetches = fetch(
         .then((res) => res.text())
         .then((denoJson) =>
           denoJson.replaceAll(
-            /("jsx-machine\/(jsx-runtime)?": "[^"]+)"/g,
+            /("jsx-machine\/(jsx-runtime)?": "[^"]+")/g,
             (_, row) => row.replace("master", sha),
           )
         ),
-      fetch(`${base}/src/main.tsx`).then((res) => res.text()),
+      fetch(`${base}/src/db.ts`).then((res) => res.text()),
+      fetch(`${base}/src/root.tsx`).then((res) => res.text()),
+      fetch(`${base}/src/server.ts`).then((res) => res.text()),
     ]);
   });
 
 const projectName = prompt("What folder name do you want to create?");
 
-const [denoJson, main] = await fetches;
+const [denoJson, db, root, server] = await fetches;
 
 if (!projectName) Deno.exit(1);
 if (projectName.includes("/")) {
@@ -41,5 +43,18 @@ await Promise.all([
   ),
 
   Deno.mkdir(src)
-    .then(() => Deno.writeTextFile(join(src, "main.tsx"), main)),
+    .then(() =>
+      Promise.all([
+        Deno.writeTextFile(join(src, "db.ts"), db),
+        Deno.writeTextFile(join(src, "root.tsx"), root),
+        Deno.writeTextFile(join(src, "server.ts"), server),
+        Deno.writeTextFile(
+          join(src, "web-modules.gen.ts"),
+          `// AUTO-GENERATED FILE, DO NOT MODIFY
+
+export const web = null;
+`,
+        ),
+      ])
+    ),
 ]);

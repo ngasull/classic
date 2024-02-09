@@ -39,16 +39,15 @@ const jsx = ((
 
   <
     Tag extends
-      | JSX.ParentComponent<any>
+      | JSX.Component<{ children: any }>
       | Exclude<JSX.IntrinsicTag, VoidElement>,
-    Props extends Tag extends JSX.ParentComponent<infer O> ? O
-      : Tag extends JSX.IntrinsicTag
-        ? Omit<JSX.IntrinsicElements[Tag], "children">
+    Props extends Tag extends JSX.Component<infer O> ? O
+      : Tag extends JSX.IntrinsicTag ? JSX.IntrinsicElements[Tag]
       : never,
   >(
     tag: Tag,
-    props: Props | null | undefined,
-    ...children: Props extends Record<"children", infer Children>
+    props: Omit<Props, "children"> | null | undefined,
+    ...children: Props extends { children?: undefined | infer Children }
       ? Children extends readonly unknown[] ? Children : [Children]
       : never
   ): JSX.Element;

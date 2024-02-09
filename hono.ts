@@ -1,131 +1,25 @@
-import type { Context, Env, Hono, ParamKeys, Schema } from "./deps/hono.ts";
-import { renderToString } from "./jsx/render.ts";
-import { Fragment, jsx } from "./jsx-runtime.ts";
+import { makeWebModuleHandler } from "./api/router.ts";
+import type { MiddlewareHandler } from "./deps/hono.ts";
 import { WebBundle } from "./js/web.ts";
-import { ChildrenProp } from "./jsx/types.ts";
+import { jsx } from "./jsx-runtime.ts";
 
-export type Routes<KS extends string> = { [Path in KS]: Route<Path> };
-
-export type Route<Path> = JSX.Component<{ [K in ParamKeys<Path>]: string }> | {
-  layout?: JSX.Component<
-    { children: JSX.Children } & { [K in ParamKeys<Path>]: string }
-  >;
-  index?: JSX.Component<{ [K in ParamKeys<Path>]: string }>;
-};
-
-export const routes = <KS extends string>(def: Routes<KS>) => def;
-
-export const serveRoutes = <
-  E extends Env,
-  S extends Schema,
-  BasePath extends string,
-  KS extends string,
->(
-  { app, routes, bundle }: {
-    app: Hono<E, S, BasePath>;
-    routes: Routes<KS>;
-    bundle: WebBundle;
-  },
-) => {
-  const routeEntries = Object.entries(routes) as [string, Route<string>][];
-  for (const e of routeEntries) {
-    if (e[0] === "/") e[0] = "";
+declare module "./deps/hono.ts" {
+  interface ContextVariableMap {
+    [bundleSymbol]: WebBundle;
   }
+}
 
-  const handleRoute = <K extends KS>(
-    routePath: "" | K,
-    Layout?:
-      | JSX.Component<
-        { children: JSX.Children } & Record<ParamKeys<K>, string>
-      >
-      | null,
-    Index: JSX.Component<Record<ParamKeys<K>, string>> = NotFound,
-  ) =>
-  async (c: Context<E, ParamKeys<K>>) => {
-    const params = c.req.param() as Record<ParamKeys<K>, string>;
+export const bundleSymbol = Symbol("bundle");
 
-    const isLayout = c.req.query("_layout") != null;
-    const isIndex = c.req.query("_index") != null;
+export const webModules = (webBundle: WebBundle): MiddlewareHandler => {
+  const handleModule = makeWebModuleHandler(webBundle);
+  return (c, next) => {
+    const res = handleModule(c.req.raw);
+    if (res && !c.finalized) return Promise.resolve(res);
 
-    const element = isLayout
-      ? Layout
-        ? jsx("div", {
-          "data-route": "/" + routePath.split("/").pop(),
-          children: jsx(Layout, { ...params, children: undefined }),
-        })
-        : jsx("progress", { "data-route": "" })
-      : (isIndex
-        ? jsx("div", { "data-route": "/", children: jsx(Index, null) })
-        : (() => {
-          const segments = routePath.split("/");
-          const layoutPaths = segments.map((_, i) =>
-            segments.slice(0, i + 1).join("/")
-          ) as K[];
-          const layoutComponents: JSX.Component<
-            Record<ParamKeys<K>, string> & ChildrenProp
-          >[] = layoutPaths.map(
-            (path) =>
-              extractRoute(routes[path])[0] ||
-              (({ children }) => Fragment({ children })),
-          );
-
-          return layoutComponents.reduceRight(
-            (prev, SegmentLayout, i) =>
-              jsx(SegmentLayout, {
-                ...params,
-                children: jsx("div", {
-                  "data-route": "/" + (segments[i + 1] || ""),
-                  children: prev,
-                }),
-              }),
-            jsx(Index, params),
-          );
-        })());
-
-    return c.html(
-      await renderToString(element, { bundle }),
-      Index === NotFound ? 404 : 200,
-    );
+    c.set(bundleSymbol, webBundle);
+    return next();
   };
-
-  for (const [path, route] of Object.entries(routes) as [KS, Route<KS>][]) {
-    const [Layout, Index] = extractRoute(route);
-    app.get(
-      path,
-      handleRoute(path as keyof typeof routes, Layout, Index),
-    );
-  }
-
-  app.get("*", handleRoute(""));
-};
-
-const extractRoute = <K extends string>(
-  route: Route<K>,
-): [
-  | JSX.Component<{ children: JSX.Children } & { [k in ParamKeys<K>]: string }>
-  | undefined,
-  JSX.Component<{ [k in ParamKeys<K>]: string }> | undefined,
-] =>
-  typeof route === "function"
-    ? [undefined, route]
-    : [route.layout, route.index];
-
-const NotFound = () => Fragment({ children: "Not found" });
-
-export const serveBundle = (app: Hono, webBundle: WebBundle) => {
-  const outputMap = Object.fromEntries(
-    webBundle.outputFiles.map((f) => [f.publicPath, f]),
-  );
-
-  app.get(`${webBundle.publicRoot}/:filename{.+}`, (c) => {
-    const bundle = outputMap[c.req.path];
-    if (!bundle) return c.text("Not found", 404);
-
-    const { contents } = bundle;
-
-    c.header("Content-Type", "text/javascript; charset=UTF-8");
-    return c.body(contents);
-  });
 };
 
 export const HTMLRoot = ({ lang, title }: {

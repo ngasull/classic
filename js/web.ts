@@ -7,6 +7,7 @@ import {
 } from "../deps/importmap.ts";
 import { parse as JSONCParse } from "../deps/std/jsonc.ts";
 import { join, resolve, toFileUrl } from "../deps/std/path.ts";
+import { createContext } from "../jsx/render.ts";
 
 export type WebBundle = {
   name: string;
@@ -25,6 +26,8 @@ type OutputFile = {
   contents: Uint8Array;
   hash: string;
 };
+
+export const bundleContext = createContext("bundle");
 
 export const bundleWebImports = async (
   {

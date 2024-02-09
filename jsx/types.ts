@@ -87,7 +87,13 @@ declare global {
       O & ChildrenProp
     >;
 
-    type Context<T> = Record<typeof contextSymbol, symbol> & Record<symbol, T>;
+    type Context<T> = {
+      [contextSymbol]: symbol;
+      [contextTypeSymbol]: T;
+      init(value: T): InitContext<T>;
+    };
+
+    type InitContext<T> = [symbol, T];
 
     type ContextAPI = {
       get<T>(context: Context<T>): T;
@@ -102,6 +108,8 @@ declare global {
     type Ref<N> = JSFn<[N], unknown>;
   }
 }
+
+declare const contextTypeSymbol: unique symbol;
 
 export type SyncRef<N> = {
   fn: JS<(ref: N) => void> & {

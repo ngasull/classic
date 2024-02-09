@@ -46,8 +46,8 @@ export const escapeScriptContent = (node: JSX.DOMLiteral) =>
 
 export const renderToString = async (
   root: JSX.Element,
-  opts: { bundle: WebBundle },
-) => DOMTreeToString(await toDOMTree(root), opts);
+  opts: { context?: JSX.InitContext<unknown>[]; bundle: WebBundle },
+) => DOMTreeToString(await toDOMTree(root, opts.context), opts);
 
 export const DOMTreeToString = (
   tree: DOMNode[],
@@ -68,32 +68,41 @@ export const DOMTreeToString = (
 
 export const renderToStream = (
   root: JSX.Element,
-  { bundle }: { bundle: WebBundle },
+  { context, bundle }: {
+    context?: JSX.InitContext<unknown>[];
+    bundle: WebBundle;
+  },
 ) =>
-  new ReadableStream<string>({
-    async start(controller) {
-      const tree = await toDOMTree(root);
-      writeDOMTree(
-        tree,
-        controller.enqueue,
-        (partial) =>
-          writeActivationScript(controller.enqueue, tree, {
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+      const write = (chunk: string) =>
+        controller.enqueue(encoder.encode(chunk));
+
+      toDOMTree(root, context).then((tree) => {
+        writeDOMTree(tree, write, (partial) =>
+          writeActivationScript(write, tree, {
             domPath: bundle.lib.dom,
             partial,
-          }),
-      );
-      controller.close();
+          }));
+        controller.close();
+      });
     },
   });
 
 type ContextData = Map<symbol, unknown>;
 
-export const createContext = <T>() =>
-  ({ [contextSymbol]: Symbol() }) as JSX.Context<T>;
+export const createContext = <T>(name?: string) => {
+  const context = ({
+    init: (value: T) => [context[contextSymbol], value],
+    [contextSymbol]: Symbol(name),
+  }) as JSX.Context<T>;
+  return context;
+};
 
 const subContext = (
   parent?: ContextData,
-  added: [symbol, unknown][] = [],
+  added: JSX.InitContext<unknown>[] = [],
 ): ContextData => {
   const contexts = new Map(parent);
   for (const [c, v] of added) {
@@ -102,7 +111,7 @@ const subContext = (
   return contexts;
 };
 
-const contextAPI = (data: ContextData) => {
+const contextAPIFromData = (data: ContextData) => {
   const ctx: JSX.ContextAPI = {
     get: <T>(context: JSX.Context<T>) => {
       if (!data.has(context[contextSymbol])) {
@@ -122,6 +131,9 @@ const contextAPI = (data: ContextData) => {
   };
   return ctx;
 };
+
+export const contextAPI = (context?: JSX.InitContext<unknown>[]) =>
+  contextAPIFromData(subContext(undefined, context));
 
 const writeActivationScript = (
   write: (chunk: string) => void,
@@ -303,8 +315,10 @@ export const writeDOMTree = (
   }
 };
 
-export const toDOMTree = (root: JSX.Element): Promise<DOMNode[]> =>
-  nodeToDOMTree(root, subContext());
+export const toDOMTree = (
+  root: JSX.Element,
+  context: JSX.InitContext<unknown>[] = [],
+): Promise<DOMNode[]> => nodeToDOMTree(root, subContext(undefined, context));
 
 const nodeToDOMTree = async (
   root: JSX.Element,
@@ -335,7 +349,7 @@ const nodeToDOMTree = async (
       const { Component, props } = syncRoot.element;
       const subCtxData = subContext(ctxData);
       return nodeToDOMTree(
-        Component(props, contextAPI(subCtxData)),
+        Component(props, contextAPIFromData(subCtxData)),
         subCtxData,
       );
     }
