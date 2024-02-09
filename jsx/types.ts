@@ -2,6 +2,8 @@ import type { JS, JSable, JSFn, JSFnBody, JSONable } from "../js/types.ts";
 import { jsSymbol } from "../js/types.ts";
 import type { JSXInternal } from "./dom.d.ts";
 
+type ValueOrJS<T> = T | JSable<T>;
+
 declare global {
   namespace JSX {
     type IntrinsicTag = keyof JSXInternal.IntrinsicElements;
@@ -9,9 +11,9 @@ declare global {
     type IntrinsicElements = {
       [K in keyof JSXInternal.IntrinsicElements]:
         & {
-          [P in keyof JSXInternal.IntrinsicElements[K]]?:
-            | JSXInternal.IntrinsicElements[K][P]
-            | JSable<JSXInternal.IntrinsicElements[K][P]>;
+          [P in keyof JSXInternal.IntrinsicElements[K]]?: ValueOrJS<
+            JSXInternal.IntrinsicElements[K][P]
+          >;
         }
         & {
           children?: JSX.Children;
@@ -29,7 +31,7 @@ declare global {
 
     type AsyncElement = Promise<SyncElement | Fragment>;
 
-    type Fragment = Element[];
+    type Fragment = readonly Element[];
 
     type Children =
       | Element
@@ -37,7 +39,7 @@ declare global {
       | null
       | undefined
       | JSable<DOMLiteral | null | undefined>
-      | Array<Children>;
+      | readonly Children[];
 
     type SyncElement =
       | { kind: ElementKind.Comment; element: string }
@@ -72,13 +74,13 @@ declare global {
     }
 
     interface ComponentElement<
-      O extends Record<never, never> = Record<never, never>,
+      O extends Record<string, any> = Record<string, never>,
     > {
       Component: Component<O>;
       props: O;
     }
 
-    type Component<O extends Record<never, never> = Record<never, never>> = (
+    type Component<O extends Record<string, any> = Record<string, never>> = (
       props: O,
       ctx: ContextAPI,
     ) => Element;

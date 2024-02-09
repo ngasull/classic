@@ -27,29 +27,29 @@ const jsx = ((
       },
     };
 }) as {
-  <Tag extends JSX.Component<any> | JSX.IntrinsicTag>(
+  <Tag extends Exclude<JSX.IntrinsicTag, VoidElement>>(
     tag: Tag,
-    props:
-      | (Tag extends JSX.Component<infer O> ? O
-        : Tag extends JSX.IntrinsicTag ? JSX.IntrinsicElements[Tag]
-        : never)
-      | null
-      | undefined,
+    props: JSX.IntrinsicElements[Tag] | null | undefined,
+    ...children: JSX.Children[]
+  ): JSX.Element;
+
+  <Tag extends VoidElement>(
+    tag: Tag,
+    props: JSX.IntrinsicElements[Tag] | null | undefined,
   ): JSX.Element;
 
   <
-    Tag extends
-      | JSX.Component<{ children: any }>
-      | Exclude<JSX.IntrinsicTag, VoidElement>,
-    Props extends Tag extends JSX.Component<infer O> ? O
-      : Tag extends JSX.IntrinsicTag ? JSX.IntrinsicElements[Tag]
+    Cpt extends JSX.Component<any>,
+    Props extends Cpt extends JSX.Component<infer O> ? O
+      : Cpt extends JSX.IntrinsicTag ? JSX.IntrinsicElements[Cpt]
       : never,
   >(
-    tag: Tag,
-    props: Omit<Props, "children"> | null | undefined,
-    ...children: Props extends { children?: undefined | infer Children }
-      ? Children extends readonly unknown[] ? Children : [Children]
-      : never
+    tag: Cpt,
+    props:
+      | Omit<Props, "children"> & Partial<Pick<Props, "children">>
+      | null
+      | undefined,
+    ...children: JSX.Children[]
   ): JSX.Element;
 };
 

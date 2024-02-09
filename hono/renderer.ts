@@ -43,13 +43,14 @@ async (c, next) => {
     if (c.req.query("_layout") != null && !Layout) return c.notFound();
 
     content = jsx("div", { "data-route": c.req.path, children: content });
+    const params = reqParamProxy(c.req);
 
     return c.body(
       renderToStream(
         c.req.query("_layout") != null
-          ? jsx(Layout!, null, jsx("progress", { "data-route": "" }))
+          ? jsx(Layout!, params, jsx("progress", { "data-route": "" }))
           : c.req.query("_index") == null && ComposedLayout
-          ? jsx(ComposedLayout, null, content)
+          ? jsx(ComposedLayout, params, content)
           : content,
         {
           context: c.get(jsxContextSymbol),
@@ -83,9 +84,10 @@ export const layout = <
 ): MiddlewareHandler<E, P, I> =>
 async (c, next) => {
   const { routePath } = c.req;
+  const params = reqParamProxy(c.req);
+
   const ParentLayout = c.get(layoutSymbol);
   const ParentComposed = c.get(composedLayoutSymbol);
-  const params = reqParamProxy(c.req);
   const ComposedLayout = ParentComposed && Layout
     ? ({ children }: ChildrenProp) =>
       jsx(
@@ -99,7 +101,11 @@ async (c, next) => {
               routePath.replace(/\/\*?$/, "").split("/").length,
             ).join("/"),
           },
-          jsx(Layout, params, children),
+          jsx(
+            Layout as JSX.ParentComponent<Record<string, string>>,
+            params,
+            children,
+          ),
         ),
       )
     : ParentComposed ?? Layout;
