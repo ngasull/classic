@@ -31,7 +31,7 @@ declare global {
 
     type AsyncElement = Promise<SyncElement | Fragment>;
 
-    type Fragment = readonly Element[];
+    type Fragment = Element[];
 
     type Children =
       | Element
@@ -39,7 +39,7 @@ declare global {
       | null
       | undefined
       | JSable<DOMLiteral | null | undefined>
-      | readonly Children[];
+      | Children[];
 
     type SyncElement =
       | { kind: ElementKind.Comment; element: string }
@@ -74,7 +74,7 @@ declare global {
     }
 
     interface ComponentElement<
-      O extends Record<string, any> = Record<string, never>,
+      O extends Record<string, any> = Record<string, any>,
     > {
       Component: Component<O>;
       props: O;
