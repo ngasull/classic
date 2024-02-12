@@ -1,23 +1,35 @@
 import { VoidElement } from "./dom/void.ts";
 import { isEvaluable } from "./js/types.ts";
-import { ChildrenProp, ElementKind, ElementProps } from "./jsx/types.ts";
+import {
+  Component,
+  DOMLiteral,
+  ElementKind,
+  IntrinsicElement,
+  JSXChildren,
+  JSXElement,
+  JSXFragment,
+} from "./jsx/types.ts";
 
 const jsx = ((
-  tag: JSX.IntrinsicTag | JSX.Component<any>,
-  props: (ElementProps & Partial<ChildrenProp>) | null | undefined,
-  ...children: JSX.Children[]
-): JSX.Element => {
+  tag: keyof JSX.IntrinsicElements | Component<Record<string, unknown>>,
+  props: Record<string, unknown> | null | undefined,
+  ...children: JSXChildren[]
+): JSXElement => {
   props ??= {};
-  children = flatten(children.length ? children : props.children ?? []);
+  children = flatten(
+    children.length
+      ? children
+      : props.children as JSXChildren | null | undefined ?? [],
+  );
   delete props.children;
   return typeof tag === "string"
     ? {
       kind: ElementKind.Intrinsic,
       element: {
         tag,
-        props: props as JSX.IntrinsicElement["props"],
-        children: children as JSX.Fragment,
-      } satisfies JSX.IntrinsicElement,
+        props: props as IntrinsicElement["props"],
+        children: children as JSXFragment,
+      } satisfies IntrinsicElement,
     }
     : {
       kind: ElementKind.Component,
@@ -27,48 +39,64 @@ const jsx = ((
       },
     };
 }) as {
-  <Tag extends Exclude<JSX.IntrinsicTag, VoidElement>>(
+  <Tag extends Exclude<keyof JSX.IntrinsicElements, VoidElement>>(
     tag: Tag,
     props: JSX.IntrinsicElements[Tag] | null | undefined,
-    ...children: JSX.Children[]
-  ): JSX.Element;
+    ...children: JSXChildren[]
+  ): JSXElement;
 
   <Tag extends VoidElement>(
     tag: Tag,
     props: JSX.IntrinsicElements[Tag] | null | undefined,
-  ): JSX.Element;
+  ): JSXElement;
 
   <
-    Cpt extends JSX.Component<any>,
-    Props extends Cpt extends JSX.Component<infer O> ? O
-      : Cpt extends JSX.IntrinsicTag ? JSX.IntrinsicElements[Cpt]
-      : never,
+    Cpt extends Component<Record<any, any>>,
+    Props extends ComponentProps<Cpt>,
   >(
-    tag: Cpt,
-    props:
-      | Omit<Props, "children"> & Partial<Pick<Props, "children">>
-      | null
-      | undefined,
-    ...children: JSX.Children[]
-  ): JSX.Element;
+    component: Cpt,
+    props: NullableProps<
+      Omit<Props, "children"> & Partial<Pick<Props, "children">>
+    >,
+    ...children: Props extends { readonly children: infer T }
+      ? T extends readonly unknown[] ? T : [T]
+      : Props extends { readonly children?: infer T }
+        ? T extends readonly unknown[] ? T | [] : [T] | []
+      : JSXChildren[]
+  ): JSXElement;
+
+  <Cpt extends Component<Record<any, any>>>(
+    component: Cpt,
+    props: NullableProps<ComponentProps<Cpt>>,
+  ): JSXElement;
 };
 
-const Fragment = ({ children }: { children: JSX.Children }): JSX.Fragment =>
+type ComponentProps<Cpt extends Component<Record<any, any>>> = Cpt extends
+  Component<infer O> ? O : never;
+
+type NullableProps<Props> =
+  | Props
+  | ({} extends
+    { readonly [K in keyof Props as Props[K] extends undefined ? never : K]: 1 }
+    ? null | undefined
+    : never);
+
+const Fragment = ({ children }: { children: JSXChildren }): JSXFragment =>
   flatten(children);
 
-const flatten = (children: JSX.Children): JSX.Fragment => {
+const flatten = (children: JSXChildren): JSXFragment => {
   if (!Array.isArray(children)) children = [children];
 
-  const fragment: JSX.Fragment = [];
+  const fragment: JSXFragment = [];
   for (const child of children) {
     if (Array.isArray(child)) {
       fragment.push(...flatten(child));
     } else if (child != null) {
       fragment.push(
-        isEvaluable<JSX.DOMLiteral>(child)
+        isEvaluable<DOMLiteral>(child)
           ? { kind: ElementKind.JS, element: child }
           : typeof child === "object"
-          ? (child as JSX.Element)
+          ? (child as JSXElement)
           : {
             kind: ElementKind.Text,
             element: { text: child as string | number },

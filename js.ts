@@ -17,6 +17,7 @@ import type {
   JSReturn,
   JSStatements,
   JSStatementsReturn,
+  JSWithBody,
   ModuleMeta,
   ParamKeys,
   Resource,
@@ -24,6 +25,8 @@ import type {
   Resources,
 } from "./js/types.ts";
 import { isEvaluable, isReactive, jsSymbol } from "./js/types.ts";
+
+type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
 export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
   const tpl = Array(stmts.length).fill(";");
@@ -34,7 +37,7 @@ export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
   ) as JSStatementsReturn<S>;
 };
 
-export const fn = <Cb extends (...args: any[]) => JSFnBody<any>>(
+export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
   cb: Cb,
 ) => {
   const argList = unsafe(
@@ -50,15 +53,12 @@ export const fn = <Cb extends (...args: any[]) => JSFnBody<any>>(
   );
 
   const jsfnExpr = Array.isArray(body)
-    ? jsFn`((${argList})=>{${statements(body)}})`
+    ? jsFn`((${argList})=>{${statements(body as JSStatements<unknown>)}})`
     : jsFn`((${argList})=>(${body}))`;
 
-  jsfnExpr[jsSymbol].body = body;
+  (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).body = body;
 
-  return jsfnExpr as Cb extends JSFn<infer Args, infer T>
-    ? JS<(...args: Args) => T> & {
-      [jsSymbol]: { body: JSFnBody<T> };
-    }
+  return jsfnExpr as Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
     : never;
 };
 
@@ -220,10 +220,11 @@ const jsFn = (<T>(
   if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
 
   const expr = mkPureJS(rawParts.join("")) as unknown as JSable<T>;
-  expr[jsSymbol].modules = Object.values(modules);
+  const exprMeta = expr[jsSymbol] as Writable<JSMeta<T>>;
+  exprMeta.modules = Object.values(modules);
 
   if (resources.size > 0) {
-    expr[jsSymbol].resources = [...resources.keys()] as [
+    exprMeta.resources = [...resources.keys()] as [
       Resource<JSONable>,
       ...Resource<JSONable>[],
     ];
@@ -241,7 +242,7 @@ const jsFn = (<T>(
 
     const jsArgs = unsafe(
       argArray.map((a) => mapCallArg(store, a)).join(","),
-    ) as unknown as { [jsSymbol]: JSMeta<unknown> };
+    ) as unknown as { [jsSymbol]: Writable<JSMeta<unknown>> };
     jsArgs[jsSymbol].resources = Object.values(resStore).map(([, r]) => r) as [
       Resource<JSONable>,
       ...Resource<JSONable>[],
@@ -293,7 +294,7 @@ const jsUtils = {
 
   module: <M>(local: string, pub: string) => {
     const expr = jsFn<M>`${unsafe(modulesArg)}[${pub}]`;
-    expr[jsSymbol].modules = [{ local, pub }];
+    (expr[jsSymbol] as Writable<JSMeta<M>>).modules = [{ local, pub }];
     return expr;
   },
 
@@ -328,7 +329,9 @@ const jsUtils = {
     get(_, p) {
       return jsFn`${unsafe(p as string)}`;
     },
-  }) as Omit<JS<Window>, keyof JSWindowOverrides> & JSWindowOverrides,
+  }) as
+    & Readonly<Omit<JS<Window & typeof globalThis>, keyof JSWindowOverrides>>
+    & JSWindowOverrides,
 };
 
 export const js = Object.assign(jsFn, jsUtils) as
@@ -336,7 +339,7 @@ export const js = Object.assign(jsFn, jsUtils) as
   & typeof jsUtils;
 
 type JSWindowOverrides = {
-  Promise: {
+  readonly Promise: {
     all<P>(
       promises: P,
     ): P extends readonly JSable<unknown>[] ? JS<
@@ -359,10 +362,10 @@ type JSWindowOverrides = {
   };
 };
 
-export const resource = <T extends Record<string, JSONable>>(
+export const resource = <T extends Readonly<Record<string, JSONable>>>(
   uri: string,
   fetch: () => T | Promise<T>,
-) => {
+): JS<T> => {
   let value = null;
 
   const r = {
@@ -375,22 +378,26 @@ export const resource = <T extends Record<string, JSONable>>(
   const expr = jsFn`${unsafe(resourcesArg)}[0]` as unknown as JS<
     T
   >;
-  // @ts-ignore: infinte instantiation cannot happen and doesn't seem fixable
-  expr[jsSymbol].resources = [r];
+  (expr[jsSymbol] as Writable<JSMeta<T>>).resources = [r];
 
   return expr;
 };
 
-export const resources = <T extends Record<string, JSONable>, U extends string>(
+export const resources = <
+  T extends Readonly<Record<string, JSONable>>,
+  U extends string,
+>(
   pattern: U,
-  fetch: (params: { [k in ParamKeys<U>]: string }) => T | Promise<T>,
-) => {
+  fetch: (params: { readonly [k in ParamKeys<U>]: string }) => T | Promise<T>,
+): ResourceGroup<T, U> => {
   const make = (
-    params: { [k in ParamKeys<U>]: string | number },
+    params: { readonly [k in ParamKeys<U>]: string | number },
   ): JS<T> => {
-    const stringParams = Object.fromEntries(
-      Object.entries(params).map(([k, v]) => [k, String(v)]),
-    ) as { [k in ParamKeys<U>]: string };
+    const stringParams = (
+      Object.fromEntries(
+        Object.entries(params).map(([k, v]) => [k, String(v)]),
+      )
+    ) as { readonly [k in ParamKeys<U>]: string };
 
     return resource(
       pattern.replaceAll(
@@ -403,20 +410,21 @@ export const resources = <T extends Record<string, JSONable>, U extends string>(
   const group: ResourceGroup<T, U> = Object.assign(make, {
     pattern,
     each: (
-      values: { [k in ParamKeys<U>]: string | number }[],
+      values: ReadonlyArray<{ readonly [k in ParamKeys<U>]: string | number }>,
     ): Resources<T, U> => ({
       group,
-      values: values.map((v) => make(v)[jsSymbol].resources[0]) as Resource<
-        T
-      >[],
+      values: (
+        values.map((v) => make(v)[jsSymbol].resources[0])
+      ) as unknown as ReadonlyArray<Resource<T>>,
     }),
   });
   return group;
 };
 
-export const sync = async <J extends JS<(...args: any[]) => any>>(
-  js: J,
-): Promise<{ fn: J; values: JSONable[] }> => {
+export const sync = async <J extends JSWithBody<any, any>>(js: J): Promise<{
+  readonly fn: J;
+  readonly values: readonly JSONable[];
+}> => {
   return {
     fn: js,
     values: js[jsSymbol].resources.length > 0

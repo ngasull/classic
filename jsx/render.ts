@@ -13,10 +13,17 @@ import {
 } from "../js/types.ts";
 import { WebBundle } from "../js/web.ts";
 import {
+  Context,
+  ContextAPI,
   contextSymbol,
+  ContextTypeSymbol,
+  DOMLiteral,
   DOMNode,
   DOMNodeKind,
   ElementKind,
+  InitContext,
+  JSXElement,
+  Ref,
   SyncRef,
 } from "./types.ts";
 
@@ -41,12 +48,12 @@ const commentEscapeRegExp = /--(#|>)/g;
 const escapeComment = (comment: string) =>
   comment.replaceAll(commentEscapeRegExp, "--#$1");
 
-export const escapeScriptContent = (node: JSX.DOMLiteral) =>
+export const escapeScriptContent = (node: DOMLiteral) =>
   String(node).replaceAll("</script", "</scr\\ipt");
 
 export const renderToString = async (
-  root: JSX.Element,
-  opts: { context?: JSX.InitContext<unknown>[]; bundle: WebBundle },
+  root: JSXElement,
+  opts: { context?: InitContext<unknown>[]; bundle: WebBundle },
 ) => DOMTreeToString(await toDOMTree(root, opts.context), opts);
 
 export const DOMTreeToString = (
@@ -67,9 +74,9 @@ export const DOMTreeToString = (
 };
 
 export const renderToStream = (
-  root: JSX.Element,
+  root: JSXElement,
   { context, bundle }: {
-    context?: JSX.InitContext<unknown>[];
+    context?: InitContext<unknown>[];
     bundle: WebBundle;
   },
 ) =>
@@ -96,13 +103,16 @@ export const createContext = <T>(name?: string) => {
   const context = ({
     init: (value: T) => [context[contextSymbol], value],
     [contextSymbol]: Symbol(name),
-  }) as JSX.Context<T>;
+  } satisfies Omit<
+    Context<T>,
+    ContextTypeSymbol
+  >) as unknown as Context<T>;
   return context;
 };
 
 const subContext = (
   parent?: ContextData,
-  added: JSX.InitContext<unknown>[] = [],
+  added: InitContext<unknown>[] = [],
 ): ContextData => {
   const contexts = new Map(parent);
   for (const [c, v] of added) {
@@ -112,27 +122,27 @@ const subContext = (
 };
 
 const contextAPIFromData = (data: ContextData) => {
-  const ctx: JSX.ContextAPI = {
-    get: <T>(context: JSX.Context<T>) => {
+  const ctx: ContextAPI = {
+    get: <T>(context: Context<T>) => {
       if (!data.has(context[contextSymbol])) {
         throw new Error(`Looking up unset context`);
       }
       return data.get(context[contextSymbol]) as T;
     },
-    getOrNull: <T>(context: JSX.Context<T>) =>
+    getOrNull: <T>(context: Context<T>) =>
       data.get(context[contextSymbol]) as T | null,
     has: (context) => data.has(context[contextSymbol]),
-    set: <T>(context: JSX.Context<T>, value: T) => (
+    set: <T>(context: Context<T>, value: T) => (
       data.set(context[contextSymbol], value), ctx
     ),
-    delete: <T>(context: JSX.Context<T>) => (
+    delete: <T>(context: Context<T>) => (
       data.delete(context[contextSymbol]), ctx
     ),
   };
   return ctx;
 };
 
-export const contextAPI = (context?: JSX.InitContext<unknown>[]) =>
+export const contextAPI = (context?: InitContext<unknown>[]) =>
   contextAPIFromData(subContext(undefined, context));
 
 const writeActivationScript = (
@@ -188,7 +198,7 @@ export const deepActivation = (
 };
 
 const domActivation = (
-  dom: DOMNode[],
+  dom: readonly DOMNode[],
   storeModule: (m: ModuleMeta) => void,
   store: (resource: Resource<JSONable>, value: JSONable) => number,
 ) => {
@@ -202,11 +212,13 @@ const domActivation = (
       }
 
       const { body } = ref.fn[jsSymbol];
+      const refFnBody = Array.isArray(body)
+        ? statements(body as JSStatements<unknown>)
+        : body as JSable<unknown>;
+
       activation.push([
         i,
-        (Array.isArray(body)
-          ? statements(body as JSStatements<unknown>)
-          : body)[jsSymbol].rawJS,
+        refFnBody[jsSymbol].rawJS,
         ...(ref.fn[jsSymbol].resources?.map((r, i) =>
           store(r, ref.values[i])
         ) ??
@@ -229,7 +241,7 @@ const domActivation = (
 };
 
 export const writeDOMTree = (
-  tree: DOMNode[],
+  tree: readonly DOMNode[],
   write: (chunk: string) => void,
   writeRootActivation: (partial?: boolean) => void,
   root = true,
@@ -316,12 +328,12 @@ export const writeDOMTree = (
 };
 
 export const toDOMTree = (
-  root: JSX.Element,
-  context: JSX.InitContext<unknown>[] = [],
+  root: JSXElement,
+  context: InitContext<unknown>[] = [],
 ): Promise<DOMNode[]> => nodeToDOMTree(root, subContext(undefined, context));
 
 const nodeToDOMTree = async (
-  root: JSX.Element,
+  root: JSXElement,
   ctxData: ContextData,
 ): Promise<DOMNode[]> => {
   const syncRoot = await root;
@@ -374,7 +386,7 @@ const nodeToDOMTree = async (
         ? [
           await sync(
             fn((elRef: JS<Element>) =>
-              (ref as unknown as JSX.Ref<Element>)(elRef) as JSable<void>
+              (ref as unknown as Ref<Element>)(elRef) as JSable<void>
             ),
           ),
         ]

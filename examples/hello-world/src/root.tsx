@@ -1,11 +1,12 @@
 import { Hono } from "hono/mod.ts";
 import { layout, route } from "jsx-machine/hono/renderer.ts";
+import type { Component, ParentComponent } from "jsx-machine/jsx/types.ts";
 
 import { dbContext } from "./db.ts";
 // Your bundle is built by scanning calls to this import
 import { web } from "./web-modules.gen.ts";
 
-const RootLayout: JSX.ParentComponent = ({ children }) => (
+const RootLayout: ParentComponent = ({ children }) => (
   <html>
     <head>
       <title>Hello world</title>
@@ -20,7 +21,7 @@ const RootLayout: JSX.ParentComponent = ({ children }) => (
   </html>
 );
 
-const Index: JSX.Component = (_, ctx) => {
+const Index: Component = (_, ctx) => {
   const db = ctx.get(dbContext);
   return (
     <>

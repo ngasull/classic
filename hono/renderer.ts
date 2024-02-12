@@ -8,16 +8,22 @@ import type {
 import { bundleSymbol } from "../hono.ts";
 import { jsx } from "../jsx-runtime.ts";
 import { contextAPI, createContext, renderToStream } from "../jsx/render.ts";
-import { ChildrenProp } from "../jsx/types.ts";
+import {
+  Component,
+  InitContext,
+  JSXChildren,
+  JSXElement,
+  ParentComponent,
+} from "../jsx/types.ts";
 
 declare module "../deps/hono.ts" {
   interface ContextRenderer {
-    (content: JSX.Element): Response | Promise<Response>;
+    (content: JSXElement): Response | Promise<Response>;
   }
   interface ContextVariableMap {
-    [composedLayoutSymbol]?: JSX.ParentComponent<Record<string, string>>;
-    [layoutSymbol]?: JSX.ParentComponent<Record<string, string>>;
-    [jsxContextSymbol]?: JSX.InitContext<unknown>[];
+    readonly [composedLayoutSymbol]?: ParentComponent<Record<string, unknown>>;
+    readonly [layoutSymbol]?: ParentComponent<Record<string, unknown>>;
+    readonly [jsxContextSymbol]?: InitContext<unknown>[];
   }
 }
 
@@ -35,7 +41,7 @@ export const jsxRenderer = <
 async (c, next) => {
   c.set(jsxContextSymbol, [honoContext.init(c)]);
 
-  c.setRenderer((content: JSX.Element) => {
+  c.setRenderer((content: JSXElement) => {
     const Layout = c.get(layoutSymbol);
     const ComposedLayout = c.get(composedLayoutSymbol);
 
@@ -69,8 +75,11 @@ async (c, next) => {
 };
 
 export const jsxContext =
-  (...context: JSX.InitContext<unknown>[]): MiddlewareHandler =>
-  async (c, next) => {
+  (...context: InitContext<unknown>[]): MiddlewareHandler =>
+  async (
+    c,
+    next,
+  ) => {
     const inits = c.get(jsxContextSymbol)!;
     inits.push(...context);
     await next();
@@ -82,7 +91,7 @@ export const layout = <
   P extends string,
   I extends Input,
 >(
-  Layout: JSX.ParentComponent<Record<ParamKeys<P>, string>>,
+  Layout: ParentComponent<Record<ParamKeys<P>, string>>,
 ): MiddlewareHandler<E, P, I> =>
 async (c, next) => {
   const { routePath } = c.req;
@@ -91,7 +100,7 @@ async (c, next) => {
   const ParentLayout = c.get(layoutSymbol);
   const ParentComposed = c.get(composedLayoutSymbol);
   const ComposedLayout = ParentComposed && Layout
-    ? ({ children }: ChildrenProp) =>
+    ? (({ children }: { children?: JSXChildren }) =>
       jsx(
         ParentComposed,
         null,
@@ -104,16 +113,16 @@ async (c, next) => {
             ).join("/"),
           },
           jsx(
-            Layout as JSX.ParentComponent<Record<string, string>>,
+            Layout as ParentComponent<Record<string, string>>,
             params,
             children,
           ),
         ),
-      )
+      ))
     : ParentComposed ?? Layout;
 
-  c.set(composedLayoutSymbol, ComposedLayout);
-  c.set(layoutSymbol, Layout);
+  c.set(composedLayoutSymbol, ComposedLayout as ParentComponent);
+  c.set(layoutSymbol, Layout as ParentComponent);
 
   await next();
 
@@ -126,7 +135,7 @@ export const route = <
   P extends string,
   I extends Input,
 >(
-  Index: JSX.Component<Record<ParamKeys<P>, string>>,
+  Index: Component<Record<ParamKeys<P>, string>>,
 ): MiddlewareHandler<E, P, I> =>
 (c) =>
   Promise.resolve(

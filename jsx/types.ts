@@ -1,124 +1,132 @@
-import type { JS, JSable, JSFn, JSFnBody, JSONable } from "../js/types.ts";
-import { jsSymbol } from "../js/types.ts";
+import type { JSable, JSFn, JSONable, JSWithBody } from "../js/types.ts";
 import type { JSXInternal } from "./dom.d.ts";
-
-type ValueOrJS<T> = T | JSable<T>;
 
 declare global {
   namespace JSX {
-    type IntrinsicTag = keyof JSXInternal.IntrinsicElements;
-
     type IntrinsicElements = {
-      [K in keyof JSXInternal.IntrinsicElements]:
+      readonly [K in keyof JSXInternal.IntrinsicElements]:
         & {
-          [P in keyof JSXInternal.IntrinsicElements[K]]?: ValueOrJS<
+          readonly [P in keyof JSXInternal.IntrinsicElements[K]]?: ValueOrJS<
             JSXInternal.IntrinsicElements[K][P]
           >;
         }
         & {
-          children?: JSX.Children;
-          ref?: JSX.Ref<
+          readonly children?: JSXChildren;
+          readonly ref?: Ref<
             JSXInternal.IntrinsicElements[K] extends
               JSXInternal.HTMLAttributes<infer E> ? E
               : JSXInternal.IntrinsicElements[K] extends
                 JSXInternal.SVGAttributes<infer E> ? E
-              : Element
+              : JSXElement
           >;
         };
     };
-
-    type Element = SyncElement | AsyncElement | Fragment;
-
-    type AsyncElement = Promise<SyncElement | Fragment>;
-
-    type Fragment = Element[];
-
-    type Children =
-      | Element
-      | DOMLiteral
-      | null
-      | undefined
-      | JSable<DOMLiteral | null | undefined>
-      | Children[];
-
-    type SyncElement =
-      | { kind: ElementKind.Comment; element: string }
-      | { kind: ElementKind.Component; element: ComponentElement }
-      | { kind: ElementKind.Intrinsic; element: IntrinsicElement }
-      | { kind: ElementKind.JS; element: JSable<DOMLiteral> }
-      | { kind: ElementKind.Text; element: TextElement }
-      | { kind: ElementKind.HTMLNode; element: HTMLNodeElement };
-
-    interface IntrinsicElement {
-      tag: IntrinsicTag;
-      props: Record<
-        string,
-        | JSable<string | number | boolean | null>
-        | string
-        | number
-        | boolean
-        | null
-        | undefined
-      >;
-      children: Fragment;
-    }
-
-    interface TextElement {
-      text: DOMLiteral;
-      ref?: Ref<Text>;
-    }
-
-    interface HTMLNodeElement {
-      html: string;
-      ref?: Ref<Node>;
-    }
-
-    interface ComponentElement<
-      O extends Record<string, any> = Record<string, any>,
-    > {
-      Component: Component<O>;
-      props: O;
-    }
-
-    type Component<O extends Record<string, any> = Record<string, never>> = (
-      props: O,
-      ctx: ContextAPI,
-    ) => Element;
-
-    type ParentComponent<O extends ElementProps = ElementProps> = Component<
-      O & ChildrenProp
-    >;
-
-    type Context<T> = {
-      [contextSymbol]: symbol;
-      [contextTypeSymbol]: T;
-      init(value: T): InitContext<T>;
-    };
-
-    type InitContext<T> = [symbol, T];
-
-    type ContextAPI = {
-      get<T>(context: Context<T>): T;
-      getOrNull<T>(context: Context<T>): T | null;
-      has<T>(context: Context<T>): boolean;
-      set<T>(context: Context<T>, value: T): ContextAPI;
-      delete<T>(context: Context<T>): ContextAPI;
-    };
-
-    type DOMLiteral = string | number;
-
-    type Ref<N> = JSFn<[N], unknown>;
   }
 }
 
-declare const contextTypeSymbol: unique symbol;
+type ValueOrJS<T> = T | JSable<T>;
+
+export type JSXElement = SyncElement | AsyncElement | JSXFragment;
+
+type AsyncElement = Promise<SyncElement | JSXFragment>;
+
+type SyncElement =
+  | { readonly kind: ElementKind.Comment; readonly element: string }
+  | {
+    readonly kind: ElementKind.Component;
+    readonly element: ComponentElement;
+  }
+  | {
+    readonly kind: ElementKind.Intrinsic;
+    readonly element: IntrinsicElement;
+  }
+  | { readonly kind: ElementKind.JS; readonly element: JSable<DOMLiteral> }
+  | { readonly kind: ElementKind.Text; readonly element: TextElement }
+  | {
+    readonly kind: ElementKind.HTMLNode;
+    readonly element: HTMLNodeElement;
+  };
+
+export interface IntrinsicElement {
+  readonly tag: keyof JSX.IntrinsicElements;
+  readonly props: Readonly<
+    Record<
+      string,
+      | JSable<string | number | boolean | null>
+      | string
+      | number
+      | boolean
+      | null
+      | undefined
+    >
+  >;
+  readonly children: JSXFragment;
+}
+
+interface TextElement {
+  readonly text: DOMLiteral;
+  readonly ref?: Ref<Text>;
+}
+
+interface HTMLNodeElement {
+  readonly html: string;
+  readonly ref?: Ref<Node>;
+}
+
+interface ComponentElement<
+  O extends Readonly<Record<string, unknown>> = {},
+> {
+  readonly Component: Component<O>;
+  readonly props: O;
+}
+
+export type JSXFragment = JSXElement[];
+
+export type JSXChildren =
+  | JSXElement
+  | DOMLiteral
+  | null
+  | undefined
+  | JSable<DOMLiteral | null | undefined>
+  | JSXChildren[];
+
+export type DOMLiteral = string | number;
+
+export type Ref<N> = JSFn<[N], unknown>;
 
 export type SyncRef<N> = {
-  fn: JS<(ref: N) => void> & {
-    [jsSymbol]: { body: JSFnBody<unknown> };
-  };
-  values: JSONable[];
+  readonly fn: JSWithBody<[N], void>;
+  readonly values: readonly JSONable[];
 };
+
+export type Component<O extends Record<string, unknown> = {}> = (
+  props: O,
+  ctx: ContextAPI,
+) => JSXElement;
+
+export type ParentComponent<O extends Record<string, unknown> = {}> = Component<
+  Omit<O, "children"> & { readonly children?: JSXChildren }
+>;
+
+export type InitContext<T> = readonly [symbol, T];
+
+export type ContextAPI = {
+  readonly get: <T>(context: Context<T>) => T;
+  readonly getOrNull: <T>(context: Context<T>) => T | null;
+  readonly has: <T>(context: Context<T>) => boolean;
+  readonly set: <T>(context: Context<T>, value: T) => ContextAPI;
+  readonly delete: <T>(context: Context<T>) => ContextAPI;
+};
+
+export type Context<T> = {
+  readonly [contextSymbol]: symbol;
+  readonly [contextTypeSymbol]: T;
+  init(value: T): InitContext<T>;
+};
+
+declare const contextTypeSymbol: unique symbol;
+
+export type ContextTypeSymbol = typeof contextTypeSymbol;
 
 export enum ElementKind {
   Comment,
@@ -138,36 +146,32 @@ export enum DOMNodeKind {
 
 export type DOMNode =
   | {
-    kind: DOMNodeKind.Tag;
-    node: {
-      tag: string;
-      attributes: Record<string, string | number | boolean>;
-      children: DOMNode[];
+    readonly kind: DOMNodeKind.Tag;
+    readonly node: {
+      readonly tag: string;
+      readonly attributes: Readonly<Record<string, string | number | boolean>>;
+      readonly children: readonly DOMNode[];
     };
-    refs?: SyncRef<Element>[];
+    readonly refs?: readonly SyncRef<Element>[];
   }
   | {
-    kind: DOMNodeKind.Text;
-    node: {
-      text: string;
+    readonly kind: DOMNodeKind.Text;
+    readonly node: {
+      readonly text: string;
     };
-    refs?: SyncRef<Text>[];
+    readonly refs?: readonly SyncRef<Text>[];
   }
   | {
-    kind: DOMNodeKind.HTMLNode;
-    node: {
-      html: string;
+    readonly kind: DOMNodeKind.HTMLNode;
+    readonly node: {
+      readonly html: string;
     };
-    refs?: SyncRef<Node>[];
+    readonly refs?: readonly SyncRef<Node>[];
   }
   | {
-    kind: DOMNodeKind.Comment;
-    node: string;
-    refs?: SyncRef<Comment>[];
+    readonly kind: DOMNodeKind.Comment;
+    readonly node: string;
+    readonly refs?: readonly SyncRef<Comment>[];
   };
 
 export const contextSymbol = Symbol("context");
-
-export type ElementProps = Omit<Record<string, unknown>, "children">;
-
-export type ChildrenProp = Record<"children", JSX.Children>;
