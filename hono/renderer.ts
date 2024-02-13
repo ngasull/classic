@@ -1,4 +1,5 @@
 import type {
+  Context,
   ContextVariableMap,
   Env,
   Input,
@@ -9,21 +10,22 @@ import { bundleSymbol } from "../hono.ts";
 import { jsx } from "../jsx-runtime.ts";
 import { contextAPI, createContext, renderToStream } from "../jsx/render.ts";
 import {
-  Component,
-  InitContext,
   JSXChildren,
-  JSXElement,
-  ParentComponent,
+  JSXComponent,
+  JSXInitContext,
+  JSXParentComponent,
 } from "../jsx/types.ts";
 
 declare module "../deps/hono.ts" {
   interface ContextRenderer {
-    (content: JSXElement): Response | Promise<Response>;
+    (content: JSX.Element): Response | Promise<Response>;
   }
   interface ContextVariableMap {
-    readonly [composedLayoutSymbol]?: ParentComponent<Record<string, unknown>>;
-    readonly [layoutSymbol]?: ParentComponent<Record<string, unknown>>;
-    readonly [jsxContextSymbol]?: InitContext<unknown>[];
+    readonly [composedLayoutSymbol]?: JSXParentComponent<
+      Record<string, unknown>
+    >;
+    readonly [layoutSymbol]?: JSXParentComponent<Record<string, unknown>>;
+    readonly [jsxContextSymbol]?: JSXInitContext<unknown>[];
   }
 }
 
@@ -41,7 +43,7 @@ export const jsxRenderer = <
 async (c, next) => {
   c.set(jsxContextSymbol, [honoContext.init(c)]);
 
-  c.setRenderer((content: JSXElement) => {
+  c.setRenderer((content: JSX.Element) => {
     const Layout = c.get(layoutSymbol);
     const ComposedLayout = c.get(composedLayoutSymbol);
 
@@ -75,7 +77,7 @@ async (c, next) => {
 };
 
 export const jsxContext =
-  (...context: InitContext<unknown>[]): MiddlewareHandler =>
+  (...context: JSXInitContext<unknown>[]): MiddlewareHandler =>
   async (
     c,
     next,
@@ -91,7 +93,7 @@ export const layout = <
   P extends string,
   I extends Input,
 >(
-  Layout: ParentComponent<Record<ParamKeys<P>, string>>,
+  Layout: JSXParentComponent<Record<ParamKeys<P>, string>>,
 ): MiddlewareHandler<E, P, I> =>
 async (c, next) => {
   const { routePath } = c.req;
@@ -113,7 +115,7 @@ async (c, next) => {
             ).join("/"),
           },
           jsx(
-            Layout as ParentComponent<Record<string, string>>,
+            Layout as JSXParentComponent<Record<string, string>>,
             params,
             children,
           ),
@@ -121,8 +123,8 @@ async (c, next) => {
       ))
     : ParentComposed ?? Layout;
 
-  c.set(composedLayoutSymbol, ComposedLayout as ParentComponent);
-  c.set(layoutSymbol, Layout as ParentComponent);
+  c.set(composedLayoutSymbol, ComposedLayout as JSXParentComponent);
+  c.set(layoutSymbol, Layout as JSXParentComponent);
 
   await next();
 
@@ -131,13 +133,31 @@ async (c, next) => {
 };
 
 export const route = <
-  E extends Env & { Variables: ContextVariableMap },
-  P extends string,
-  I extends Input,
->(
-  Index: Component<Record<ParamKeys<P>, string>>,
-): MiddlewareHandler<E, P, I> =>
-(c) =>
+  K extends string,
+>(Index: JSXComponent<Record<K, string>>) =>
+(
+  c: Context<Env & { Variables: ContextVariableMap }, FakePath<Union2Tuple<K>>>,
+) =>
   Promise.resolve(
-    c.render(Index(c.req.param() as any, contextAPI(c.get(jsxContextSymbol)))),
+    c.render(
+      Index(c.req.param() as any, contextAPI(c.get(jsxContextSymbol))),
+    ),
   );
+
+type FakePath<P> = P extends
+  [infer H extends string, ...infer T extends string[]] ? `/:${H}${FakePath<T>}`
+  : ``;
+
+// https://www.hacklewayne.com/typescript-convert-union-to-tuple-array-yes-but-how
+type Contra<T> = T extends any ? (arg: T) => void
+  : never;
+
+type InferContra<T> = [T] extends [(arg: infer I) => void] ? I
+  : never;
+
+type PickOne<T> = InferContra<InferContra<Contra<Contra<T>>>>;
+
+type Union2Tuple<T> = PickOne<T> extends infer U
+  ? Exclude<T, U> extends never ? [T]
+  : [...Union2Tuple<Exclude<T, U>>, U]
+  : never;

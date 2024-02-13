@@ -1,20 +1,19 @@
 import { VoidElement } from "./dom/void.ts";
 import { isEvaluable } from "./js/types.ts";
 import {
-  Component,
   DOMLiteral,
   ElementKind,
   IntrinsicElement,
   JSXChildren,
-  JSXElement,
+  JSXComponent,
   JSXFragment,
 } from "./jsx/types.ts";
 
 const jsx = ((
-  tag: keyof JSX.IntrinsicElements | Component<Record<string, unknown>>,
+  tag: keyof JSX.IntrinsicElements | JSXComponent<Record<string, unknown>>,
   props: Record<string, unknown> | null | undefined,
   ...children: JSXChildren[]
-): JSXElement => {
+): JSX.Element => {
   props ??= {};
   children = flatten(
     children.length
@@ -43,15 +42,15 @@ const jsx = ((
     tag: Tag,
     props: JSX.IntrinsicElements[Tag] | null | undefined,
     ...children: JSXChildren[]
-  ): JSXElement;
+  ): JSX.Element;
 
   <Tag extends VoidElement>(
     tag: Tag,
     props: JSX.IntrinsicElements[Tag] | null | undefined,
-  ): JSXElement;
+  ): JSX.Element;
 
   <
-    Cpt extends Component<Record<any, any>>,
+    Cpt extends JSXComponent<Record<any, any>>,
     Props extends ComponentProps<Cpt>,
   >(
     component: Cpt,
@@ -63,16 +62,16 @@ const jsx = ((
       : Props extends { readonly children?: infer T }
         ? T extends readonly unknown[] ? T | [] : [T] | []
       : JSXChildren[]
-  ): JSXElement;
+  ): JSX.Element;
 
-  <Cpt extends Component<Record<any, any>>>(
+  <Cpt extends JSXComponent<Record<any, any>>>(
     component: Cpt,
     props: NullableProps<ComponentProps<Cpt>>,
-  ): JSXElement;
+  ): JSX.Element;
 };
 
-type ComponentProps<Cpt extends Component<Record<any, any>>> = Cpt extends
-  Component<infer O> ? O : never;
+type ComponentProps<Cpt extends JSXComponent<Record<any, any>>> = Cpt extends
+  JSXComponent<infer O> ? O : never;
 
 type NullableProps<Props> =
   | Props
@@ -96,7 +95,7 @@ const flatten = (children: JSXChildren): JSXFragment => {
         isEvaluable<DOMLiteral>(child)
           ? { kind: ElementKind.JS, element: child }
           : typeof child === "object"
-          ? (child as JSXElement)
+          ? (child as JSX.Element)
           : {
             kind: ElementKind.Text,
             element: { text: child as string | number },
