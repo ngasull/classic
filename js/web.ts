@@ -14,7 +14,6 @@ export type WebBundle = {
   publicRoot: string;
   outputFiles: OutputFile[];
   modules: Record<string, { entryPoint: URL; output: OutputFile }>;
-  dev: boolean;
   lib: {
     dom: string;
   };
@@ -32,15 +31,17 @@ export const bundleContext = createContext("bundle");
 export const bundleWebImports = async (
   {
     denoJsonPath,
-    dev = true,
+    minify = false,
     name = "web",
     publicRoot = "/m",
+    sourcemap = !minify,
     src = "src",
   }: {
     denoJsonPath?: string;
-    dev?: boolean;
+    minify?: boolean;
     name?: string;
     publicRoot?: string;
+    sourcemap?: boolean;
     src?: string;
   } = {},
 ): Promise<WebBundle> => {
@@ -110,8 +111,8 @@ export const bundleWebImports = async (
     entryNames: "[name]-[hash]",
     bundle: true,
     splitting: true,
-    minify: !dev,
-    sourcemap: dev,
+    minify,
+    sourcemap,
     metafile: true,
     write: false,
     outdir: absoluteOutDir,
@@ -208,7 +209,6 @@ ${modulesMap}export const ${name} = {
     publicRoot,
     outputFiles,
     modules,
-    dev,
     lib: { dom: modules[import.meta.resolve("../dom.ts")].output.publicPath },
   };
 
