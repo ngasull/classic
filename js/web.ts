@@ -31,23 +31,22 @@ export const bundleContext = createContext("bundle");
 
 export const bundleWebImports = async (
   {
-    name = "web",
-    src = "src",
-    configPath,
-    publicRoot = "/m",
+    denoJsonPath,
     dev = true,
+    name = "web",
+    publicRoot = "/m",
+    src = "src",
   }: {
-    name?: string;
-    src?: string;
-    publicRoot?: string;
-    configPath?: string;
+    denoJsonPath?: string;
     dev?: boolean;
+    name?: string;
+    publicRoot?: string;
+    src?: string;
   } = {},
 ): Promise<WebBundle> => {
-  configPath = resolve(
-    configPath ?? (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
+  const configPath = resolve(
+    denoJsonPath ?? (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
   );
-
   const configURL = toFileUrl(configPath);
 
   const { imports, scopes } = JSONCParse(
