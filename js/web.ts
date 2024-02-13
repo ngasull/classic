@@ -33,37 +33,30 @@ export const bundleWebImports = async (
   {
     name = "web",
     src = "src",
+    configPath,
     publicRoot = "/m",
-    importMapURL,
     dev = true,
   }: {
     name?: string;
     src?: string;
     publicRoot?: string;
-    importMapURL?: string;
+    configPath?: string;
     dev?: boolean;
   } = {},
 ): Promise<WebBundle> => {
-  importMapURL ??= toFileUrl(
-    resolve(
-      await exists("import_map.json")
-        ? "import_map.json"
-        : await exists("deno.json")
-        ? "deno.json"
-        : await exists("deno.jsonc")
-        ? "deno.jsonc"
-        : "import_map.json",
-    ),
-  ).toString();
+  configPath = resolve(
+    configPath ?? (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
+  );
 
-  const importMapAsURL = new URL(importMapURL);
-  const importMap = await fetch(importMapURL)
-    .then(async (res) =>
-      resolveImportMap(
-        JSONCParse(await res.text()) as ImportMap,
-        importMapAsURL,
-      )
-    );
+  const configURL = toFileUrl(configPath);
+
+  const { imports, scopes } = JSONCParse(
+    await Deno.readTextFile(configPath),
+  ) as ImportMap;
+  const importMap = resolveImportMap(
+    { imports, scopes },
+    configURL,
+  );
 
   const absoluteOutDir = resolve("dist");
   const absoluteOutDirRegExp = new RegExp(
@@ -125,7 +118,7 @@ export const bundleWebImports = async (
     outdir: absoluteOutDir,
     format: "esm",
     charset: "utf8",
-    plugins: esbuild.denoPlugins({ importMapURL }),
+    plugins: esbuild.denoPlugins({ configPath }),
   });
 
   const outputFiles: OutputFile[] = bundle.outputFiles
@@ -141,7 +134,7 @@ export const bundleWebImports = async (
       .flatMap((meta, i) =>
         meta.entryPoint
           ? [{
-            entryPoint: new URL(meta.entryPoint, importMapAsURL),
+            entryPoint: new URL(meta.entryPoint, configURL),
             output: outputFiles[i],
           }]
           : []
@@ -153,7 +146,7 @@ export const bundleWebImports = async (
     ? `const modules = {${
       webDotModules
         .map((spec) => {
-          const url = resolveModuleSpecifier(spec, importMap, importMapAsURL);
+          const url = resolveModuleSpecifier(spec, importMap, configURL);
           const module = modules[url];
           return `\n  ${JSON.stringify(spec)}: { local: ${
             JSON.stringify(url)
