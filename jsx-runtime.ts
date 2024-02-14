@@ -27,7 +27,7 @@ const jsx = ((
       element: {
         tag,
         props: props as IntrinsicElement["props"],
-        children: children as JSXFragment,
+        children: children as JSX.Element[],
       } satisfies IntrinsicElement,
     }
     : {
@@ -83,10 +83,10 @@ type NullableProps<Props> =
 const Fragment = ({ children }: { children: JSXChildren }): JSXFragment =>
   flatten(children);
 
-const flatten = (children: JSXChildren): JSXFragment => {
+const flatten = (children: JSXChildren): JSX.Element[] => {
   if (!Array.isArray(children)) children = [children];
 
-  const fragment: JSXFragment = [];
+  const fragment: JSX.Element[] = [];
   for (const child of children) {
     if (Array.isArray(child)) {
       fragment.push(...flatten(child));

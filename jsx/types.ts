@@ -22,15 +22,14 @@ declare global {
         };
     };
 
-    type Element = SyncElement | AsyncElement | JSXFragment;
+    type Element = SyncElement | Promise<SyncElement>;
   }
 }
 
 type JSOr<T> = T | JSable<T>;
 
-type AsyncElement = Promise<SyncElement | JSXFragment>;
-
 type SyncElement =
+  | JSXFragment
   | { readonly kind: ElementKind.Comment; readonly element: string }
   | {
     readonly kind: ElementKind.Component;
@@ -69,7 +68,7 @@ export interface IntrinsicElement {
       | undefined
     >
   >;
-  readonly children: JSXFragment;
+  readonly children: readonly JSX.Element[];
 }
 
 interface TextElement {
@@ -89,7 +88,7 @@ interface ComponentElement<
   readonly props: O;
 }
 
-export type JSXFragment = JSX.Element[];
+export type JSXFragment = readonly JSX.Element[];
 
 export type JSXChildren =
   | JSX.Element
