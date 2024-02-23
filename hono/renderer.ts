@@ -6,9 +6,9 @@ import type {
   MiddlewareHandler,
   ParamKeys,
 } from "../deps/hono.ts";
-import { bundleSymbol } from "../hono.ts";
+import { bundleContext, BundleResult } from "../js/web.ts";
 import { jsx } from "../jsx-runtime.ts";
-import { contextAPI, createContext, renderToStream } from "../jsx/render.ts";
+import { createContext, renderToStream } from "../jsx/render.ts";
 import {
   JSXChildren,
   JSXComponent,
@@ -21,6 +21,7 @@ declare module "../deps/hono.ts" {
     (content: JSX.Element): Response | Promise<Response>;
   }
   interface ContextVariableMap {
+    readonly [bundleSymbol]: BundleResult;
     readonly [composedLayoutSymbol]?: JSXParentComponent<
       Record<string, unknown>
     >;
@@ -31,6 +32,7 @@ declare module "../deps/hono.ts" {
 
 export const honoContext = createContext("hono");
 
+const bundleSymbol = Symbol("bundle");
 const composedLayoutSymbol = Symbol("composedLayout");
 const layoutSymbol = Symbol("layout");
 const jsxContextSymbol = Symbol("jsxContext");
@@ -39,9 +41,10 @@ export const jsxRenderer = <
   E extends Env & { Variables: ContextVariableMap },
   P extends string,
   I extends Input,
->(): MiddlewareHandler<E, P, I> =>
+>(webBundle: BundleResult): MiddlewareHandler<E, P, I> =>
 async (c, next) => {
-  c.set(jsxContextSymbol, [honoContext.init(c)]);
+  c.set(bundleSymbol, webBundle);
+  c.set(jsxContextSymbol, [honoContext(c), bundleContext(webBundle)]);
 
   c.setRenderer((content: JSX.Element) => {
     const Layout = c.get(layoutSymbol);
@@ -62,10 +65,7 @@ async (c, next) => {
           : c.req.query("_index") == null && ComposedLayout
           ? jsx(ComposedLayout, null, content)
           : content,
-        {
-          context: c.get(jsxContextSymbol),
-          bundle: c.get(bundleSymbol),
-        },
+        { context: c.get(jsxContextSymbol) },
       ),
       { headers: { "Content-Type": "text/html; charset=UTF-8" } },
     );
@@ -137,12 +137,7 @@ export const route = <
 >(Index: JSXComponent<Record<K, string>>) =>
 (
   c: Context<Env & { Variables: ContextVariableMap }, FakePath<Union2Tuple<K>>>,
-) =>
-  Promise.resolve(
-    c.render(
-      Index(c.req.param() as any, contextAPI(c.get(jsxContextSymbol))),
-    ),
-  );
+) => Promise.resolve(c.render(jsx(Index, c.req.param() as any)));
 
 type FakePath<P> = P extends
   [infer H extends string, ...infer T extends string[]] ? `/:${H}${FakePath<T>}`

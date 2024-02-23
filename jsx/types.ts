@@ -68,7 +68,7 @@ export interface IntrinsicElement {
       | undefined
     >
   >;
-  readonly children: readonly JSX.Element[];
+  readonly children: JSX.Element[];
 }
 
 interface TextElement {
@@ -88,7 +88,7 @@ interface ComponentElement<
   readonly props: O;
 }
 
-export type JSXFragment = readonly JSX.Element[];
+export type JSXFragment = JSX.Element[];
 
 export type JSXChildren =
   | JSX.Element
@@ -128,16 +128,11 @@ export type JSXContextAPI = {
 };
 
 export type JSXContext<T> = {
+  (value: T): JSXInitContext<T>;
   readonly [contextSymbol]: symbol;
-  readonly [contextTypeSymbol]: T;
-  init(value: T): JSXInitContext<T>;
 };
 
 export const contextSymbol = Symbol("context");
-
-declare const contextTypeSymbol: unique symbol;
-
-export type JSXContextTypeSymbol = typeof contextTypeSymbol;
 
 export type DOMNode =
   | {

@@ -8,8 +8,10 @@ import {
 import { parse as JSONCParse } from "../deps/std/jsonc.ts";
 import { join, resolve, toFileUrl } from "../deps/std/path.ts";
 import { createContext } from "../jsx/render.ts";
+import { JS } from "./types.ts";
+import { js } from "../js.ts";
 
-export type WebBundle = {
+export type BundleResult = {
   name: string;
   publicRoot: string;
   outputFiles: OutputFile[];
@@ -26,7 +28,65 @@ type OutputFile = {
   hash: string;
 };
 
-export const bundleContext = createContext("bundle");
+export const bundleContext = createContext<BundleResult>("bundle");
+
+export type BundleDefinition<Preparing extends boolean = boolean> = {
+  readonly name: string;
+  preparing: Preparing;
+  readonly ready: () => Promise<BundleResult>;
+  readonly register: <T>(
+    url: URL,
+  ) => Preparing extends true ? Promise<JS<T>> : never;
+  readonly result: Promise<BundleResult>;
+
+  readonly [bundleSymbol]: {
+    readonly entryPoints: Set<string>;
+  };
+};
+
+const bundleSymbol = Symbol("bundle");
+
+export const defineBundle = (
+  { name = "web" }: { name?: string } = {},
+): BundleDefinition => {
+  const { resolve, promise: result } = Promise.withResolvers<BundleResult>();
+  const entryPoints = new Set<string>();
+  let preparing = true;
+
+  return {
+    name,
+    get preparing() {
+      return preparing;
+    },
+
+    ready() {
+      preparing = false;
+      resolve(bundleWebImports({ name }));
+      return result;
+    },
+
+    async register<T>(url: URL) {
+      if (!preparing) {
+        throw Error(
+          `${name} bundle has finished preparing, no more register call is allowed`,
+        );
+      }
+
+      const path = url.toString();
+      entryPoints.add(path);
+
+      const bundle = await result;
+
+      return js.module<T>(path, bundle.modules[path].output.publicPath);
+    },
+
+    result,
+
+    [bundleSymbol]: {
+      entryPoints,
+    },
+  };
+};
 
 export const bundleWebImports = async (
   {
@@ -44,7 +104,7 @@ export const bundleWebImports = async (
     sourcemap?: boolean;
     src?: string;
   } = {},
-): Promise<WebBundle> => {
+): Promise<BundleResult> => {
   const configPath = resolve(
     denoJsonPath ?? (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
   );

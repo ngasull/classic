@@ -11,7 +11,7 @@ import {
   ModuleMeta,
   Resource,
 } from "../js/types.ts";
-import { WebBundle } from "../js/web.ts";
+import { bundleContext } from "../js/web.ts";
 import {
   contextSymbol,
   DOMLiteral,
@@ -19,8 +19,6 @@ import {
   DOMNodeKind,
   ElementKind,
   JSXContext,
-  JSXContextAPI,
-  JSXContextTypeSymbol,
   JSXInitContext,
   JSXRef,
   JSXSyncRef,
@@ -52,32 +50,30 @@ export const escapeScriptContent = (node: DOMLiteral) =>
 
 export const renderToString = async (
   root: JSX.Element,
-  opts: { context?: JSXInitContext<unknown>[]; bundle: WebBundle },
-) => DOMTreeToString(await toDOMTree(root, opts.context), opts);
-
-export const DOMTreeToString = (
-  tree: DOMNode[],
-  { bundle }: { bundle: WebBundle },
+  { context }: { context?: JSXInitContext<unknown>[] } = {},
 ) => {
   const acc: string[] = [];
+  const ctxData = subContext(undefined, context);
+  const bundle = new ContextAPIImpl(ctxData).getOrNull(bundleContext);
+  const tree = await nodeToDOMTree(root, ctxData);
+
   writeDOMTree(
     tree,
     (chunk) => acc.push(chunk),
-    (partial) =>
-      writeActivationScript((chunk) => acc.push(chunk), tree, {
-        domPath: bundle.lib.dom,
-        partial,
-      }),
+    bundle
+      ? ((partial) =>
+        writeActivationScript((chunk) => acc.push(chunk), tree, {
+          domPath: bundle.lib.dom,
+          partial,
+        }))
+      : null,
   );
   return acc.join("");
 };
 
 export const renderToStream = (
   root: JSX.Element,
-  { context, bundle }: {
-    context?: JSXInitContext<unknown>[];
-    bundle: WebBundle;
-  },
+  { context }: { context?: JSXInitContext<unknown>[] },
 ) =>
   new ReadableStream<Uint8Array>({
     start(controller) {
@@ -85,12 +81,21 @@ export const renderToStream = (
       const write = (chunk: string) =>
         controller.enqueue(encoder.encode(chunk));
 
-      toDOMTree(root, context).then((tree) => {
-        writeDOMTree(tree, write, (partial) =>
-          writeActivationScript(write, tree, {
-            domPath: bundle.lib.dom,
-            partial,
-          }));
+      const ctxData = subContext(undefined, context);
+      const bundle = new ContextAPIImpl(ctxData).getOrNull(bundleContext);
+
+      nodeToDOMTree(root, ctxData).then((tree) => {
+        writeDOMTree(
+          tree,
+          write,
+          bundle
+            ? ((partial) =>
+              writeActivationScript(write, tree, {
+                domPath: bundle.lib.dom,
+                partial,
+              }))
+            : null,
+        );
         controller.close();
       });
     },
@@ -98,14 +103,9 @@ export const renderToStream = (
 
 type ContextData = Map<symbol, unknown>;
 
-export const createContext = <T>(name?: string) => {
-  const context = ({
-    init: (value: T) => [context[contextSymbol], value],
-    [contextSymbol]: Symbol(name),
-  } satisfies Omit<
-    JSXContext<T>,
-    JSXContextTypeSymbol
-  >) as unknown as JSXContext<T>;
+export const createContext = <T>(name?: string): JSXContext<T> => {
+  const context = (value: T) => [context[contextSymbol], value] as const;
+  context[contextSymbol] = Symbol(name);
   return context;
 };
 
@@ -113,36 +113,41 @@ const subContext = (
   parent?: ContextData,
   added: JSXInitContext<unknown>[] = [],
 ): ContextData => {
-  const contexts = new Map(parent);
-  for (const [c, v] of added) {
-    contexts.set(c as unknown as symbol, v);
+  const sub = new Map(parent);
+  for (const [k, v] of added) {
+    sub.set(k, v);
   }
-  return contexts;
+  return sub;
 };
 
-const contextAPIFromData = (data: ContextData) => {
-  const ctx: JSXContextAPI = {
-    get: <T>(context: JSXContext<T>) => {
-      if (!data.has(context[contextSymbol])) {
-        throw new Error(`Looking up unset context`);
-      }
-      return data.get(context[contextSymbol]) as T;
-    },
-    getOrNull: <T>(context: JSXContext<T>) =>
-      data.get(context[contextSymbol]) as T | null,
-    has: (context) => data.has(context[contextSymbol]),
-    set: <T>(context: JSXContext<T>, value: T) => (
-      data.set(context[contextSymbol], value), ctx
-    ),
-    delete: <T>(context: JSXContext<T>) => (
-      data.delete(context[contextSymbol]), ctx
-    ),
-  };
-  return ctx;
-};
+class ContextAPIImpl {
+  constructor(private readonly data: ContextData) {}
 
-export const contextAPI = (context?: JSXInitContext<unknown>[]) =>
-  contextAPIFromData(subContext(undefined, context));
+  get<T>(context: JSXContext<T>) {
+    if (!this.data.has(context[contextSymbol])) {
+      throw new Error(`Looking up unset context`);
+    }
+    return this.data.get(context[contextSymbol]) as T;
+  }
+
+  getOrNull<T>(context: JSXContext<T>) {
+    return this.data.get(context[contextSymbol]) as T | null;
+  }
+
+  has<T>(context: JSXContext<T>) {
+    return this.data.has(context[contextSymbol]);
+  }
+
+  set<T>(context: JSXContext<T>, value: T) {
+    this.data.set(context[contextSymbol], value);
+    return this;
+  }
+
+  delete<T>(context: JSXContext<T>) {
+    this.data.delete(context[contextSymbol]);
+    return this;
+  }
+}
 
 const writeActivationScript = (
   write: (chunk: string) => void,
@@ -239,10 +244,10 @@ const domActivation = (
   return activation;
 };
 
-export const writeDOMTree = (
+const writeDOMTree = (
   tree: readonly DOMNode[],
   write: (chunk: string) => void,
-  writeRootActivation: (partial?: boolean) => void,
+  writeRootActivation: ((partial?: boolean) => void) | null,
   root = true,
 ) => {
   const partialRoot = root && (tree.length !== 1 ||
@@ -297,7 +302,7 @@ export const writeDOMTree = (
             writeDOMTree(node.children, write, writeRootActivation, false);
 
             if (!partialRoot && node.tag === "head") {
-              writeRootActivation();
+              writeRootActivation?.();
             }
           }
 
@@ -307,7 +312,7 @@ export const writeDOMTree = (
         }
 
         if (partialRoot && node.tag !== "script") {
-          writeRootActivation(true);
+          writeRootActivation?.(true);
           write("</body></html>");
         }
         break;
@@ -325,11 +330,6 @@ export const writeDOMTree = (
     }
   }
 };
-
-export const toDOMTree = (
-  root: JSX.Element,
-  context: JSXInitContext<unknown>[] = [],
-): Promise<DOMNode[]> => nodeToDOMTree(root, subContext(undefined, context));
 
 const nodeToDOMTree = async (
   root: JSX.Element,
@@ -360,7 +360,7 @@ const nodeToDOMTree = async (
       const { Component, props } = syncRoot.element;
       const subCtxData = subContext(ctxData);
       return nodeToDOMTree(
-        Component(props, contextAPIFromData(subCtxData)),
+        Component(props, new ContextAPIImpl(subCtxData)),
         subCtxData,
       );
     }
