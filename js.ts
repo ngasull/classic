@@ -23,7 +23,7 @@ import type {
   ResourceGroup,
   Resources,
 } from "./js/types.ts";
-import { isEvaluable, isReactive, jsSymbol } from "./js/types.ts";
+import { isReactive, jsSymbol } from "./js/types.ts";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -112,36 +112,6 @@ const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
     },
   };
 };
-
-const mapCallArg = (
-  store: (res: Resource<JSONable>) => number,
-  a: JSable<unknown> | JSONable,
-): string =>
-  a == null
-    ? String(a)
-    : isEvaluable(a)
-    ? a[jsSymbol].resources.length
-      ? `((${a[jsSymbol].resources.map((_, i) => argn(i)).join(",")})=>(${
-        a[jsSymbol].rawJS
-      }))(${a[jsSymbol].resources.map((r) => argn(store(r)))})`
-      : a[jsSymbol].rawJS
-    : typeof a === "function"
-    ? mapCallArg(store, fn(a))
-    : Array.isArray(a)
-    ? `[${a.map((a) => mapCallArg(store, a)).join(",")}]`
-    : typeof a === "object"
-    ? `{${
-      Object.entries(a as { [k: string | number]: typeof a })
-        .map(([k, v]) =>
-          `${
-            typeof k === "number" || safeRecordKeyRegExp.test(k)
-              ? k
-              : JSON.stringify(k)
-          }:${mapCallArg(store, v)}`
-        )
-        .join(",")
-    }}`
-    : JSON.stringify(a);
 
 export const unsafe = (js: string) => mkPureJS(js);
 
@@ -245,20 +215,9 @@ const jsFn = (<T>(
   const callExpr = (
     ...argArray: ReadonlyArray<JSable<unknown> | JSONable>
   ) => {
-    let lastIndex = 0;
-    const resStore: Record<string, [number, Resource<JSONable>]> = {};
-    const store = (res: Resource<JSONable>) => {
-      resStore[res.uri] ??= [lastIndex++, res];
-      return resStore[res.uri][0];
-    };
-
-    const jsArgs = unsafe(
-      argArray.map((a) => mapCallArg(store, a)).join(","),
-    ) as unknown as { [jsSymbol]: Writable<JSMeta<unknown>> };
-    jsArgs[jsSymbol].resources = Object.values(resStore).map(([, r]) => r) as [
-      Resource<JSONable>,
-      ...Resource<JSONable>[],
-    ];
+    const jsArgs = argArray.length > 0
+      ? argArray.reduce((acc, a) => jsFn`${acc},${a}`)
+      : jsFn``;
 
     return jsFn`${expr}(${jsArgs})`;
   };
