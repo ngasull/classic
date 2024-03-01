@@ -1,6 +1,6 @@
 import type { Activation } from "../dom.ts";
 import { voidElements } from "../dom/void.ts";
-import { effect, fn, js, statements, sync, unsafe } from "../js.ts";
+import { effect, fn, js, statements, sync, toRawJS, unsafe } from "../js.ts";
 import {
   isEvaluable,
   JS,
@@ -8,10 +8,9 @@ import {
   JSONable,
   JSStatements,
   jsSymbol,
-  ModuleMeta,
   Resource,
 } from "../js/types.ts";
-import { bundleContext } from "../js/web.ts";
+import { bundleContext, BundleResult } from "../js/web.ts";
 import {
   contextSymbol,
   DOMLiteral,
@@ -19,6 +18,7 @@ import {
   DOMNodeKind,
   ElementKind,
   JSXContext,
+  JSXContextAPI,
   JSXInitContext,
   JSXRef,
   JSXSyncRef,
@@ -54,7 +54,7 @@ export const renderToString = async (
 ) => {
   const acc: string[] = [];
   const ctxData = subContext(undefined, context);
-  const bundle = new ContextAPIImpl(ctxData).getOrNull(bundleContext);
+  const bundle = mkContext(ctxData).get(bundleContext);
   const tree = await nodeToDOMTree(root, ctxData);
 
   writeDOMTree(
@@ -63,7 +63,7 @@ export const renderToString = async (
     bundle
       ? ((partial) =>
         writeActivationScript((chunk) => acc.push(chunk), tree, {
-          domPath: bundle.lib.dom,
+          bundle,
           partial,
         }))
       : null,
@@ -82,7 +82,7 @@ export const renderToStream = (
         controller.enqueue(encoder.encode(chunk));
 
       const ctxData = subContext(undefined, context);
-      const bundle = new ContextAPIImpl(ctxData).getOrNull(bundleContext);
+      const bundle = mkContext(ctxData).get(bundleContext);
 
       nodeToDOMTree(root, ctxData).then((tree) => {
         writeDOMTree(
@@ -90,10 +90,7 @@ export const renderToStream = (
           write,
           bundle
             ? ((partial) =>
-              writeActivationScript(write, tree, {
-                domPath: bundle.lib.dom,
-                partial,
-              }))
+              writeActivationScript(write, tree, { bundle, partial }))
             : null,
         );
         controller.close();
@@ -120,40 +117,35 @@ const subContext = (
   return sub;
 };
 
-class ContextAPIImpl {
-  constructor(private readonly data: ContextData) {}
-
-  get<T>(context: JSXContext<T>) {
-    if (!this.data.has(context[contextSymbol])) {
+const mkContext = (data: ContextData): JSXContextAPI => {
+  const ctx = <T>(context: JSXContext<T>) => {
+    if (!data.has(context[contextSymbol])) {
       throw new Error(`Looking up unset context`);
     }
-    return this.data.get(context[contextSymbol]) as T;
-  }
+    return data.get(context[contextSymbol]) as T;
+  };
 
-  getOrNull<T>(context: JSXContext<T>) {
-    return this.data.get(context[contextSymbol]) as T | null;
-  }
+  ctx.get = <T>(context: JSXContext<T>) =>
+    data.get(context[contextSymbol]) as T;
 
-  has<T>(context: JSXContext<T>) {
-    return this.data.has(context[contextSymbol]);
-  }
+  ctx.set = <T>(context: JSXContext<T>, value: T) => {
+    data.set(context[contextSymbol], value);
+    return ctx;
+  };
 
-  set<T>(context: JSXContext<T>, value: T) {
-    this.data.set(context[contextSymbol], value);
-    return this;
-  }
+  ctx.delete = (context: JSXContext<never>) => {
+    data.delete(context[contextSymbol]);
+    return ctx;
+  };
 
-  delete<T>(context: JSXContext<T>) {
-    this.data.delete(context[contextSymbol]);
-    return this;
-  }
-}
+  return ctx;
+};
 
 const writeActivationScript = (
   write: (chunk: string) => void,
   children: DOMNode[],
-  { domPath, partial = false }: {
-    domPath: string;
+  { bundle, partial = false }: {
+    bundle: BundleResult;
     partial?: boolean;
   },
 ) => {
@@ -161,10 +153,10 @@ const writeActivationScript = (
   if (activation.length) {
     write("<script>(p=>");
     write(
-      js.import<typeof import("../dom.ts")>(domPath).then((dom) =>
+      js.import<typeof import("../dom.ts")>(bundle.lib.dom).then((dom) =>
         dom.a(
           activation,
-          modules,
+          modules.map((m) => bundle.modules[m].output.publicPath) as string[],
           store,
           js<NodeList | Node[]>`p`,
         )
@@ -180,13 +172,12 @@ const writeActivationScript = (
   }
 };
 
-export const deepActivation = (
+const deepActivation = (
   root: DOMNode[],
 ): [Activation, string[], [string, JSONable][]] => {
-  const modules: Record<string, 1> = {};
-  const storeModule = ({ pub }: ModuleMeta) => {
-    modules[pub] = 1;
-  };
+  let lastModuleIndex = -1;
+  const modules: Record<string, number> = {};
+  const storeModule = (m: string) => (modules[m] ??= ++lastModuleIndex);
 
   const activationStore: Record<string, [number, JSONable]> = {};
   let storeIndex = 0;
@@ -203,7 +194,7 @@ export const deepActivation = (
 
 const domActivation = (
   dom: readonly DOMNode[],
-  storeModule: (m: ModuleMeta) => void,
+  storeModule: (path: string) => number,
   store: (resource: Resource<JSONable>, value: JSONable) => number,
 ) => {
   const activation: Activation = [];
@@ -211,10 +202,6 @@ const domActivation = (
   for (let i = 0; i < dom.length; i++) {
     const { kind, node, refs = [] } = dom[i];
     for (const ref of refs) {
-      for (const m of ref.fn[jsSymbol].modules) {
-        storeModule(m);
-      }
-
       const { body } = ref.fn[jsSymbol];
       const refFnBody = Array.isArray(body)
         ? statements(body as JSStatements<unknown>)
@@ -222,7 +209,10 @@ const domActivation = (
 
       activation.push([
         i,
-        refFnBody[jsSymbol].rawJS,
+        toRawJS(
+          refFnBody,
+          (path) => storeModule(path),
+        ),
         ...(ref.fn[jsSymbol].resources?.map((r, i) =>
           store(r, ref.values[i])
         ) ??
@@ -359,10 +349,7 @@ const nodeToDOMTree = async (
     case ElementKind.Component: {
       const { Component, props } = syncRoot.element;
       const subCtxData = subContext(ctxData);
-      return nodeToDOMTree(
-        Component(props, new ContextAPIImpl(subCtxData)),
-        subCtxData,
-      );
+      return nodeToDOMTree(Component(props, mkContext(subCtxData)), subCtxData);
     }
 
     case ElementKind.Comment: {

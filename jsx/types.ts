@@ -120,11 +120,10 @@ export type JSXParentComponent<O extends Record<string, unknown> = {}> =
 export type JSXInitContext<T> = readonly [symbol, T];
 
 export type JSXContextAPI = {
-  readonly get: <T>(context: JSXContext<T>) => T;
-  readonly getOrNull: <T>(context: JSXContext<T>) => T | null;
-  readonly has: <T>(context: JSXContext<T>) => boolean;
+  <T>(context: JSXContext<T>): T;
+  readonly get: <T>(context: JSXContext<T>) => T | null;
   readonly set: <T>(context: JSXContext<T>, value: T) => JSXContextAPI;
-  readonly delete: <T>(context: JSXContext<T>) => JSXContextAPI;
+  readonly delete: (context: JSXContext<never>) => JSXContextAPI;
 };
 
 export type JSXContext<T> = {

@@ -56,7 +56,7 @@ const lifecycleFns = { e: effect };
 const activateNode = (
   nodes: NodeList | Node[],
   activation: Activation,
-  modules: Record<string, unknown>,
+  modules: unknown[],
   resources: string[],
   resourcesProxyHandler: ProxyHandler<
     { (rs: number[]): JSONable[]; [targetSymbol]: number[]; u: string[] }
@@ -117,14 +117,14 @@ export const a = (
   trackChildren(doc),
     setResources(resources),
     Promise
-      .all(modules.map((m) => import(m).then((r) => [m, r] as const)))
+      .all(modules.map((m) => import(m)))
       .then((ms) =>
         forEach(
           // Batch activations so that nodes are correctly read, allowing DOM manipulation
           activateNode(
             nodes,
             activation,
-            fromEntries(ms),
+            ms,
             resources.map(first),
           ),
           call,

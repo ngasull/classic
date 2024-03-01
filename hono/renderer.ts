@@ -1,5 +1,4 @@
 import type {
-  Context,
   ContextVariableMap,
   Env,
   Input,
@@ -132,12 +131,15 @@ async (c, next) => {
   c.set(composedLayoutSymbol, ParentComposed);
 };
 
-export const route = <
-  K extends string,
->(Index: JSXComponent<Record<K, string>>) =>
-(
-  c: Context<Env & { Variables: ContextVariableMap }, FakePath<Union2Tuple<K>>>,
-) => Promise.resolve(c.render(jsx(Index, c.req.param() as any)));
+export const route =
+  <K extends string, I extends Input>(
+    Index: JSXComponent<Record<K, string>>,
+  ): MiddlewareHandler<
+    Env & { Variables: ContextVariableMap },
+    FakePath<Union2Tuple<K>>,
+    I
+  > =>
+  (c) => Promise.resolve(c.render(jsx(Index, c.req.param() as any)));
 
 type FakePath<P> = P extends
   [infer H extends string, ...infer T extends string[]] ? `/:${H}${FakePath<T>}`

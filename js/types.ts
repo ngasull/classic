@@ -56,13 +56,11 @@ export type JSMeta<T> = {
   readonly [typeSymbol]: T;
   readonly [returnSymbol]: false;
   readonly rawJS: string;
-  readonly modules: readonly ModuleMeta[];
+  readonly modules: Record<string, number[]>; // { [path]: indices }
   readonly resources: readonly Resource<JSONable>[];
   readonly body?: JSFnBody<unknown>;
 };
 declare const typeSymbol: unique symbol;
-
-export type ModuleMeta = { readonly local: string; readonly pub: string };
 
 export type JSable<T> = { readonly [jsSymbol]: JSMeta<T> };
 
@@ -149,9 +147,6 @@ export const isJSable = <T>(v: unknown): v is JSable<T> =>
 
 export const isEvaluable = <T>(v: unknown): v is JSable<T> =>
   isJSable(v) && !(v[jsSymbol].body && Array.isArray(v[jsSymbol].body));
-
-export const isPure = <T>(v: unknown): v is JSable<T> =>
-  isEvaluable(v) && !v[jsSymbol].resources.length;
 
 export const isReactive = <T>(v: unknown): v is JSable<T> =>
   isEvaluable(v) && v[jsSymbol].resources.length > 0;

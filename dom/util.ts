@@ -89,7 +89,7 @@ export const {
 
 export const { parse } = JSON;
 
-export const { assign, entries, fromEntries, keys, values } = Object;
+export const { assign, entries, keys, values } = Object;
 
 // DOM
 

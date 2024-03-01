@@ -1,6 +1,6 @@
-import { WebBundle } from "../js/web.ts";
+import { BundleResult } from "../js/web.ts";
 
-export const makeWebModuleHandler = (webBundle: WebBundle) => {
+export const makeWebModuleHandler = (webBundle: BundleResult) => {
   const outputMap = Object.fromEntries(
     webBundle.outputFiles.map((f) => [f.publicPath, f]),
   );

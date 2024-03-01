@@ -18,7 +18,6 @@ import type {
   JSStatements,
   JSStatementsReturn,
   JSWithBody,
-  ModuleMeta,
   ParamKeys,
   Resource,
   ResourceGroup,
@@ -158,7 +157,7 @@ const jsFn = (<T>(
   tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
 ) => {
-  const modules: Record<string, ModuleMeta> = {};
+  const modules: Record<string, number[]> = {};
 
   let resIndex = 0;
   const resources = new Map<Resource<JSONable>, number>();
@@ -169,6 +168,9 @@ const jsFn = (<T>(
     return resources.get(res)!;
   };
 
+  // Tracks the cumulated length of generated JS
+  let exprIndex = 0;
+
   const handleExpression = (expr: ImplicitlyJSable): string => {
     if (expr === null) {
       return `null`;
@@ -178,8 +180,15 @@ const jsFn = (<T>(
       (typeof expr === "function" || typeof expr === "object") &&
       jsSymbol in expr && expr[jsSymbol]
     ) {
-      for (const m of expr[jsSymbol].modules) {
-        modules[m.pub] = m;
+      for (
+        const [path, relativeIndices] of Object.entries(expr[jsSymbol].modules)
+      ) {
+        const indices = relativeIndices.map((i) => i + exprIndex);
+        if (path in modules) {
+          modules[path].push(...indices);
+        } else {
+          modules[path] = indices;
+        }
       }
 
       const subres = expr[jsSymbol].resources.map(trackResource);
@@ -214,14 +223,17 @@ const jsFn = (<T>(
 
   const rawParts = [];
   for (let i = 0; i < exprs.length; i++) {
-    rawParts.push(tpl[i], handleExpression(exprs[i]));
+    exprIndex += tpl[i].length;
+    const handledExpr = handleExpression(exprs[i]);
+    exprIndex += handledExpr.length;
+    rawParts.push(tpl[i], handledExpr);
   }
 
   if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
 
   const expr = mkPureJS(rawParts.join("")) as unknown as JSable<T>;
   const exprMeta = expr[jsSymbol] as Writable<JSMeta<T>>;
-  exprMeta.modules = Object.values(modules);
+  exprMeta.modules = modules;
 
   if (resources.size > 0) {
     exprMeta.resources = [...resources.keys()] as [
@@ -258,9 +270,41 @@ const jsFn = (<T>(
   <T>(tpl: ReadonlyArray<string>, ...exprs: ImplicitlyJSable[]): JS<T>;
 };
 
+export const toRawJS = (
+  expr: JSable<any>,
+  cb?: (path: string, moduleIndex: number) => number,
+): string => {
+  const { modules, rawJS } = expr[jsSymbol];
+
+  const replacements = Object.entries(modules)
+    .flatMap(([path, indices], moduleIndex) =>
+      indices.map((index) =>
+        [index, cb ? cb(path, moduleIndex) : moduleIndex] as const
+      )
+    )
+    .sort((a, b) => a[0] - b[0]);
+
+  const jsParts = Array<string>(2 * replacements.length + 1);
+  jsParts[0] = replacements.length > 0
+    ? rawJS.slice(0, replacements[0][0])
+    : rawJS;
+
+  let i = -1;
+  for (const [index, replacement] of replacements) {
+    i++;
+    jsParts[i * 2] = `${modulesArg}[${replacement}]`;
+    jsParts[i * 2 + 1] = rawJS.slice(
+      index,
+      replacements[i + 1]?.[0] ?? rawJS.length,
+    );
+  }
+
+  return jsParts.join("");
+};
+
 const jsUtils = {
   eval: async <T>(expr: JSable<T>): Promise<T> => {
-    const argsBody = [`return(${expr[jsSymbol].rawJS})`];
+    const argsBody = [`return(${toRawJS(expr)})`];
     const args: unknown[] = [];
 
     if (isReactive(expr)) {
@@ -280,11 +324,10 @@ const jsUtils = {
       })(await Promise.all(expr[jsSymbol].resources.map((r) => r.value))));
     }
 
-    if (expr[jsSymbol].modules.length > 0) {
+    const modules = Object.keys(expr[jsSymbol].modules);
+    if (modules.length > 0) {
       argsBody.unshift(modulesArg);
-      args.unshift(
-        await Promise.all(expr[jsSymbol].modules.map((m) => import(m.local))),
-      );
+      args.unshift(await Promise.all(modules.map((path) => import(path))));
     }
 
     return new Function(...argsBody)(...args);
@@ -292,9 +335,9 @@ const jsUtils = {
 
   import: <M>(url: string) => jsFn<Promise<M>>`import(${url})`,
 
-  module: <M>(local: string, pub: string) => {
-    const expr = jsFn<M>`${unsafe(modulesArg)}[${pub}]`;
-    (expr[jsSymbol] as Writable<JSMeta<M>>).modules = [{ local, pub }];
+  module: <M>(path: string) => {
+    const expr = jsFn<M>``;
+    (expr[jsSymbol] as Writable<JSMeta<M>>).modules = { [path]: [0] };
     return expr;
   },
 
