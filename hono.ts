@@ -1,15 +1,16 @@
-import { makeWebModuleHandler } from "./api/router.ts";
 import type { MiddlewareHandler } from "./deps/hono.ts";
 import { jsxRenderer } from "./hono/renderer.ts";
-import { BundleResult } from "./js/web.ts";
+import { Bundle, BundleResult } from "./js/bundle.ts";
 import { jsx } from "./jsx-runtime.ts";
 
-export const augmente = (webBundle: BundleResult): MiddlewareHandler => {
-  const handleModule = makeWebModuleHandler(webBundle);
-  const useJsx = jsxRenderer(webBundle);
-  return (c, next) => {
-    const res = handleModule(c.req.raw);
-    return res && !c.finalized ? Promise.resolve(res) : useJsx(c, next);
+export const jsxMachine = (
+  bundle: Bundle | BundleResult,
+): MiddlewareHandler => {
+  const useJsx = jsxRenderer(bundle);
+  return async (c, next) => {
+    const servedRes = bundle instanceof Bundle && bundle.watched &&
+      await bundle.watch()(c.req.raw);
+    return servedRes && !c.finalized ? servedRes : useJsx(c, next);
   };
 };
 

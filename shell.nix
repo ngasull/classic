@@ -3,6 +3,6 @@
 with pkgs;
 
 mkShell {
-  buildInputs = [ just deno ];
+  buildInputs = [ deno ];
 }
 

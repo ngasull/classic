@@ -1,6 +1,7 @@
 import type { Activation } from "../dom.ts";
 import { voidElements } from "../dom/void.ts";
 import { effect, fn, js, statements, sync, toRawJS, unsafe } from "../js.ts";
+import type { BundleResult } from "../js/bundle.ts";
 import {
   isEvaluable,
   JS,
@@ -10,7 +11,6 @@ import {
   jsSymbol,
   Resource,
 } from "../js/types.ts";
-import { bundleContext, BundleResult } from "../js/web.ts";
 import {
   contextSymbol,
   DOMLiteral,
@@ -19,6 +19,7 @@ import {
   ElementKind,
   JSXContext,
   JSXContextAPI,
+  JSXContextOf,
   JSXInitContext,
   JSXRef,
   JSXSyncRef,
@@ -141,25 +142,37 @@ const mkContext = (data: ContextData): JSXContextAPI => {
   return ctx;
 };
 
+export const bundleContext = createContext<{
+  readonly result: BundleResult;
+  readonly watched?: boolean;
+}>("bundle");
+
 const writeActivationScript = (
   write: (chunk: string) => void,
   children: DOMNode[],
   { bundle, partial = false }: {
-    bundle: BundleResult;
+    bundle: JSXContextOf<typeof bundleContext>;
     partial?: boolean;
   },
 ) => {
   const [activation, modules, store] = deepActivation(children);
+
+  const publicModules = modules.map((m) => {
+    const publicPath = bundle.result.publicPath(m);
+    if (!publicPath) throw Error(`Module expected to be bundled: ${m}`);
+    return publicPath;
+  });
+
+  const domPath = bundle.result.publicPath(
+    import.meta.resolve("../dom.ts"),
+  );
+  if (!domPath) throw Error(`DOM lib is supposed to be bundled`);
+
   if (activation.length) {
     write("<script>(p=>");
     write(
-      js.import<typeof import("../dom.ts")>(bundle.lib.dom).then((dom) =>
-        dom.a(
-          activation,
-          modules.map((m) => bundle.modules[m].output.publicPath) as string[],
-          store,
-          js<NodeList | Node[]>`p`,
-        )
+      js.import<typeof import("../dom.ts")>(domPath).then((dom) =>
+        dom.a(activation, publicModules, store, js<NodeList | Node[]>`p`)
       )[jsSymbol].rawJS,
     );
     write(")(");
@@ -168,7 +181,15 @@ const writeActivationScript = (
         ? `[document.currentScript.previousSibling]`
         : `document.childNodes`,
     );
-    write(")</script>");
+    write(");");
+
+    if (bundle.watched) {
+      write(
+        `new EventSource("/hmr").addEventListener("change",()=>location.reload());`,
+      );
+    }
+
+    write("</script>");
   }
 };
 
@@ -176,26 +197,29 @@ const deepActivation = (
   root: DOMNode[],
 ): [Activation, string[], [string, JSONable][]] => {
   let lastModuleIndex = -1;
-  const modules: Record<string, number> = {};
-  const storeModule = (m: string) => (modules[m] ??= ++lastModuleIndex);
+  const modules = new Map<string, number>();
+  const storeModule = (m: string) =>
+    modules.get(m) ?? (modules.set(m, ++lastModuleIndex), lastModuleIndex);
 
-  const activationStore: Record<string, [number, JSONable]> = {};
+  const activationStore = new Map<string, [number, JSONable]>();
   let storeIndex = 0;
-  const store = ({ uri }: Resource<JSONable>, value: JSONable) => {
-    activationStore[uri] ??= [storeIndex++, value];
-    return activationStore[uri][0];
+  const storeResource = ({ uri }: Resource<JSONable>, value: JSONable) => {
+    if (!activationStore.has(uri)) {
+      activationStore.set(uri, [storeIndex++, value]);
+    }
+    return activationStore.get(uri)![0];
   };
   return [
-    domActivation(root, storeModule, store),
-    Object.keys(modules),
-    Object.entries(activationStore).map(([uri, [, value]]) => [uri, value]),
+    domActivation(root, storeModule, storeResource),
+    [...modules.keys()],
+    [...activationStore.entries()].map(([uri, [, value]]) => [uri, value]),
   ];
 };
 
 const domActivation = (
   dom: readonly DOMNode[],
   storeModule: (path: string) => number,
-  store: (resource: Resource<JSONable>, value: JSONable) => number,
+  storeResource: (resource: Resource<JSONable>, value: JSONable) => number,
 ) => {
   const activation: Activation = [];
 
@@ -214,7 +238,7 @@ const domActivation = (
           (path) => storeModule(path),
         ),
         ...(ref.fn[jsSymbol].resources?.map((r, i) =>
-          store(r, ref.values[i])
+          storeResource(r, ref.values[i])
         ) ??
           []),
       ]);
@@ -223,7 +247,7 @@ const domActivation = (
       const childrenActivation = domActivation(
         node.children,
         storeModule,
-        store,
+        storeResource,
       );
       if (childrenActivation.length > 0) {
         activation.push([i, childrenActivation]);
@@ -260,7 +284,7 @@ const writeDOMTree = (
         write("<");
         write(escapeTag(node.tag));
 
-        for (const [name, value] of Object.entries(node.attributes)) {
+        for (const [name, value] of node.attributes) {
           if (value === false) continue;
           const valueStr = value === true ? "" : String(value);
 
@@ -363,7 +387,7 @@ const nodeToDOMTree = async (
         children,
       } = syncRoot.element;
 
-      const attributes: Record<string, string | number | boolean> = {};
+      const attributes = new Map<string, string | number | boolean>();
       const reactiveAttributes: [
         string,
         JSable<string | number | boolean | null>,
@@ -411,7 +435,7 @@ const nodeToDOMTree = async (
               await recordAttr(name, await js.eval(value));
               reactiveAttributes.push([name, value]);
             } else {
-              attributes[name] = value;
+              attributes.set(name, value);
             }
           }
         })(name, value);

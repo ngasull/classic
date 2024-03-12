@@ -131,6 +131,9 @@ export type JSXContext<T> = {
   readonly [contextSymbol]: symbol;
 };
 
+export type JSXContextOf<C extends JSXContext<any>> = C extends
+  JSXContext<infer T> ? T : never;
+
 export const contextSymbol = Symbol("context");
 
 export type DOMNode =
@@ -138,7 +141,7 @@ export type DOMNode =
     readonly kind: DOMNodeKind.Tag;
     readonly node: {
       readonly tag: string;
-      readonly attributes: Readonly<Record<string, string | number | boolean>>;
+      readonly attributes: ReadonlyMap<string, string | number | boolean>;
       readonly children: readonly DOMNode[];
     };
     readonly refs?: readonly JSXSyncRef<Element>[];

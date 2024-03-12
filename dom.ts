@@ -7,15 +7,7 @@ import {
 } from "./dom/arg-alias.ts";
 import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
 import { JSONable, peek, setResources, subStore } from "./dom/store.ts";
-import {
-  call,
-  doc,
-  first,
-  forEach,
-  fromEntries,
-  isArray,
-  isFunction,
-} from "./dom/util.ts";
+import { call, doc, first, forEach, isArray, isFunction } from "./dom/util.ts";
 
 /**
  * Tuple holding JS hooks produced by a jsx render.

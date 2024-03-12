@@ -1,4 +1,9 @@
 {
+  "tasks": {
+    "npm": "deno run -A script/build_npm.ts",
+    "test": "deno test --allow-read --allow-env --allow-run",
+    "clean": "rm -rf npm"
+  },
   "compilerOptions": {
     "lib": [
       "deno.ns",
