@@ -1,9 +1,9 @@
 import { Hono } from "hono/mod.ts";
-import { layout, route } from "jsx-machine/hono/renderer.ts";
+import { layout, route } from "classic-web/hono/renderer.ts";
 import type {
   JSXComponent,
   JSXParentComponent,
-} from "jsx-machine/jsx/types.ts";
+} from "classic-web/jsx/types.ts";
 
 import { dbContext } from "./db.ts";
 // Your bundle is built by scanning calls to this import
@@ -17,7 +17,7 @@ const RootLayout: JSXParentComponent = ({ children }) => (
     </head>
     <body
       // Optional: client-side dynamic routing _à la_ Remix
-      ref={(body) => web.module("jsx-machine/dom/router.ts").register(body)}
+      ref={(body) => web.module("classic-web/dom/router.ts").register(body)}
     >
       {children}
     </body>

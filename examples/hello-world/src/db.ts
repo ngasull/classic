@@ -1,4 +1,4 @@
-import { createContext } from "jsx-machine/jsx/render.ts";
+import { createContext } from "classic-web/jsx/render.ts";
 
 type DB = {
   hello: string;

@@ -1,19 +1,19 @@
 import { join } from "./deps/std/path.ts";
 
 const fetches = fetch(
-  "https://api.github.com/repos/ngasull/jsx-machine/branches/master",
+  "https://api.github.com/repos/ngasull/classic/branches/master",
 )
   .then((res) => res.json())
   .then(({ commit: { sha } }) => sha)
   .then((sha) => {
     const base =
-      `https://raw.githubusercontent.com/ngasull/jsx-machine/${sha}/examples/hello-world`;
+      `https://raw.githubusercontent.com/ngasull/classic/${sha}/examples/hello-world`;
     return Promise.all([
       fetch(`${base}/deno.json`)
         .then((res) => res.text())
         .then((denoJson) =>
           denoJson.replaceAll(
-            /("jsx-machine\/(jsx-runtime)?": "[^"]+")/g,
+            /("classic-web\/(jsx-runtime)?": "[^"]+")/g,
             (_, row) => row.replace("master", sha),
           )
         ),

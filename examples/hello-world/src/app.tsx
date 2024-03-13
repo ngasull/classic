@@ -1,5 +1,5 @@
-import { jsxMachine } from "jsx-machine/hono.ts";
-import { jsxContext } from "jsx-machine/hono/renderer.ts";
+import { jsxMachine } from "classic-web/hono.ts";
+import { jsxContext } from "classic-web/hono/renderer.ts";
 import { Hono } from "hono/mod.ts";
 // Don't import hono/middleware.ts as it messes with JSX global namespace
 import { compress } from "hono/middleware/compress/index.ts";

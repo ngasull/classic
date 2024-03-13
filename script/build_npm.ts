@@ -16,7 +16,7 @@ await build({
   outDir: "./npm",
   shims: { deno: true },
   package: {
-    name: "jsx-machine",
+    name: "classic-web",
     version: "1",
   },
   compilerOptions: { lib: ["DOM", "DOM.Iterable", "ES2021"] },

@@ -6,7 +6,7 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "jsx-machine",
+    "jsxImportSource": "classic-web",
     "lib": [
       "deno.ns",
       "DOM",
@@ -15,8 +15,8 @@
     ]
   },
   "imports": {
-    "jsx-machine/": "https://raw.githubusercontent.com/ngasull/jsx-machine/master/",
-    "jsx-machine/jsx-runtime": "https://raw.githubusercontent.com/ngasull/jsx-machine/master/jsx-runtime.ts",
+    "classic-web/": "https://raw.githubusercontent.com/ngasull/classic/master/",
+    "classic-web/jsx-runtime": "https://raw.githubusercontent.com/ngasull/classic/master/jsx-runtime.ts",
     "hono/": "https://deno.land/x/hono@v3.12.11/"
   }
 }
