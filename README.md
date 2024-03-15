@@ -80,7 +80,10 @@ export const YourName = () => {
 ```tsx
 import { bundle } from "./bundle.ts";
 
-// Typed client-side JS! Check the development workflow for more info
+/*
+ * Proxied to keep client code explictly typed and explicitly client-side.
+ * Check the development workflow for more info.
+ */
 const yourName = bundle.add("./your-name.web.ts");
 
 export const YourName = () => {
