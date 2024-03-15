@@ -9,23 +9,26 @@ const fetches = fetch(
     const base =
       `https://raw.githubusercontent.com/ngasull/classic/${sha}/examples/hello-world`;
     return Promise.all([
-      fetch(`${base}/deno.json`)
+      fetch(`${base}/deno.jsonc`)
         .then((res) => res.text())
-        .then((denoJson) =>
-          denoJson.replaceAll(
-            /("classic-web\/(jsx-runtime)?": "[^"]+")/g,
-            (_, row) => row.replace("master", sha),
+        .then((denoJson) => (path: string) =>
+          Deno.writeTextFile(
+            join(path, "deno.jsonc"),
+            denoJson.replaceAll(
+              /("classic-web\/(jsx-runtime)?": "[^"]+")/g,
+              (_, row) => row.replace("master", sha),
+            ),
           )
         ),
-      fetch(`${base}/src/db.ts`).then((res) => res.text()),
-      fetch(`${base}/src/root.tsx`).then((res) => res.text()),
-      fetch(`${base}/src/server.ts`).then((res) => res.text()),
+      ...["bundle.ts", "db.ts", "root.ts", "server.ts", "task.ts"].map((file) =>
+        fetch(`${base}/src/${file}`).then((res) => async (path: string) =>
+          Deno.writeTextFile(join(path, "src", file), await res.text())
+        )
+      ),
     ]);
   });
 
 const projectName = prompt("What folder name do you want to create?");
-
-const [denoJson, db, root, server] = await fetches;
 
 if (!projectName) Deno.exit(1);
 if (projectName.includes("/")) {
@@ -33,28 +36,8 @@ if (projectName.includes("/")) {
   Deno.exit(1);
 }
 
-const src = join(projectName, "src");
-
 await Deno.mkdir(projectName);
-await Promise.all([
-  Deno.writeTextFile(
-    join(projectName, "deno.json"),
-    denoJson,
-  ),
-
-  Deno.mkdir(src)
-    .then(() =>
-      Promise.all([
-        Deno.writeTextFile(join(src, "db.ts"), db),
-        Deno.writeTextFile(join(src, "root.tsx"), root),
-        Deno.writeTextFile(join(src, "server.ts"), server),
-        Deno.writeTextFile(
-          join(src, "web-modules.gen.ts"),
-          `// AUTO-GENERATED FILE, DO NOT MODIFY
-
-export const web = null;
-`,
-        ),
-      ])
-    ),
-]);
+await Deno.mkdir(join(projectName, "src"));
+await fetches.then((writeFiles) =>
+  Promise.all(writeFiles.map((write) => write(projectName)))
+);
