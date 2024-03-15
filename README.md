@@ -64,7 +64,7 @@ export const YourName = async ({ userId }: { userId: string }) => {
 ```tsx
 import { js } from "classic-web/js.ts"
 
-export const YourName = ({ userId }: { userId: string }) => {
+export const YourName = () => {
   return (
     <div
       ref={(div) => js`${div}.innerText = "Your name will be H4CK3D!"`}
@@ -81,11 +81,11 @@ export const YourName = ({ userId }: { userId: string }) => {
 import { bundle } from "./bundle.ts";
 
 // Typed client-side JS! Check the development workflow for more info
-const { hackYourName } = bundle.add("./your-name.web.ts");
+const yourName = bundle.add("./your-name.web.ts");
 
-export const YourName = ({ userId }: { userId: string }) => {
+export const YourName = () => {
   return (
-    <div ref={(div) => hackYourName(div, "H4CK3D")}>
+    <div ref={(div) => yourName.hack(div, "H4CK3D")}>
       Your name will be ...
     </div>
   );
@@ -94,9 +94,8 @@ export const YourName = ({ userId }: { userId: string }) => {
 
 ```ts
 // your-name.web.ts
-import { effect } from "classic-web/dom.ts"
 
-export const hackYourName = (el: HTMLElement, name: string) => {
+export const hack = (el: HTMLElement, name: string) => {
   el.innerText = `Your name will be ${name}`;
 };
 ```
@@ -106,15 +105,14 @@ export const hackYourName = (el: HTMLElement, name: string) => {
 ```tsx
 import type { Bundle } from "classic-web/bundle.ts";
 
-export const yourName = (bundle: Bundle) => {
-  const { hackYourName } = bundle.add<typeof import("./your-name.web.ts")>(
+export const yourName = (bundle: Bundle): JSX.Component => {
+  const yourName = bundle.add<typeof import("./your-name.web.ts")>(
     "./your-name.web.ts",
   );
-  return async ({ userId }: { userId: string }) => {
-    const user = await db.user.find(userId);
+  return async () => {
     return (
-      <div ref={hackYourName}>
-        Your name will be {user.name}
+      <div ref={yourName.hack}>
+        Your name will be ...
       </div>
     );
   };
