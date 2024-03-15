@@ -20,13 +20,17 @@ const fetches = fetch(
             ),
           )
         ),
-      fetch(`${base}/task.ts`).then((res) => async (path: string) =>
-        Deno.writeTextFile(join(path, "task.ts"), await res.text())
-      ),
-      ...["bundle.ts", "db.ts", "root.ts", "server.ts"].map((file) =>
-        fetch(`${base}/src/${file}`).then((res) => async (path: string) =>
-          Deno.writeTextFile(join(path, "src", file), await res.text())
-        )
+      fetch(`${base}/task.ts`)
+        .then(validResText)
+        .then((text) => (path: string) =>
+          Deno.writeTextFile(join(path, "task.ts"), text)
+        ),
+      ...["app.tsx", "bundle.ts", "db.ts", "root.tsx"].map((file) =>
+        fetch(`${base}/src/${file}`)
+          .then(validResText)
+          .then((text) => (path: string) =>
+            Deno.writeTextFile(join(path, "src", file), text)
+          )
       ),
     ]);
   });
@@ -39,8 +43,13 @@ if (projectName.includes("/")) {
   Deno.exit(1);
 }
 
-await Deno.mkdir(projectName);
-await Deno.mkdir(join(projectName, "src"));
-await fetches.then((writeFiles) =>
-  Promise.all(writeFiles.map((write) => write(projectName)))
-);
+const writeFiles = await fetches;
+await Deno.mkdir(join(projectName, "src"), { recursive: true });
+await Promise.all(writeFiles.map((write) => write(projectName)));
+
+function validResText(res: Response): Promise<string> {
+  if (!res.ok) {
+    throw Error(`Failed fetching ${res.url} (${res.status} ${res.statusText})`);
+  }
+  return res.text();
+}

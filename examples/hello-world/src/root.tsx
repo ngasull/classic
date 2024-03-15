@@ -6,8 +6,9 @@ import type {
 } from "classic-web/jsx/types.ts";
 
 import { dbContext } from "./db.ts";
-// Your bundle is built by scanning calls to this import
-import { web } from "./web-modules.gen.ts";
+import { bundle } from "./bundle.ts";
+
+const router = bundle.add("classic-web/dom/router.ts");
 
 const RootLayout: JSXParentComponent = ({ children }) => (
   <html>
@@ -17,7 +18,7 @@ const RootLayout: JSXParentComponent = ({ children }) => (
     </head>
     <body
       // Optional: client-side dynamic routing _à la_ Remix
-      ref={(body) => web.module("classic-web/dom/router.ts").register(body)}
+      ref={router.register}
     >
       {children}
     </body>
