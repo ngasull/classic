@@ -81,7 +81,7 @@ export const YourName = () => {
 import { bundle } from "./bundle.ts";
 
 /*
- * Proxied to keep client code explictly typed and explicitly client-side.
+ * Proxied to keep client code explicitly client-side and typed.
  * Check the development workflow for more info.
  */
 const yourName = bundle.add("./your-name.web.ts");
