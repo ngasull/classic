@@ -20,7 +20,10 @@ const fetches = fetch(
             ),
           )
         ),
-      ...["bundle.ts", "db.ts", "root.ts", "server.ts", "task.ts"].map((file) =>
+      fetch(`${base}/task.ts`).then((res) => async (path: string) =>
+        Deno.writeTextFile(join(path, "task.ts"), await res.text())
+      ),
+      ...["bundle.ts", "db.ts", "root.ts", "server.ts"].map((file) =>
         fetch(`${base}/src/${file}`).then((res) => async (path: string) =>
           Deno.writeTextFile(join(path, "src", file), await res.text())
         )
