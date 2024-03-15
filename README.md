@@ -23,7 +23,8 @@ Server-side middle-end prioritizing page load times and simplicity.
   - Buildless development
   - Simple explicit production build
 
-**Classic is not a UI library and depends on none**, but you can use some. It integrates with existing technologies rather than reinventing them.
+**Classic is not a UI library and depends on none**, but you can optionally use some.
+Classic integrates with existing technologies rather than reinventing them.
 
 Typical Classic stack:
 - [Deno](https://deno.com/) - Runtime, LSP, lint, test, DB...
@@ -36,36 +37,10 @@ NodeJS support is planned, however we strongly recommend Deno in general.
 
 ```sh
 # Prompts a folder name and creates the template
-deno run --allow-write=. --allow-net https://raw.githubusercontent.com/ngasull/classic/master/init.ts
+deno run -r --allow-write=. --allow-net https://raw.githubusercontent.com/ngasull/classic/master/init.ts
 ```
 
-## Principles
-
-### Web application middle-end
-
-Using the same language in both server and client sides is an exceptional opportunity for simplicity.
-This should not imply exceptional technical complexity.
-
-- Render HTML from your backend, allowing **async JSX**
-- Attach **reactive client-side JavaScript** to it
-- **No build step** to bundle optimized client-side JS
-- Manipulate client-side JS bits **explicitly yet transparently** from the backend
-
-### Not a UI library
-
-Although it's using JSX, this library runs mostly server-side.
-There is no comparison to be done with React, Solid or Vue.
-Such libraries can however be still be used.
-
-### Not promoting _components everywhere_
-
-Components are great to scope complex UI behaviors. In other cases, components bring unnecessary lifecycle complexity. So what to do ?
-
-- Render HTML by default
-- Attach JS when needed
-- If necessary, use a UI library to manage individual components
-
-## Show me code!
+## Code examples
 
 _Remember: everything runs server-side except what is explicitly wrapped in JS types!_
 
@@ -110,7 +85,7 @@ const { hackYourName } = bundle.add("./your-name.web.ts");
 
 export const YourName = ({ userId }: { userId: string }) => {
   return (
-    <div ref={hackYourName}>
+    <div ref={(div) => hackYourName(div, "H4CK3D")}>
       Your name will be ...
     </div>
   );
@@ -121,8 +96,8 @@ export const YourName = ({ userId }: { userId: string }) => {
 // your-name.web.ts
 import { effect } from "classic-web/dom.ts"
 
-export const hackYourName = (el: HTMLElement) => {
-  el.innerText = "Your name will be H4CK3D!";
+export const hackYourName = (el: HTMLElement, name: string) => {
+  el.innerText = `Your name will be ${name}`;
 };
 ```
 
