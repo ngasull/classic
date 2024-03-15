@@ -109,7 +109,7 @@ export const yourName = (bundle: Bundle): JSX.Component => {
   const yourName = bundle.add<typeof import("./your-name.web.ts")>(
     "./your-name.web.ts",
   );
-  return async () => {
+  return () => {
     return (
       <div ref={yourName.hack}>
         Your name will be ...
