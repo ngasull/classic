@@ -2,9 +2,7 @@
 
 export const argn = (n: number) => `𐏑${n}`;
 
-export const nodeArg = "𐏑";
-
-export const lifecycleArg = "𐏒";
+export const apiArg = "𐏑";
 
 export const modulesArg = "𐏓";
 

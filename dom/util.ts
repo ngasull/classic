@@ -39,7 +39,9 @@ export const first = <T>(a: readonly [T, ...any[]]): T => a[0];
 
 export const last = <T>(a: readonly T[]): T => a[length(a) - 1];
 
-export const forEach = <T extends Record<"forEach", (...item: any[]) => any>>(
+export const forEach = <
+  T extends Record<"forEach", (...item: readonly any[]) => any>,
+>(
   iterable: T | null | undefined,
   cb: T extends Record<"forEach", (cb: infer Cb) => void> ? Cb : never,
 ) => iterable?.forEach(cb);

@@ -1,10 +1,5 @@
-import {
-  argn,
-  lifecycleArg,
-  modulesArg,
-  nodeArg,
-  resourcesArg,
-} from "./dom/arg-alias.ts";
+import { apiArg } from "./dom/arg-alias.ts";
+import { argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import type {
   ExtractImplicitlyJSable,
   ImplicitlyJSable,
@@ -64,10 +59,11 @@ export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
     : never;
 };
 
-export const effect = (cb: JSFn<[], void | (() => void)>): JS<void> =>
-  js<void>`${unsafe(lifecycleArg)}.e(${unsafe(nodeArg)},${
-    unsafe(resourcesArg)
-  }.u,${cb})`;
+export const effect = (cb: JSFn<[], void | (() => void)>): JS<void> => {
+  const cbFn = fn(cb);
+  const uris = cbFn[jsSymbol].resources.map((r) => r.uri);
+  return js<void>`${unsafe(apiArg)}.effect(${cbFn},${uris})`;
+};
 
 const targetSymbol = Symbol("target");
 

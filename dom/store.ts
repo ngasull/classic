@@ -13,25 +13,27 @@ export type JSONable = JSONLiteral | JSONRecord | JSONArray;
 const store: ResourceStore = {};
 
 export const peek = (uri: string) => store[uri]?.[0];
-export const getValues = (uris: string[]) => uris.map((uri) => store[uri]![0]);
+export const getValues = (uris: readonly string[]) =>
+  uris.map((uri) => store[uri]![0]);
 
-export const subStore = (uris: string[], cb: ResourceListener) => {
+export const subStore = (uris: readonly string[], cb: ResourceListener) => {
   forEach(uris, (uri) => (store[uri] ??= [undefined!, new Set()])![1].add(cb));
   return () => forEach(uris, (uri) => store[uri]![1].delete(cb));
 };
 
 export const setResources = (
-  resources: [string, JSONable][] | Record<string, JSONable | undefined>,
+  resources:
+    | (readonly [string, JSONable][])
+    | Record<string, JSONable | undefined>,
 ) => {
-  if (!isArray(resources)) {
-    resources = entries(resources)
-      .filter((r) => r[1] != null) as [string, JSONable][];
-  }
-
-  let batch = new Set<ResourceListener>(),
+  let rs = isArray(resources)
+      ? (resources as readonly [string, JSONable][])
+      : entries(resources)
+        .filter((r) => r[1] != null) as readonly [string, JSONable][],
+    batch = new Set<ResourceListener>(),
     rollbacks: (() => void)[] = [];
 
-  forEach(resources, ([uri, v]) => {
+  forEach(rs, ([uri, v]) => {
     let r = (store[uri] ??= [undefined!, new Set()]),
       prev = r[0];
     if (v !== prev) {

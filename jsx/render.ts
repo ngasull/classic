@@ -1,6 +1,6 @@
-import type { Activation } from "../dom.ts";
+import type { Activation, RefAPI } from "../dom.ts";
 import { voidElements } from "../dom/void.ts";
-import { effect, fn, js, statements, sync, toRawJS, unsafe } from "../js.ts";
+import { fn, js, statements, sync, toRawJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
 import {
   isEvaluable,
@@ -395,8 +395,8 @@ const nodeToDOMTree = async (
       const refs: JSXSyncRef<Element>[] = ref
         ? [
           await sync(
-            fn((elRef: JS<Element>) =>
-              (ref as unknown as JSXRef<Element>)(elRef) as JSable<void>
+            fn((api: JS<RefAPI<Element>>) =>
+              (ref as unknown as JSXRef<Element>)(api) as JSable<void>
             ),
           ),
         ]
@@ -421,15 +421,17 @@ const nodeToDOMTree = async (
             if (eventMatch) {
               const eventType = eventMatch[1].toLowerCase();
               refs.push(
-                await sync(fn((elRef: JS<Element>) =>
-                  effect(() => [
-                    js`let c=${value}`,
-                    elRef.addEventListener(eventType, unsafe("c")),
-                    js.return(() =>
-                      elRef.removeEventListener(eventType, unsafe("c"))
-                    ),
-                  ])
-                )),
+                await sync(
+                  fn(({ target, effect }: JS<RefAPI<Element>>) =>
+                    effect(() => [
+                      js`let c=${value}`,
+                      target.addEventListener(eventType, unsafe("c")),
+                      js.return(() =>
+                        target.removeEventListener(eventType, unsafe("c"))
+                      ),
+                    ])
+                  ),
+                ),
               );
             } else if (isEvaluable<string | number | boolean | null>(value)) {
               await recordAttr(name, await js.eval(value));
@@ -445,9 +447,9 @@ const nodeToDOMTree = async (
         ...(await Promise.all(
           reactiveAttributes.map(([name, reactive]) =>
             sync(
-              fn((node: JS<Element>) =>
+              fn(({ target, effect }: JS<RefAPI<Element>>) =>
                 effect(() =>
-                  js`let k=${name},v=${reactive};!v&&v!==""?${node}.removeAttribute(k):${node}.setAttribute(k,v===true?"":String(v))`
+                  js`let k=${name},v=${reactive};!v&&v!==""?${target}.removeAttribute(k):${target}.setAttribute(k,v===true?"":String(v))`
                 )
               ),
             )
@@ -477,8 +479,8 @@ const nodeToDOMTree = async (
           },
           refs: [
             await sync(
-              fn((node: JS<Text>) =>
-                effect(() => js`${node}.textContent=${(syncRoot.element)}`)
+              fn(({ target, effect }: JS<RefAPI<Text>>) =>
+                effect(() => js`${target}.textContent=${(syncRoot.element)}`)
               ),
             ),
           ],
@@ -494,7 +496,7 @@ const nodeToDOMTree = async (
           refs: syncRoot.element.ref
             ? [
               await sync(
-                fn((ref) => syncRoot.element.ref!(ref) as JSable<void>),
+                fn((api) => syncRoot.element.ref!(api) as JSable<void>),
               ),
             ]
             : [],
@@ -510,7 +512,7 @@ const nodeToDOMTree = async (
           refs: syncRoot.element.ref
             ? [
               await sync(
-                fn((ref) => syncRoot.element.ref!(ref) as JSable<void>),
+                fn((api) => syncRoot.element.ref!(api) as JSable<void>),
               ),
             ]
             : [],

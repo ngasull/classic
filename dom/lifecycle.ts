@@ -49,9 +49,9 @@ export const trackChildren = (node: Node) => {
 };
 
 // Tells the closest lifecycle-tracking parent to attach a cleanup to a Node
-export const registerCleanup = (node: Node, cleanup: () => void) => {
+export const registerCleanup = (node: EventTarget, cleanup: () => void) => {
   dispatchPrevented(node, customEvent(trackEvent, cleanup));
 };
 
-export const cleanup = (node: Node) =>
+export const cleanup = (node: EventTarget) =>
   dispatchPrevented(node, customEvent(untrackEvent));

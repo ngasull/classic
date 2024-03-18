@@ -1,10 +1,4 @@
-import {
-  argn,
-  lifecycleArg,
-  modulesArg,
-  nodeArg,
-  resourcesArg,
-} from "./dom/arg-alias.ts";
+import { apiArg, argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
 import { JSONable, peek, setResources, subStore } from "./dom/store.ts";
 import { call, doc, first, forEach, isArray, isFunction } from "./dom/util.ts";
@@ -24,26 +18,39 @@ const targetSymbol = Symbol();
 
 const arg0 = argn(0);
 
-const effect = (
-  node: Node,
-  uris: string[],
-  cb: () => void | (() => void),
-) => {
-  let cleanup: (() => void) | void = cb(),
-    unsubStore = subStore(uris, () => {
-      isFunction(cleanup) && cleanup();
-      cleanup = cb();
-    });
-  registerCleanup(
-    node,
-    () => {
-      unsubStore();
-      isFunction(cleanup) && cleanup();
+type APIBase<T extends EventTarget> = { target: T; uris: readonly string[] };
+
+const apiDef = {
+  effect:
+    (api: APIBase<EventTarget>) =>
+    (cb: () => void | (() => void), uris = api.uris): void => {
+      let cleanup: (() => void) | void = cb(),
+        unsubStore = subStore(uris, () => {
+          isFunction(cleanup) && cleanup();
+          cleanup = cb();
+        });
+      registerCleanup(
+        api.target,
+        () => {
+          unsubStore();
+          isFunction(cleanup) && cleanup();
+        },
+      );
     },
-  );
 };
 
-const lifecycleFns = { e: effect };
+const apiHandler = {
+  get(
+    target: APIBase<EventTarget> & Record<string | symbol, any>,
+    p: keyof typeof apiDef,
+  ) {
+    return target[p] ??= apiDef[p]?.(target);
+  },
+} as ProxyHandler<RefAPI<EventTarget>>;
+
+export type RefAPI<N extends EventTarget> = APIBase<N> & {
+  effect: (cb: () => void | (() => void), uris?: string[]) => void;
+};
 
 const activateNode = (
   nodes: NodeList | Node[],
@@ -62,7 +69,8 @@ const activateNode = (
   },
 ): ReadonlyArray<() => void> =>
   activation.flatMap(([childIndex, h1, ...rs]) => {
-    let child = nodes[childIndex];
+    let child = nodes[childIndex],
+      api = new Proxy({ node: child, uris: resources } as any, apiHandler);
 
     return isArray(h1)
       ? activateNode(
@@ -73,7 +81,7 @@ const activateNode = (
         resourcesProxyHandler,
       )
       : [() => {
-        let resourcesProxy = (function mkResProxy(rs: number[]) {
+        let mkResProxy = (rs: number[]) => {
           let callArray = (...argArray: number[]) =>
             mkResProxy(argArray.map((r) => rs[r]));
           callArray[targetSymbol] = rs;
@@ -85,14 +93,13 @@ const activateNode = (
             },
             resourcesProxyHandler,
           );
-        })(rs as number[]);
+        };
 
-        new Function(arg0, nodeArg, lifecycleArg, modulesArg, resourcesArg, h1)(
-          child,
-          child,
-          lifecycleFns,
+        new Function(arg0, apiArg, modulesArg, resourcesArg, h1)(
+          api,
+          api,
           modules,
-          resourcesProxy,
+          mkResProxy(rs as number[]),
         );
       }];
   });
