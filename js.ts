@@ -27,7 +27,9 @@ import { isReactive, jsSymbol } from "./js/types.ts";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
-export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
+export const statements = <S extends JSStatements<unknown>>(
+  stmts: S,
+): JSStatementsReturn<S> => {
   const tpl = Array(stmts.length).fill(";");
   tpl[0] = "";
   return jsFn(
@@ -38,7 +40,8 @@ export const statements = <S extends JSStatements<unknown>>(stmts: S) => {
 
 export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
   cb: Cb,
-) => {
+): Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
+  : never => {
   const argList = unsafe(
     Array(cb.length).fill(0)
       .map((_, i) => argn(i))
@@ -61,7 +64,7 @@ export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
     : never;
 };
 
-export const effect = (cb: JSFn<[], void | (() => void)>) =>
+export const effect = (cb: JSFn<[], void | (() => void)>): JS<void> =>
   js<void>`${unsafe(lifecycleArg)}.e(${unsafe(nodeArg)},${
     unsafe(resourcesArg)
   }.u,${cb})`;
@@ -113,7 +116,7 @@ const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
   };
 };
 
-export const unsafe = (js: string) => mkPureJS(js);
+export const unsafe = (js: string): JSable<unknown> => mkPureJS(js);
 
 const mkPureJS = (rawJS: string) => ({
   [jsSymbol]: ({
@@ -123,7 +126,7 @@ const mkPureJS = (rawJS: string) => ({
   }) as unknown as JSMeta<unknown>,
 });
 
-const jsFn = (<T>(
+const jsFn = ((
   tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
 ) => {
@@ -201,8 +204,8 @@ const jsFn = (<T>(
 
   if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
 
-  const expr = mkPureJS(rawParts.join("")) as unknown as JSable<T>;
-  const exprMeta = expr[jsSymbol] as Writable<JSMeta<T>>;
+  const expr = mkPureJS(rawParts.join(""));
+  const exprMeta = expr[jsSymbol] as Writable<JSMeta<unknown>>;
   exprMeta.modules = modules;
 
   if (resources.size > 0) {
@@ -224,7 +227,7 @@ const jsFn = (<T>(
 
   callExpr[targetSymbol] = expr;
 
-  return new Proxy(callExpr, jsProxyHandler) as unknown as JS<T>;
+  return new Proxy(callExpr, jsProxyHandler) as unknown as JS<unknown>;
 }) as {
   <T>(tpl: ReadonlyArray<string>, ...exprs: ImplicitlyJSable[]): JS<T>;
 };
@@ -292,37 +295,44 @@ const jsUtils = {
     return new Function(...argsBody)(...args);
   },
 
-  import: <M>(url: string) => jsFn<Promise<M>>`import(${url})`,
+  import: <M>(url: string): JS<Promise<M>> => jsFn<Promise<M>>`import(${url})`,
 
-  module: <M>(path: string) => {
+  module: <M>(path: string): JS<M> => {
     const expr = jsFn<M>``;
     (expr[jsSymbol] as Writable<JSMeta<M>>).modules = { [path]: [0] };
     return expr;
   },
 
-  nonNullable: <T>(v: T) =>
+  nonNullable: <T>(v: T): T extends JS<infer T> ? JS<NonNullable<T>> : never =>
     v as T extends JS<infer T> ? JS<NonNullable<T>> : never,
 
-  if: <S extends JSStatements<unknown>>(
+  if: (
+    (test: ImplicitlyJSable, stmts: JSStatements<unknown>) =>
+      jsFn`if(${test}){${statements(stmts)}}`
+  ) as <S extends JSStatements<unknown>>(
     test: ImplicitlyJSable,
     stmts: S,
-  ): JSStatementsReturn<S> =>
-    jsFn`if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>,
+  ) => JSStatementsReturn<S>,
 
-  elseif: <S extends JSStatements<unknown>>(
+  elseif: (
+    (test: ImplicitlyJSable, stmts: JSStatements<unknown>) =>
+      jsFn`else if(${test}){${statements(stmts)}}`
+  ) as <S extends JSStatements<unknown>>(
     test: ImplicitlyJSable,
     stmts: S,
-  ): JSStatementsReturn<S> =>
-    jsFn`else if(${test}){${statements(stmts)}}` as JSStatementsReturn<S>,
+  ) => JSStatementsReturn<S>,
 
-  else: <S extends JSStatements<unknown>>(stmts: S) =>
-    jsFn`else{${statements(stmts)}}` as JSStatementsReturn<S>,
+  else: (
+    (stmts: JSStatements<unknown>) => jsFn`else{${statements(stmts)}}`
+  ) as <S extends JSStatements<unknown>>(stmts: S) => JSStatementsReturn<S>,
 
-  return: <E extends ImplicitlyJSable>(expr: E) =>
-    // @ts-ignore: Don't worry, be happy TS
-    jsFn`return ${expr}` as JS<ExtractImplicitlyJSable<E>> & JSReturn,
+  return: (
+    (expr: ImplicitlyJSable) => jsFn<unknown>`return ${expr}`
+  ) as <E extends ImplicitlyJSable>(
+    expr: E,
+  ) => JS<ExtractImplicitlyJSable<E>> & JSReturn,
 
-  set: <T>(receiver: JSable<T>, value: ImplicitlyJSable<T>) =>
+  set: <T>(receiver: JSable<T>, value: ImplicitlyJSable<T>): JS<never> =>
     jsFn<never>`${receiver}=${value}`,
 
   symbol: jsSymbol,
