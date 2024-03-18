@@ -158,7 +158,7 @@ const reviveScript = (script: HTMLScriptElement) => {
   replaceWith(script, copy);
 };
 
-export const navigate = (path: string) => {
+export const navigate = (path: string): boolean => {
   let origin = location.origin,
     url = newURL(path, origin),
     navigated = url.origin == origin;
@@ -169,7 +169,7 @@ export const navigate = (path: string) => {
   return navigated;
 };
 
-export const register = (root = doc.body) => {
+export const register = (root = doc.body): () => void => {
   let t: EventTarget | null,
     subs = [
       subEvent(

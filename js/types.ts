@@ -5,52 +5,52 @@ export type Resource<T extends JSONable> = {
 
 export type JS<T> =
   & JSable<T>
-  & (T extends (...args: infer Args) => infer Ret ? (
-      <R = Ret>(
-        ...args: {
-          readonly [I in keyof Args]: Args[I] extends infer Arg ?
-              | JSable<Arg>
-              | (Arg extends null | undefined ? Arg : never)
-              | { readonly [AI in keyof Arg]: JSable<Arg[AI]> }
-              | (Arg extends
-                ((...args: infer AArgs) => infer AR) | null | undefined
-                ? JSFn<AArgs, AR>
-                : Arg extends JSONable ? Arg
-                : never)
-            : never;
-        }
-      ) => JS<R>
-    )
-    : unknown)
-  & (T extends readonly unknown[] ? { readonly [I in keyof T]: JS<T[I]> }
-    : unknown)
   & (T extends string ? {
-      readonly [K in keyof typeof String["prototype"]]: JS<
+      [K in keyof typeof String["prototype"]]: JS<
         typeof String["prototype"][K]
       >;
     }
     : T extends number ? {
-        readonly [K in keyof typeof Number["prototype"]]: JS<
+        [K in keyof typeof Number["prototype"]]: JS<
           typeof Number["prototype"][K]
         >;
       }
     : T extends bigint ? {
-        readonly [K in keyof typeof BigInt["prototype"]]: JS<
+        [K in keyof typeof BigInt["prototype"]]: JS<
           typeof BigInt["prototype"][K]
         >;
       }
     : T extends boolean ? {
-        readonly [K in keyof typeof Boolean["prototype"]]: JS<
+        [K in keyof typeof Boolean["prototype"]]: JS<
           typeof Boolean["prototype"][K]
         >;
       }
     : T extends JSGeneric<unknown> ? JSGenericTo<T>
-    : T extends {} ? (
-        // Only map actual objects to avoid polluting debugging
-        {} extends T ? unknown
-          : { readonly [K in keyof T]: JS<T[K]> }
-      )
-    : unknown);
+    : (
+      & (T extends (...args: infer Args) => infer Ret ? (
+          <R = Ret>(
+            ...args: {
+              [I in keyof Args]: Args[I] extends infer Arg ?
+                  | JSable<Arg>
+                  | (Arg extends null | undefined ? Arg : never)
+                  | { [AI in keyof Arg]: JSable<Arg[AI]> }
+                  | (Arg extends
+                    ((...args: infer AArgs) => infer AR) | null | undefined
+                    ? JSFn<AArgs, AR>
+                    : Arg extends JSONable ? Arg
+                    : never)
+                : never;
+            }
+          ) => JS<R>
+        )
+        : T extends unknown[] ? { [I in keyof T]: JS<T[I]> }
+        : unknown)
+      & (T extends {} ? (
+          // Only map actual objects to avoid polluting debugging
+          {} extends T ? unknown : { [K in keyof T]: JS<T[K]> }
+        )
+        : unknown)
+    ));
 
 export type JSMeta<T> = {
   readonly [typeSymbol]: T;
@@ -65,7 +65,7 @@ declare const typeSymbol: unique symbol;
 export type JSable<T> = { readonly [jsSymbol]: JSMeta<T> };
 
 export type JSFn<Args extends readonly unknown[], T = void> = (
-  ...args: { readonly [I in keyof Args]: JS<Args[I]> }
+  ...args: { [I in keyof Args]: JS<Args[I]> }
 ) => JSFnBody<T>;
 
 export type JSFnBody<T> = JSable<T> | JSStatements<T>;
@@ -73,7 +73,7 @@ export type JSFnBody<T> = JSable<T> | JSStatements<T>;
 export type JSWithBody<Args extends readonly unknown[], T> =
   & Omit<JS<(...args: Args) => T>, typeof jsSymbol>
   & {
-    readonly [jsSymbol]: Omit<JSMeta<(...args: Args) => T>, "body"> & {
+    [jsSymbol]: Omit<JSMeta<(...args: Args) => T>, "body"> & {
       readonly body: JSFnBody<T>;
     };
   };
@@ -88,17 +88,17 @@ export type JSStatementsReturn<S extends JSStatements<unknown>> = S extends
   : S extends JSStatements<infer T> ? JS<T> & JSReturn
   : never;
 
-export type JSReturn = { readonly [returnSymbol]: true };
-export type JSNoReturn = { readonly [returnSymbol]: false };
+export type JSReturn = { [returnSymbol]: true };
+export type JSNoReturn = { [returnSymbol]: false };
 declare const returnSymbol: unique symbol;
 
 export type ResourceGroup<
   T extends Readonly<Record<string, JSONable>>,
   U extends string,
-> = ((v: { readonly [k in ParamKeys<U>]: string | number }) => JS<T>) & {
+> = ((v: { [k in ParamKeys<U>]: string | number }) => JS<T>) & {
   pattern: U;
   each: (
-    values: ReadonlyArray<{ readonly [k in ParamKeys<U>]: string | number }>,
+    values: ReadonlyArray<{ [k in ParamKeys<U>]: string | number }>,
   ) => Resources<T, U>;
 };
 
@@ -132,8 +132,8 @@ export type ImplicitlyJSable<T = any> =
 export type ExtractImplicitlyJSable<T extends ImplicitlyJSable> = T extends
   JSable<infer T> ? T
   : T extends JSFn<infer Args, infer R> ? (...args: Args) => R
-  : T extends {} | readonly unknown[] ? {
-      readonly [K in keyof T]: T[K] extends ImplicitlyJSable
+  : T extends Record<any, any> | readonly unknown[] ? {
+      [K in keyof T]: T[K] extends ImplicitlyJSable
         ? ExtractImplicitlyJSable<T[K]>
         : T[K];
     }

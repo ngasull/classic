@@ -400,16 +400,14 @@ export const resources = <
   U extends string,
 >(
   pattern: U,
-  fetch: (params: { readonly [k in ParamKeys<U>]: string }) => T | Promise<T>,
+  fetch: (params: { [k in ParamKeys<U>]: string }) => T | Promise<T>,
 ): ResourceGroup<T, U> => {
-  const make = (
-    params: { readonly [k in ParamKeys<U>]: string | number },
-  ): JS<T> => {
+  const make = (params: { [k in ParamKeys<U>]: string | number }): JS<T> => {
     const stringParams = (
       Object.fromEntries(
         Object.entries(params).map(([k, v]) => [k, String(v)]),
       )
-    ) as { readonly [k in ParamKeys<U>]: string };
+    ) as { [k in ParamKeys<U>]: string };
 
     return resource(
       pattern.replaceAll(
@@ -422,7 +420,7 @@ export const resources = <
   const group: ResourceGroup<T, U> = Object.assign(make, {
     pattern,
     each: (
-      values: ReadonlyArray<{ readonly [k in ParamKeys<U>]: string | number }>,
+      values: ReadonlyArray<{ [k in ParamKeys<U>]: string | number }>,
     ): Resources<T, U> => ({
       group,
       values: (
