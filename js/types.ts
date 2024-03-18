@@ -129,15 +129,20 @@ export type ImplicitlyJSable<T = any> =
   | readonly ImplicitlyJSable[]
   | { readonly [k: string]: ImplicitlyJSable; readonly [jsSymbol]?: undefined };
 
-export type ExtractImplicitlyJSable<T extends ImplicitlyJSable> = T extends
-  JSable<infer T> ? T
+export type ExtractImplicitlyJSable<T> = ExtractFlat<T> extends infer E
+  ? E extends never ? T extends Record<any, any> | readonly unknown[] ? {
+        [K in keyof T]: Exact<T[K], T> extends true ? ExtractFlat<T[K]>
+          : ExtractImplicitlyJSable<T[K]>;
+      }
+    : T
+  : E
+  : never;
+
+type ExtractFlat<T> = T extends JSable<infer T> ? T
   : T extends JSFn<infer Args, infer R> ? (...args: Args) => R
-  : T extends Record<any, any> | readonly unknown[] ? {
-      [K in keyof T]: T[K] extends ImplicitlyJSable
-        ? ExtractImplicitlyJSable<T[K]>
-        : T[K];
-    }
   : T;
+
+type Exact<A, B> = A extends B ? B extends A ? true : false : false;
 
 export const jsSymbol = Symbol("js");
 
