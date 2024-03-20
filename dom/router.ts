@@ -1,3 +1,4 @@
+import type { RefAPI } from "../dom.ts";
 import { cleanup, trackChildren } from "./lifecycle.ts";
 import {
   adoptNode,
@@ -169,11 +170,11 @@ export const navigate = (path: string): boolean => {
   return navigated;
 };
 
-export const register = (root = doc.body): () => void => {
+export const register = (root: RefAPI): () => void => {
   let t: EventTarget | null,
     subs = [
       subEvent(
-        root,
+        root.target,
         "click",
         (e) =>
           !e.ctrlKey &&
@@ -184,7 +185,7 @@ export const register = (root = doc.body): () => void => {
       ),
 
       subEvent(
-        root,
+        root.target,
         submit,
         (e) =>
           (t = e.target) instanceof HTMLFormElement &&

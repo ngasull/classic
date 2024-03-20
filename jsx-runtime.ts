@@ -1,5 +1,5 @@
 import { VoidElement } from "./dom/void.ts";
-import { isEvaluable } from "./js/types.ts";
+import { isJSable } from "./js/types.ts";
 import {
   DOMLiteral,
   ElementKind,
@@ -92,7 +92,7 @@ const flatten = (children: JSXChildren): JSX.Element[] => {
       fragment.push(...flatten(child));
     } else if (child != null) {
       fragment.push(
-        isEvaluable<DOMLiteral>(child)
+        isJSable<DOMLiteral>(child)
           ? { kind: ElementKind.JS, element: child }
           : typeof child === "object"
           ? (child as JSX.Element)

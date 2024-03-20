@@ -1,5 +1,5 @@
-import { RefAPI } from "../dom.ts";
-import type { JSable, JSFn, JSONable, JSWithBody } from "../js/types.ts";
+import type { RefAPI } from "../dom.ts";
+import type { JSable, JSFn, JSWithBody } from "../js/types.ts";
 import type { JSXInternal } from "./dom.d.ts";
 
 declare global {
@@ -101,12 +101,9 @@ export type JSXChildren =
 
 export type DOMLiteral = string | number;
 
-export type JSXRef<T extends EventTarget> = JSFn<[RefAPI<T>], unknown>;
+export type JSXRef<T extends EventTarget> = JSFn<[RefAPI<T>], any>;
 
-export type JSXSyncRef<T extends EventTarget> = {
-  readonly fn: JSWithBody<[RefAPI<T>], void>;
-  readonly values: readonly JSONable[];
-};
+export type JSXSyncRef<T extends EventTarget> = JSWithBody<[RefAPI<T>], void>;
 
 export type JSXComponent<O extends Record<string, unknown> = {}> = (
   props: O,

@@ -1,24 +1,26 @@
 import { apiArg, argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
 import { JSONable, peek, setResources, subStore } from "./dom/store.ts";
-import { call, doc, first, forEach, isArray, isFunction } from "./dom/util.ts";
+import { call, doc, forEach, isArray, isFunction } from "./dom/util.ts";
 
 /**
  * Tuple holding JS hooks produced by a jsx render.
  * First holds node index, rest represents activation info.
  */
-export type Activation = [number, ...ActivationInfo][];
+export type Activation = [number, ActivationInfo][];
 
 /** Either JS with resource dependencies or activation for child nodes. */
-export type ActivationInfo =
-  | [string, ...number[]] // [Raw JS, ...Resources]
-  | [Activation];
-
-const targetSymbol = Symbol();
+type ActivationInfo =
+  | string // Raw JS
+  | Activation;
 
 const arg0 = argn(0);
 
-type APIBase<T extends EventTarget> = { target: T; uris: readonly string[] };
+type APIBase<T extends EventTarget> = {
+  target: T;
+  uris: readonly string[];
+  peek: (uri: string) => JSONable | undefined;
+};
 
 const apiDef = {
   effect:
@@ -46,9 +48,9 @@ const apiHandler = {
   ) {
     return target[p] ??= apiDef[p]?.(target);
   },
-} as ProxyHandler<RefAPI<EventTarget>>;
+} as ProxyHandler<RefAPI>;
 
-export type RefAPI<N extends EventTarget> = APIBase<N> & {
+export type RefAPI<N extends EventTarget = EventTarget> = APIBase<N> & {
   effect: (cb: () => void | (() => void), uris?: string[]) => void;
 };
 
@@ -56,50 +58,23 @@ const activateNode = (
   nodes: NodeList | Node[],
   activation: Activation,
   modules: unknown[],
-  resources: string[],
-  resourcesProxyHandler: ProxyHandler<
-    { (rs: number[]): JSONable[]; [targetSymbol]: number[]; u: string[] }
-  > = {
-    get: (target, i) =>
-      i == "u"
-        ? target.u ??= target[targetSymbol].map((i) => resources[i])
-        : i in Array.prototype
-        ? target[targetSymbol][i as any]
-        : peek(resources[target[targetSymbol][i as any]]),
-  },
+  peekResIndex: (i: number) => JSONable | undefined,
 ): ReadonlyArray<() => void> =>
-  activation.flatMap(([childIndex, h1, ...rs]) => {
+  activation.flatMap(([childIndex, h1]) => {
     let child = nodes[childIndex],
-      api = new Proxy({ node: child, uris: resources } as any, apiHandler);
+      api = new Proxy(
+        { target: child, peek } as any,
+        apiHandler,
+      );
 
     return isArray(h1)
-      ? activateNode(
-        child.childNodes,
-        h1,
-        modules,
-        resources,
-        resourcesProxyHandler,
-      )
+      ? activateNode(child.childNodes, h1, modules, peekResIndex)
       : [() => {
-        let mkResProxy = (rs: number[]) => {
-          let callArray = (...argArray: number[]) =>
-            mkResProxy(argArray.map((r) => rs[r]));
-          callArray[targetSymbol] = rs;
-          return new Proxy(
-            callArray as unknown as JSONable[] & {
-              (rs: number[]): JSONable[];
-              [targetSymbol]: number[];
-              u: string[];
-            },
-            resourcesProxyHandler,
-          );
-        };
-
         new Function(arg0, apiArg, modulesArg, resourcesArg, h1)(
           api,
           api,
           modules,
-          mkResProxy(rs as number[]),
+          peekResIndex,
         );
       }];
   });
@@ -124,7 +99,7 @@ export const a = (
             nodes,
             activation,
             ms,
-            resources.map(first),
+            (i) => peek(resources[i][0]),
           ),
           call,
         )

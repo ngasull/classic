@@ -145,7 +145,7 @@ export const replaceWith = (
   ...node: readonly (Node | string)[]
 ) => el.replaceWith(...node);
 
-type ListenerOfAddEvent<T extends EventTarget | Window, K extends string> = (
+type ListenerOfAddEvent<K extends string, T extends EventTarget> = (
   this: T,
   e: T extends Window ? K extends keyof WindowEventMap ? WindowEventMap[K]
     : Event
@@ -157,22 +157,19 @@ export const stopPropagation = (e: Event) => e.stopPropagation();
 
 export const subEvent = <
   K extends string,
-  T extends (EventTarget | Window) & {
-    addEventListener(type: K, listener: ListenerOfAddEvent<T, K>): void;
-    removeEventListener(type: K, listener: ListenerOfAddEvent<T, K>): void;
-  },
+  T extends EventTarget,
 >(
   target: T,
   type: K,
-  listener: ListenerOfAddEvent<T, K>,
+  listener: ListenerOfAddEvent<K, T>,
   stopPropag?: 1 | 0 | boolean,
 ) => {
-  let wrappedListener = stopPropag
+  let wrappedListener = (stopPropag
     ? (function (e) {
       stopPropagation(e);
       listener.call(this, e);
     } as typeof listener)
-    : listener;
+    : listener) as EventListener;
   target.addEventListener(type, wrappedListener);
   return () => target.removeEventListener(type, wrappedListener);
 };

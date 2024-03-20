@@ -1,6 +1,6 @@
 export type Resource<T extends JSONable> = {
   uri: string;
-  value: T | Promise<T>;
+  value: T | PromiseLike<T>;
 };
 
 export type JS<T> =
@@ -25,40 +25,66 @@ export type JS<T> =
           typeof Boolean["prototype"][K]
         >;
       }
-    : T extends JSGeneric<unknown> ? JSGenericTo<T>
-    : (
-      & (T extends (...args: infer Args) => infer Ret ? (
-          <R = Ret>(
-            ...args: {
-              [I in keyof Args]: Args[I] extends infer Arg ?
-                  | JSable<Arg>
-                  | (Arg extends null | undefined ? Arg : never)
-                  | { [AI in keyof Arg]: JSable<Arg[AI]> }
-                  | (Arg extends
-                    ((...args: infer AArgs) => infer AR) | null | undefined
-                    ? JSFn<AArgs, AR>
-                    : Arg extends JSONable ? Arg
-                    : never)
-                : never;
-            }
-          ) => JS<R>
-        )
-        : T extends unknown[] ? { [I in keyof T]: JS<T[I]> }
-        : unknown)
-      & (T extends {} ? (
-          // Only map actual objects to avoid polluting debugging
-          {} extends T ? unknown : { [K in keyof T]: JS<T[K]> }
-        )
-        : unknown)
-    ));
+    : JSOverride<T> extends never ? (
+        & (T extends (...args: infer Args) => infer Ret ? (
+            <R = Ret>(
+              ...args: {
+                [I in keyof Args]: Args[I] extends infer Arg ?
+                    | JSable<Arg>
+                    | (Arg extends null | undefined ? Arg : never)
+                    | { [AI in keyof Arg]: JSable<Arg[AI]> }
+                    | (Arg extends
+                      ((...args: infer AArgs) => infer AR) | null | undefined
+                      ? JSFn<AArgs, AR>
+                      : Arg extends JSONable ? Arg
+                      : never)
+                  : never;
+              }
+            ) => JS<R>
+          )
+          : T extends unknown[] ? { [I in keyof T]: JS<T[I]> }
+          : unknown)
+        & (T extends {} ? (
+            // Only map actual objects to avoid polluting debugging
+            {} extends T ? unknown
+              : { [K in keyof T]: K extends "then" ? JSable<T[K]> : JS<T[K]> }
+          )
+          : unknown)
+      )
+    : JSOverride<T>);
+
+declare global {
+  namespace JSOverrides {
+    interface JS<T> {
+      // Promise: T extends Promise<infer G> ? JSPromise<G> : never;
+    }
+  }
+}
+
+type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
+
+export enum JSReplacementKind {
+  Module,
+  Resource,
+}
+
+export type JSReplacement =
+  & { readonly position: number }
+  & ({
+    readonly kind: JSReplacementKind.Module;
+    readonly value: { readonly url: string };
+  } | {
+    readonly kind: JSReplacementKind.Resource;
+    readonly value: Resource<JSONable>;
+  });
 
 export type JSMeta<T> = {
   readonly [typeSymbol]: T;
   readonly [returnSymbol]: false;
   readonly rawJS: string;
-  readonly modules: Record<string, number[]>; // { [path]: indices }
-  readonly resources: readonly Resource<JSONable>[];
+  readonly replacements: JSReplacement[];
   readonly body?: JSFnBody<unknown>;
+  readonly isThenable?: boolean;
 };
 declare const typeSymbol: unique symbol;
 
@@ -150,18 +176,7 @@ export const isJSable = <T>(v: unknown): v is JSable<T> =>
   v != null && (typeof v === "object" || typeof v === "function") &&
   jsSymbol in v;
 
-export const isEvaluable = <T>(v: unknown): v is JSable<T> =>
-  isJSable(v) && !(v[jsSymbol].body && Array.isArray(v[jsSymbol].body));
-
-export const isReactive = <T>(v: unknown): v is JSable<T> =>
-  isEvaluable(v) && v[jsSymbol].resources.length > 0;
-
-type JSGeneric<T> = Promise<T>;
-type JSGenericTo<T extends JSGeneric<unknown>> = T extends Promise<infer T>
-  ? JSPromise<T>
-  : never;
-
-type JSPromise<T> = {
+export type JSPromise<T> = {
   readonly then: <R>(
     onFulfilled: (value: JS<T>) => JSable<R | PromiseLike<R>>,
     onRejected?: (reason: JS<unknown>) => JSable<R | PromiseLike<R>>,

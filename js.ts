@@ -9,6 +9,8 @@ import type {
   JSFnBody,
   JSMeta,
   JSONable,
+  JSPromise,
+  JSReplacement,
   JSReturn,
   JSStatements,
   JSStatementsReturn,
@@ -18,7 +20,7 @@ import type {
   ResourceGroup,
   Resources,
 } from "./js/types.ts";
-import { isReactive, jsSymbol } from "./js/types.ts";
+import { JSReplacementKind, jsSymbol } from "./js/types.ts";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -61,7 +63,9 @@ export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
 
 export const effect = (cb: JSFn<[], void | (() => void)>): JS<void> => {
   const cbFn = fn(cb);
-  const uris = cbFn[jsSymbol].resources.map((r) => r.uri);
+  const uris = cbFn[jsSymbol].replacements.flatMap(({ kind, value }) =>
+    kind === JSReplacementKind.Resource ? [value.uri] : []
+  );
   return js<void>`${unsafe(apiArg)}.effect(${cbFn},${uris})`;
 };
 
@@ -73,17 +77,16 @@ const jsProxyHandler: ProxyHandler<{
   (...argArray: ReadonlyArray<JSable<unknown> | JSONable>): JSable<unknown>;
   [targetSymbol]: JSable<unknown>;
 }> = {
-  has(target, p) {
-    const expr = target[targetSymbol];
-    return p === jsSymbol || p in expr;
-  },
+  has: (target, p) => p in target[targetSymbol],
 
-  get(target, p) {
+  get: (target, p) => {
     const expr = target[targetSymbol];
     return p === Symbol.iterator
       ? () => jsIterator(expr)
       : typeof p === "symbol"
-      ? expr[p as typeof jsSymbol]
+      ? expr[p as keyof JSable<unknown>]
+      : p === "then" && !expr[jsSymbol].isThenable
+      ? { [jsSymbol]: jsFn`${expr}.then`[jsSymbol] }
       : !isNaN(parseInt(p))
       ? jsFn`${expr}[${unsafe(p as string)}]`
       : safeRecordKeyRegExp.test(p as string)
@@ -94,20 +97,14 @@ const jsProxyHandler: ProxyHandler<{
 
 const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
   let i = -1;
-
-  const r: IteratorResult<JS<T>> = {
-    done: false as boolean,
-    get value() {
-      return jsFn<T>`${expr}[${i}]`;
-    },
-  };
-
   return {
     next() {
       i += 1;
-      // Iterator is meant for destructuring through JS. Prevent infinite iteration
-      if (i > 50) r.done = true;
-      return r;
+      return {
+        // Iterator is meant for destructuring through JS. Prevent infinite iteration
+        done: i > 50,
+        value: jsFn<T>`${expr}[${i}]`,
+      };
     },
   };
 };
@@ -117,8 +114,7 @@ export const unsafe = (js: string): JSable<unknown> => mkPureJS(js);
 const mkPureJS = (rawJS: string) => ({
   [jsSymbol]: ({
     rawJS,
-    modules: [] as const,
-    resources: [] as const,
+    replacements: [],
   }) as unknown as JSMeta<unknown>,
 });
 
@@ -126,16 +122,7 @@ const jsFn = ((
   tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
 ) => {
-  const modules: Record<string, number[]> = {};
-
-  let resIndex = 0;
-  const resources = new Map<Resource<JSONable>, number>();
-  const trackResource = (res: Resource<JSONable>) => {
-    if (!resources.has(res)) {
-      resources.set(res, resIndex++);
-    }
-    return resources.get(res)!;
-  };
+  const replacements: JSReplacement[] = [];
 
   // Tracks the cumulated length of generated JS
   let exprIndex = 0;
@@ -150,24 +137,13 @@ const jsFn = ((
       jsSymbol in expr && expr[jsSymbol]
     ) {
       for (
-        const [path, relativeIndices] of Object.entries(expr[jsSymbol].modules)
+        const { position, ...def } of expr[jsSymbol].replacements
       ) {
-        const indices = relativeIndices.map((i) => i + exprIndex);
-        if (path in modules) {
-          modules[path].push(...indices);
-        } else {
-          modules[path] = indices;
-        }
+        // Preserves position ordering
+        replacements.push({ position: exprIndex + position, ...def });
       }
 
-      const subres = expr[jsSymbol].resources.map(trackResource);
-      if (subres.length > 0 && subres.some((r, i) => r !== i)) {
-        return `(${resourcesArg}=>(${expr[jsSymbol].rawJS}))(${resourcesArg}(${
-          subres.join(",")
-        }))`;
-      } else {
-        return expr[jsSymbol].rawJS;
-      }
+      return expr[jsSymbol].rawJS;
     } else if (typeof expr === "function") {
       return handleExpression(fn(expr));
     } else if (Array.isArray(expr)) {
@@ -201,15 +177,7 @@ const jsFn = ((
   if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
 
   const expr = mkPureJS(rawParts.join(""));
-  const exprMeta = expr[jsSymbol] as Writable<JSMeta<unknown>>;
-  exprMeta.modules = modules;
-
-  if (resources.size > 0) {
-    exprMeta.resources = [...resources.keys()] as [
-      Resource<JSONable>,
-      ...Resource<JSONable>[],
-    ];
-  }
+  (expr[jsSymbol] as Writable<JSMeta<unknown>>).replacements = replacements;
 
   const callExpr = (
     ...argArray: ReadonlyArray<JSable<unknown> | JSONable>
@@ -217,7 +185,6 @@ const jsFn = ((
     const jsArgs = argArray.length > 0
       ? argArray.reduce((acc, a) => jsFn`${acc},${a}`)
       : jsFn``;
-
     return jsFn`${expr}(${jsArgs})`;
   };
 
@@ -228,32 +195,33 @@ const jsFn = ((
   <T>(tpl: ReadonlyArray<string>, ...exprs: ImplicitlyJSable[]): JS<T>;
 };
 
-export const toRawJS = (
-  expr: JSable<any>,
-  cb?: (path: string, moduleIndex: number) => number,
+export const toRawJS = <T>(
+  expr: JSable<T>,
+  { storeModule, storeResource }: {
+    readonly storeModule: (url: string) => number;
+    readonly storeResource: (resource: Resource<JSONable>) => number;
+  },
 ): string => {
-  const { modules, rawJS } = expr[jsSymbol];
-
-  const replacements = Object.entries(modules)
-    .flatMap(([path, indices], moduleIndex) =>
-      indices.map((index) =>
-        [index, cb ? cb(path, moduleIndex) : moduleIndex] as const
-      )
-    )
-    .sort((a, b) => a[0] - b[0]);
+  const { replacements, rawJS } = expr[jsSymbol];
 
   const jsParts = Array<string>(2 * replacements.length + 1);
   jsParts[0] = replacements.length > 0
-    ? rawJS.slice(0, replacements[0][0])
+    ? rawJS.slice(0, replacements[0].position)
     : rawJS;
 
   let i = -1;
-  for (const [index, replacement] of replacements) {
+  for (const { position, kind, value } of replacements) {
     i++;
-    jsParts[i * 2] = `${modulesArg}[${replacement}]`;
+
+    jsParts[i * 2] = kind === JSReplacementKind.Module
+      ? `${modulesArg}[${storeModule(value.url)}]`
+      : kind === JSReplacementKind.Resource
+      ? `${resourcesArg}(${storeResource(value)})`
+      : "null";
+
     jsParts[i * 2 + 1] = rawJS.slice(
-      index,
-      replacements[i + 1]?.[0] ?? rawJS.length,
+      position,
+      replacements[i + 1]?.position ?? rawJS.length,
     );
   }
 
@@ -262,30 +230,33 @@ export const toRawJS = (
 
 const jsUtils = {
   eval: async <T>(expr: JSable<T>): Promise<T> => {
-    const argsBody = [`return(${toRawJS(expr)})`];
+    let m = 0, r = 0;
+    const mStore: Record<string, number> = {};
+    const mArg: Promise<unknown>[] = [];
+    const rStore: Record<string, number> = {};
+    const rArg: (JSONable | PromiseLike<JSONable>)[] = [];
+
+    const argsBody = [`return(${
+      toRawJS(expr, {
+        storeModule: (url) => (
+          mStore[url] ??= (mArg.push(import(url)), m++)
+        ),
+        storeResource: (res) => (
+          rStore[res.uri] ??= (rArg.push(res.value), r++)
+        ),
+      })
+    })`];
     const args: unknown[] = [];
 
-    if (isReactive(expr)) {
-      argsBody.unshift(resourcesArg);
-      args.unshift((function mkResProxy(resources): JSONable[] {
-        return new Proxy(
-          ((...argArray: number[]) =>
-            mkResProxy(
-              argArray.map((r) => resources[r]),
-            )) as unknown as JSONable[],
-          {
-            get(_, p) {
-              return resources[p as any];
-            },
-          },
-        );
-      })(await Promise.all(expr[jsSymbol].resources.map((r) => r.value))));
+    if (m > 0) {
+      argsBody.unshift(modulesArg);
+      args.unshift(await Promise.all(mArg));
     }
 
-    const modules = Object.keys(expr[jsSymbol].modules);
-    if (modules.length > 0) {
-      argsBody.unshift(modulesArg);
-      args.unshift(await Promise.all(modules.map((path) => import(path))));
+    if (r > 0) {
+      const resources = await Promise.all(rArg);
+      argsBody.unshift(resourcesArg);
+      args.unshift((i: number) => resources[i]);
     }
 
     return new Function(...argsBody)(...args);
@@ -295,7 +266,11 @@ const jsUtils = {
 
   module: <M>(path: string): JS<M> => {
     const expr = jsFn<M>``;
-    (expr[jsSymbol] as Writable<JSMeta<M>>).modules = { [path]: [0] };
+    (expr[jsSymbol] as Writable<JSMeta<M>>).replacements = [{
+      position: 0,
+      kind: JSReplacementKind.Module,
+      value: { url: path },
+    }];
     return expr;
   },
 
@@ -331,13 +306,17 @@ const jsUtils = {
   set: <T>(receiver: JSable<T>, value: ImplicitlyJSable<T>): JS<never> =>
     jsFn<never>`${receiver}=${value}`,
 
+  promise: <T extends PromiseLike<unknown>>(
+    expr: JSable<T>,
+  ): JS<T> & JSPromise<Awaited<T>> => {
+    const p = js<T>`${expr}`;
+    (p[jsSymbol] as Writable<JSMeta<T>>).isThenable = true;
+    return p as JS<T> & JSPromise<Awaited<T>>;
+  },
+
   symbol: jsSymbol,
 
-  window: new Proxy({}, {
-    get(_, p) {
-      return jsFn`${unsafe(p as string)}`;
-    },
-  }) as
+  window: new Proxy({}, { get: (_, p) => jsFn`${unsafe(p as string)}` }) as
     & Readonly<Omit<JS<Window & typeof globalThis>, keyof JSWindowOverrides>>
     & JSWindowOverrides,
 };
@@ -372,21 +351,21 @@ type JSWindowOverrides = {
 
 export const resource = <T extends Readonly<Record<string, JSONable>>>(
   uri: string,
-  fetch: () => T | Promise<T>,
+  fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
 ): JS<T> => {
-  let value = null;
+  const expr = jsFn<T>``;
 
-  const r = {
-    uri,
-    get value() {
-      return (value ??= [fetch()])[0];
+  let value: null | [T | PromiseLike<T>] = null;
+  (expr[jsSymbol] as Writable<JSMeta<T>>).replacements = [{
+    position: 0,
+    kind: JSReplacementKind.Resource,
+    value: {
+      uri,
+      get value() {
+        return (value ??= [typeof fetch === "function" ? fetch() : fetch])[0];
+      },
     },
-  } as Resource<T>;
-
-  const expr = jsFn`${unsafe(resourcesArg)}[0]` as unknown as JS<
-    T
-  >;
-  (expr[jsSymbol] as Writable<JSMeta<T>>).resources = [r];
+  }];
 
   return expr;
 };
@@ -420,21 +399,20 @@ export const resources = <
     ): Resources<T, U> => ({
       group,
       values: (
-        values.map((v) => make(v)[jsSymbol].resources[0])
-      ) as unknown as ReadonlyArray<Resource<T>>,
+        values.map((v) =>
+          (make(v)[jsSymbol].replacements[0].value as Resource<JSONable>).value
+        )
+      ) as unknown as readonly Resource<T>[],
     }),
   });
   return group;
 };
 
-export const sync = async <J extends JSWithBody<any, any>>(js: J): Promise<{
-  readonly fn: J;
-  readonly values: readonly JSONable[];
-}> => {
-  return {
-    fn: js,
-    values: js[jsSymbol].resources.length > 0
-      ? await Promise.all(js[jsSymbol].resources.map(({ value }) => value))
-      : [],
-  };
+export const sync = async <J extends JSable<any>>(js: J): Promise<J> => {
+  for (const { kind, value } of js[jsSymbol].replacements) {
+    if (kind === JSReplacementKind.Resource) {
+      value.value = await Promise.resolve(value.value);
+    }
+  }
+  return js;
 };

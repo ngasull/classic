@@ -3,7 +3,7 @@ import { voidElements } from "../dom/void.ts";
 import { fn, js, statements, sync, toRawJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
 import {
-  isEvaluable,
+  isJSable,
   JS,
   JSable,
   JSONable,
@@ -171,9 +171,11 @@ const writeActivationScript = (
   if (activation.length) {
     write("<script>(p=>");
     write(
-      js.import<typeof import("../dom.ts")>(domPath).then((dom) =>
-        dom.a(activation, publicModules, store, js<NodeList | Node[]>`p`)
-      )[jsSymbol].rawJS,
+      escapeScriptContent(
+        js.promise(js.import<typeof import("../dom.ts")>(domPath)).then((dom) =>
+          dom.a(activation, publicModules, store, js<NodeList | Node[]>`p`)
+        )[jsSymbol].rawJS,
+      ),
     );
     write(")(");
     write(
@@ -201,47 +203,43 @@ const deepActivation = (
   const storeModule = (m: string) =>
     modules.get(m) ?? (modules.set(m, ++lastModuleIndex), lastModuleIndex);
 
-  const activationStore = new Map<string, [number, JSONable]>();
+  const activationStore = new Map<string, [number, [string, JSONable]]>();
   let storeIndex = 0;
-  const storeResource = ({ uri }: Resource<JSONable>, value: JSONable) => {
+  const storeResource = ({ uri, value }: Resource<JSONable>) => {
     if (!activationStore.has(uri)) {
-      activationStore.set(uri, [storeIndex++, value]);
+      if (typeof (value as PromiseLike<JSONable>)?.then === "function") {
+        throw Error(
+          `Resource values should have been awaited with \`sync\` at this point`,
+        );
+      }
+      activationStore.set(uri, [storeIndex++, [uri, value as JSONable]]);
     }
     return activationStore.get(uri)![0];
   };
+
   return [
     domActivation(root, storeModule, storeResource),
     [...modules.keys()],
-    [...activationStore.entries()].map(([uri, [, value]]) => [uri, value]),
+    [...activationStore.values()].map(([, entry]) => entry),
   ];
 };
 
 const domActivation = (
   dom: readonly DOMNode[],
   storeModule: (path: string) => number,
-  storeResource: (resource: Resource<JSONable>, value: JSONable) => number,
+  storeResource: (resource: Resource<JSONable>) => number,
 ) => {
   const activation: Activation = [];
 
   for (let i = 0; i < dom.length; i++) {
     const { kind, node, refs = [] } = dom[i];
     for (const ref of refs) {
-      const { body } = ref.fn[jsSymbol];
+      const { body } = ref[jsSymbol];
       const refFnBody = Array.isArray(body)
         ? statements(body as JSStatements<unknown>)
         : body as JSable<unknown>;
 
-      activation.push([
-        i,
-        toRawJS(
-          refFnBody,
-          (path) => storeModule(path),
-        ),
-        ...(ref.fn[jsSymbol].resources?.map((r, i) =>
-          storeResource(r, ref.values[i])
-        ) ??
-          []),
-      ]);
+      activation.push([i, toRawJS(refFnBody, { storeModule, storeResource })]);
     }
     if (kind === DOMNodeKind.Tag) {
       const childrenActivation = domActivation(
@@ -394,11 +392,9 @@ const nodeToDOMTree = async (
       ][] = [];
       const refs: JSXSyncRef<Element>[] = ref
         ? [
-          await sync(
-            fn((api: JS<RefAPI<Element>>) =>
-              (ref as unknown as JSXRef<Element>)(api) as JSable<void>
-            ),
-          ),
+          await sync(fn((api: JS<RefAPI<Element>>) =>
+            (ref as unknown as JSXRef<Element>)(api)
+          )),
         ]
         : [];
 
@@ -433,7 +429,7 @@ const nodeToDOMTree = async (
                   ),
                 ),
               );
-            } else if (isEvaluable<string | number | boolean | null>(value)) {
+            } else if (isJSable<string | number | boolean | null>(value)) {
               await recordAttr(name, await js.eval(value));
               reactiveAttributes.push([name, value]);
             } else {
@@ -457,67 +453,51 @@ const nodeToDOMTree = async (
         )),
       );
 
-      return [
-        {
-          kind: DOMNodeKind.Tag,
-          node: {
-            tag: tag,
-            attributes,
-            children: await nodeToDOMTree(children, ctxData),
-          },
-          refs,
+      return [{
+        kind: DOMNodeKind.Tag,
+        node: {
+          tag: tag,
+          attributes,
+          children: await nodeToDOMTree(children, ctxData),
         },
-      ];
+        refs,
+      }];
     }
 
     case ElementKind.JS: {
-      return [
-        {
-          kind: DOMNodeKind.Text,
-          node: {
-            text: String(await js.eval(syncRoot.element)),
-          },
-          refs: [
-            await sync(
-              fn(({ target, effect }: JS<RefAPI<Text>>) =>
-                effect(() => js`${target}.textContent=${(syncRoot.element)}`)
-              ),
-            ),
-          ],
+      return [{
+        kind: DOMNodeKind.Text,
+        node: {
+          text: String(await js.eval(syncRoot.element) ?? ""),
         },
-      ];
+        refs: [
+          await sync(
+            fn(({ target, effect }: JS<RefAPI<Text>>) =>
+              effect(() => js`${target}.textContent=${(syncRoot.element)}`)
+            ),
+          ),
+        ],
+      }];
     }
 
     case ElementKind.Text: {
-      return [
-        {
-          kind: DOMNodeKind.Text,
-          node: { text: String(syncRoot.element.text) },
-          refs: syncRoot.element.ref
-            ? [
-              await sync(
-                fn((api) => syncRoot.element.ref!(api) as JSable<void>),
-              ),
-            ]
-            : [],
-        },
-      ];
+      return [{
+        kind: DOMNodeKind.Text,
+        node: { text: String(syncRoot.element.text) },
+        refs: syncRoot.element.ref
+          ? [await sync(fn((api) => syncRoot.element.ref!(api)))]
+          : [],
+      }];
     }
 
     case ElementKind.HTMLNode: {
-      return [
-        {
-          kind: DOMNodeKind.HTMLNode,
-          node: { html: syncRoot.element.html },
-          refs: syncRoot.element.ref
-            ? [
-              await sync(
-                fn((api) => syncRoot.element.ref!(api) as JSable<void>),
-              ),
-            ]
-            : [],
-        },
-      ];
+      return [{
+        kind: DOMNodeKind.HTMLNode,
+        node: { html: syncRoot.element.html },
+        refs: syncRoot.element.ref
+          ? [await sync(fn((api) => syncRoot.element.ref!(api)))]
+          : [],
+      }];
     }
   }
 
