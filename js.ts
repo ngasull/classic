@@ -1,7 +1,6 @@
 import { apiArg } from "./dom/arg-alias.ts";
 import { argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import type {
-  ExtractImplicitlyJSable,
   ImplicitlyJSable,
   JS,
   JSable,
@@ -11,7 +10,6 @@ import type {
   JSONable,
   JSPromise,
   JSReplacement,
-  JSReturn,
   JSStatements,
   JSStatementsReturn,
   JSWithBody,
@@ -81,17 +79,21 @@ const jsProxyHandler: ProxyHandler<{
 
   get: (target, p) => {
     const expr = target[targetSymbol];
+    const { isOptional, isThenable } = expr[jsSymbol];
     return p === Symbol.iterator
       ? () => jsIterator(expr)
       : typeof p === "symbol"
       ? expr[p as keyof JSable<unknown>]
-      : p === "then" && !expr[jsSymbol].isThenable
-      ? { [jsSymbol]: jsFn`${expr}.then`[jsSymbol] }
+      : p === "then" && !isThenable
+      ? {
+        [jsSymbol]:
+          jsFn`${expr}${unsafe(isOptional ? "?." : ".")}then`[jsSymbol],
+      }
       : !isNaN(parseInt(p))
-      ? jsFn`${expr}[${unsafe(p as string)}]`
+      ? jsFn`${expr}${unsafe(isOptional ? "?." : "")}[${unsafe(p)}]`
       : safeRecordKeyRegExp.test(p as string)
-      ? jsFn`${expr}.${unsafe(p as string)}`
-      : jsFn`${expr}[${JSON.stringify(p)}]`;
+      ? jsFn`${expr}${unsafe(isOptional ? "?." : ".")}${unsafe(p)}`
+      : jsFn`${expr}${unsafe(isOptional ? "?." : "")}[${p}]`;
   },
 };
 
@@ -262,8 +264,6 @@ const jsUtils = {
     return new Function(...argsBody)(...args);
   },
 
-  import: <M>(url: string): JS<Promise<M>> => jsFn<Promise<M>>`import(${url})`,
-
   module: <M>(path: string): JS<M> => {
     const expr = jsFn<M>``;
     (expr[jsSymbol] as Writable<JSMeta<M>>).replacements = [{
@@ -274,37 +274,11 @@ const jsUtils = {
     return expr;
   },
 
-  nonNullable: <T>(v: T): T extends JS<infer T> ? JS<NonNullable<T>> : never =>
-    v as T extends JS<infer T> ? JS<NonNullable<T>> : never,
-
-  if: (
-    (test: ImplicitlyJSable, stmts: JSStatements<unknown>) =>
-      jsFn`if(${test}){${statements(stmts)}}`
-  ) as <S extends JSStatements<unknown>>(
-    test: ImplicitlyJSable,
-    stmts: S,
-  ) => JSStatementsReturn<S>,
-
-  elseif: (
-    (test: ImplicitlyJSable, stmts: JSStatements<unknown>) =>
-      jsFn`else if(${test}){${statements(stmts)}}`
-  ) as <S extends JSStatements<unknown>>(
-    test: ImplicitlyJSable,
-    stmts: S,
-  ) => JSStatementsReturn<S>,
-
-  else: (
-    (stmts: JSStatements<unknown>) => jsFn`else{${statements(stmts)}}`
-  ) as <S extends JSStatements<unknown>>(stmts: S) => JSStatementsReturn<S>,
-
-  return: (
-    (expr: ImplicitlyJSable) => jsFn<unknown>`return ${expr}`
-  ) as <E extends ImplicitlyJSable>(
-    expr: E,
-  ) => JS<ExtractImplicitlyJSable<E>> & JSReturn,
-
-  set: <T>(receiver: JSable<T>, value: ImplicitlyJSable<T>): JS<never> =>
-    jsFn<never>`${receiver}=${value}`,
+  optional: <T>(expr: JSable<T>): JS<NonNullable<T>> => {
+    const p = js<NonNullable<T>>`${expr}`;
+    (p[jsSymbol] as Writable<JSMeta<NonNullable<T>>>).isOptional = true;
+    return p;
+  },
 
   promise: <T extends PromiseLike<unknown>>(
     expr: JSable<T>,

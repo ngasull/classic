@@ -172,9 +172,10 @@ const writeActivationScript = (
     write("<script>(p=>");
     write(
       escapeScriptContent(
-        js.promise(js.import<typeof import("../dom.ts")>(domPath)).then((dom) =>
-          dom.a(activation, publicModules, store, js<NodeList | Node[]>`p`)
-        )[jsSymbol].rawJS,
+        js.promise(js<Promise<typeof import("../dom.ts")>>`import(${domPath})`)
+          .then((dom) =>
+            dom.a(activation, publicModules, store, js<NodeList | Node[]>`p`)
+          )[jsSymbol].rawJS,
       ),
     );
     write(")(");
@@ -422,9 +423,9 @@ const nodeToDOMTree = async (
                     effect(() => [
                       js`let c=${value}`,
                       target.addEventListener(eventType, unsafe("c")),
-                      js.return(() =>
+                      js`return ${
                         target.removeEventListener(eventType, unsafe("c"))
-                      ),
+                      }`,
                     ])
                   ),
                 ),

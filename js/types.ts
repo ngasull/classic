@@ -84,6 +84,7 @@ export type JSMeta<T> = {
   readonly rawJS: string;
   readonly replacements: JSReplacement[];
   readonly body?: JSFnBody<unknown>;
+  readonly isOptional?: boolean;
   readonly isThenable?: boolean;
 };
 declare const typeSymbol: unique symbol;
