@@ -186,10 +186,14 @@ const writeActivationScript = (
     );
     write(");");
 
-    if (bundle.watched) {
+    if (bundle.watched && !partial) {
       write(
         `new EventSource("/hmr").addEventListener("change",()=>location.reload());`,
       );
+    }
+
+    if (partial) {
+      write(`document.currentScript.remove();`);
     }
 
     write("</script>");

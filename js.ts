@@ -211,19 +211,19 @@ export const toRawJS = <T>(
     ? rawJS.slice(0, replacements[0].position)
     : rawJS;
 
-  let i = -1;
+  let i = 0;
   for (const { position, kind, value } of replacements) {
     i++;
 
-    jsParts[i * 2] = kind === JSReplacementKind.Module
+    jsParts[i * 2 - 1] = kind === JSReplacementKind.Module
       ? `${modulesArg}[${storeModule(value.url)}]`
       : kind === JSReplacementKind.Resource
       ? `${resourcesArg}(${storeResource(value)})`
       : "null";
 
-    jsParts[i * 2 + 1] = rawJS.slice(
+    jsParts[i * 2] = rawJS.slice(
       position,
-      replacements[i + 1]?.position ?? rawJS.length,
+      replacements[i]?.position ?? rawJS.length,
     );
   }
 

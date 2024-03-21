@@ -4,7 +4,6 @@ import {
   adoptNode,
   call,
   customEvent,
-  dataset,
   dispatchPrevented,
   doc,
   doMatch,
@@ -27,35 +26,41 @@ import {
 } from "./util.ts";
 
 const suspenseDelay = 500;
-const routeAttr = "route";
-const routeElSelector = `[data-${routeAttr}]`;
 const routeIndexParam = "_index";
 const routeLayoutParam = "_layout";
 
-let routeRequests: Record<string, Promise<Document> | 0 | undefined> = {};
+type Segment = { p: string; s?: ChildNode };
+const segments = new Map<EventTarget, Segment>();
+let unsubRoot: () => void;
+
+let routeRequests: Record<string, Promise<Document> | undefined> = {};
 
 const findObsolete = (
-  url: string,
-  parent?: HTMLElement,
-  path = "",
-): [string[], HTMLElement] | null => {
-  let routeEl = querySelector<HTMLElement>(routeElSelector, parent),
-    subPath = routeEl ? path + dataset(routeEl)[routeAttr] : path;
-  return routeEl
-    ? startsWith(url, subPath) ? findObsolete(url, routeEl, subPath) : [
-      startsWith(subPath, url)
-        // Only index needed
-        ? [url]
-        // Subpaths starting from `path`
-        : url
-          .slice(path.length)
+  destination: string,
+  parent: ChildNode = doc.body,
+  segment: Segment = segments.get(parent)!,
+): [string[], ChildNode] | null | undefined => {
+  let slot = segment?.s,
+    subSegment = slot && segments.get(slot),
+    subPath = (subSegment ?? segment).p;
+  return slot
+    ? subSegment && startsWith(destination, subPath)
+      // Slot is part of destination: find inside
+      ? findObsolete(destination, slot, subSegment)
+      : startsWith(subPath, destination)
+      // Only index needed
+      ? [[destination], slot]
+      // Subpaths starting from segment
+      : [
+        destination
+          .slice(segment.p.length)
           .split("/")
-          .map((_, i, arr) => path + arr.slice(0, i + 1).join("/")),
-      routeEl,
-    ]
+          .map((_, i, arr) => segment.p + arr.slice(0, i + 1).join("/")),
+        slot,
+      ]
     : parent
-    ? [[url], parent] // No layout to replace; parent is the page to replace
-    : routeEl;
+    ? [[destination], parent] // No layout to replace; parent is the page to replace
+    : slot;
 };
 
 const handleLocationChange = async () => {
@@ -66,18 +71,19 @@ const handleLocationChange = async () => {
   if (!obsolete) return location.replace(pathname + search);
 
   let [missingPartials, slot] = obsolete,
-    curSlot = slot as HTMLElement | null | undefined,
+    curSlot = slot as ChildNode | null | undefined,
     searchParams = new URLSearchParams(search),
     resEls: Promise<Document>[],
-    el: Document;
+    el: Document,
+    raceRes: unknown;
 
   searchParams.append(routeIndexParam, "");
 
   await Promise.race([
-    new Promise<undefined>((resolve) => setTimeout(resolve, suspenseDelay)),
+    new Promise<void>((resolve) => setTimeout(resolve, suspenseDelay)),
     Promise.all(
       resEls = missingPartials.map(
-        (url, i, q: any) => (routeRequests[url] ||= q = fetch(
+        (url, i, q: any) => (routeRequests[url] ??= q = fetch(
           `${url}?${
             i == missingPartials.length - 1 ? searchParams : routeLayoutParam
           }`,
@@ -88,10 +94,17 @@ const handleLocationChange = async () => {
           .then((html) =>
             q == routeRequests[url] ? parseHtml(html) : Promise.reject()
           )
-          .finally(() => (routeRequests[url] = 0))),
+          .finally(() => {
+            delete routeRequests[url];
+          })),
       ),
     ),
   ]);
+
+  if (!raceRes && curSlot) {
+    cleanup(curSlot);
+    replaceWith(curSlot, curSlot = doc.createElement("progress"));
+  }
 
   for await (el of resEls) {
     if (!(curSlot = processHtmlRoute(el, curSlot!))) break;
@@ -100,7 +113,7 @@ const handleLocationChange = async () => {
   dispatchPrevented(slot, customEvent(routeLoadEvent));
 };
 
-const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
+const processHtmlRoute = (receivedDoc: Document, slot: ChildNode) => {
   let handleResource =
       <A extends string>(el: HTMLElement & Record<A, string>, srcAttr: A) =>
       (tagName: string, src?: string) => {
@@ -111,12 +124,15 @@ const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
           head.append(adoptNode(el));
         }
       },
-    receivedChildren = receivedDoc.body.children,
-    children,
     content,
-    script = 0 as Element | 0;
+    script = 0 as Element | 0,
+    receivedChildren = receivedDoc.body.children,
+    children = [
+      content = receivedChildren.length
+        ? adoptNode(receivedChildren[0])
+        : textElement(receivedDoc.body.innerText),
+    ];
 
-  children = [content = adoptNode(receivedChildren[0])];
   if (receivedChildren.length) {
     children.push(script = adoptNode(receivedChildren[0]));
   }
@@ -140,6 +156,8 @@ const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
   trackChildren(content);
   replaceWith(slot, ...children);
 
+  subSegment(content);
+
   // Scripts parsed with DOMParser are not marked to be run
   if (script) {
     reviveScript(script as HTMLScriptElement);
@@ -150,7 +168,13 @@ const processHtmlRoute = (receivedDoc: Document, slot: HTMLElement) => {
     reviveScript,
   );
 
-  return querySelector<HTMLElement>(routeElSelector, content);
+  return segments.get(content)?.s;
+};
+
+const textElement = (text: string): Element => {
+  const el = doc.createElement("span");
+  el.innerText = text;
+  return el;
 };
 
 const reviveScript = (script: HTMLScriptElement) => {
@@ -170,11 +194,18 @@ export const navigate = (path: string): boolean => {
   return navigated;
 };
 
-export const register = (root: RefAPI): () => void => {
+export const ref = (
+  { effect, target }: RefAPI<ChildNode>,
+  path?: string,
+): void => effect(() => subSegment(target, path));
+
+const subRoot = () => {
   let t: EventTarget | null,
-    subs = [
+    body = doc.body,
+    parent: Node | null,
+    subs: Array<() => void> = [
       subEvent(
-        root.target,
+        body,
         "click",
         (e) =>
           !e.ctrlKey &&
@@ -185,7 +216,7 @@ export const register = (root: RefAPI): () => void => {
       ),
 
       subEvent(
-        root.target,
+        body,
         submit,
         (e) =>
           (t = e.target) instanceof HTMLFormElement &&
@@ -196,14 +227,34 @@ export const register = (root: RefAPI): () => void => {
       ),
 
       subEvent(win, "popstate", handleLocationChange),
-
-      ...[...querySelectorAll(routeElSelector)]
-        .map(trackChildren)
-        .reverse(),
     ];
 
-  return () => {
-    routeRequests = {};
+  segments.set(body, { p: "/" });
+
+  unsubRoot = () => {
+    segments.delete(body);
     subs.map(call);
+    routeRequests = {};
+  };
+};
+
+const subSegment = (target: ChildNode, path?: string) => {
+  if (!segments.size) subRoot();
+
+  if (path) segments.set(target, { p: path });
+
+  // Notify closest parent that this target is the slot
+  let parent: Node | null = target, parentSegment: Segment | null | undefined;
+  do {
+    parent = parent.parentNode;
+    parentSegment = parent && segments.get(parent);
+  } while (parent && !parentSegment);
+  if (parentSegment) parentSegment.s = target;
+
+  return () => {
+    if (path != null) segments.delete(target);
+
+    if (segments.size < 2) unsubRoot();
+    else if (parent) delete segments.get(parent)!.s;
   };
 };

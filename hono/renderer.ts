@@ -5,7 +5,8 @@ import type {
   MiddlewareHandler,
   ParamKeys,
 } from "../deps/hono.ts";
-import { Bundle, BundleResult } from "../js/bundle.ts";
+import type { Bundle } from "../js/bundle.ts";
+import type { JS } from "../js/types.ts";
 import { jsx } from "../jsx-runtime.ts";
 import { bundleContext, createContext, renderToStream } from "../jsx/render.ts";
 import {
@@ -20,6 +21,7 @@ declare module "../deps/hono.ts" {
     (content: JSX.Element): Response | Promise<Response>;
   }
   interface ContextVariableMap {
+    readonly [domRouterSymbol]: JS<typeof import("../dom/router.ts")>;
     readonly [composedLayoutSymbol]?: JSXParentComponent<
       Record<string, unknown>
     >;
@@ -30,6 +32,7 @@ declare module "../deps/hono.ts" {
 
 export const honoContext = createContext("hono");
 
+const domRouterSymbol = Symbol("domRouter");
 const composedLayoutSymbol = Symbol("composedLayout");
 const layoutSymbol = Symbol("layout");
 const jsxContextSymbol = Symbol("jsxContext");
@@ -38,45 +41,54 @@ export const jsxRenderer = <
   E extends Env & { Variables: ContextVariableMap },
   P extends string,
   I extends Input,
->(bundle: Bundle | BundleResult): MiddlewareHandler<E, P, I> =>
-async (c, next) => {
-  c.set(jsxContextSymbol, [
-    honoContext(c),
-    bundleContext(
-      bundle instanceof Bundle
-        ? { result: await bundle.result, watched: bundle.watched }
-        : { result: bundle },
-    ),
-  ]);
+>(bundle: Bundle): MiddlewareHandler<E, P, I> => {
+  const domRouter = bundle.add<typeof import("../dom/router.ts")>(
+    import.meta.resolve("../dom/router.ts"),
+  );
+  const bundleContextValue = bundle.result.then((result) => ({
+    result,
+    watched: bundle.watched,
+  }));
 
-  c.setRenderer((content: JSX.Element) => {
-    const Layout = c.get(layoutSymbol);
-    const ComposedLayout = c.get(composedLayoutSymbol);
+  return async (c, next) => {
+    c.set(domRouterSymbol, domRouter);
+    c.set(jsxContextSymbol, [
+      honoContext(c),
+      bundleContext(await bundleContextValue),
+    ]);
 
-    if (c.req.query("_layout") != null && !Layout) return c.notFound();
+    c.setRenderer((content: JSX.Element) => {
+      const Layout = c.get(layoutSymbol);
+      const ComposedLayout = c.get(composedLayoutSymbol);
 
-    content = jsx("div", { "data-route": c.req.path, children: content });
+      if (c.req.query("_layout") != null && !Layout) return c.notFound();
 
-    return c.body(
-      renderToStream(
-        c.req.query("_layout") != null
-          ? jsx(
-            Layout!,
-            c.req.param() as any,
-            jsx("progress", { "data-route": "" }),
-          )
-          : c.req.query("_index") == null && ComposedLayout
-          ? jsx(ComposedLayout, null, content)
-          : content,
-        { context: c.get(jsxContextSymbol) },
-      ),
-      { headers: { "Content-Type": "text/html; charset=UTF-8" } },
-    );
-  });
+      content = jsx("div", {
+        ref: (api) => domRouter.ref(api, c.req.path),
+        children: content,
+      });
 
-  await next();
+      return c.body(
+        renderToStream(
+          c.req.query("_layout") != null
+            ? jsx(
+              Layout!,
+              c.req.param() as any,
+              jsx("progress", { ref: domRouter.ref }),
+            )
+            : c.req.query("_index") == null && ComposedLayout
+            ? jsx(ComposedLayout, null, content)
+            : content,
+          { context: c.get(jsxContextSymbol) },
+        ),
+        { headers: { "Content-Type": "text/html; charset=UTF-8" } },
+      );
+    });
 
-  c.set(jsxContextSymbol, undefined);
+    await next();
+
+    c.set(jsxContextSymbol, undefined);
+  };
 };
 
 export const jsxContext =
@@ -102,6 +114,7 @@ async (c, next) => {
   const { routePath } = c.req;
   const params = c.req.param() as any;
 
+  const domRouter = c.get(domRouterSymbol);
   const ParentLayout = c.get(layoutSymbol);
   const ParentComposed = c.get(composedLayoutSymbol);
   const ComposedLayout = ParentComposed && Layout
@@ -112,10 +125,13 @@ async (c, next) => {
         jsx(
           "div",
           {
-            "data-route": c.req.path.split("/").slice(
-              0,
-              routePath.replace(/\/\*?$/, "").split("/").length,
-            ).join("/"),
+            ref: (api) =>
+              domRouter.ref(
+                api,
+                c.req.path.split("/")
+                  .slice(0, routePath.replace(/\/\*?$/, "").split("/").length)
+                  .join("/"),
+              ),
           },
           jsx(
             Layout as JSXParentComponent<Record<string, string>>,
