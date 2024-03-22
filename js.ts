@@ -290,6 +290,14 @@ const jsUtils = {
 
   symbol: jsSymbol,
 
+  track: (def: JSFn<[], any>): JS<void> => {
+    const f = fn(def);
+    const uris = f[jsSymbol].replacements.flatMap((r) =>
+      r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
+    );
+    return js`${unsafe(apiArg)}.effect(${f},${uris})`;
+  },
+
   window: new Proxy({}, { get: (_, p) => jsFn`${unsafe(p as string)}` }) as
     & Readonly<Omit<JS<Window & typeof globalThis>, keyof JSWindowOverrides>>
     & JSWindowOverrides,

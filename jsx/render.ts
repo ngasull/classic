@@ -423,8 +423,8 @@ const nodeToDOMTree = async (
               const eventType = eventMatch[1].toLowerCase();
               refs.push(
                 await sync(
-                  fn(({ target, effect }: JS<RefAPI<Element>>) =>
-                    effect(() => [
+                  fn(({ target }: JS<RefAPI<Element>>) =>
+                    js.track(() => [
                       js`let c=${value}`,
                       target.addEventListener(eventType, unsafe("c")),
                       js`return ${
@@ -448,8 +448,8 @@ const nodeToDOMTree = async (
         ...(await Promise.all(
           reactiveAttributes.map(([name, reactive]) =>
             sync(
-              fn(({ target, effect }: JS<RefAPI<Element>>) =>
-                effect(() =>
+              fn(({ target }: JS<RefAPI<Element>>) =>
+                js.track(() =>
                   js`let k=${name},v=${reactive};!v&&v!==""?${target}.removeAttribute(k):${target}.setAttribute(k,v===true?"":String(v))`
                 )
               ),
@@ -477,8 +477,8 @@ const nodeToDOMTree = async (
         },
         refs: [
           await sync(
-            fn(({ target, effect }: JS<RefAPI<Text>>) =>
-              effect(() => js`${target}.textContent=${(syncRoot.element)}`)
+            fn(({ target }: JS<RefAPI<Text>>) =>
+              js.track(() => js`${target}.textContent=${(syncRoot.element)}`)
             ),
           ),
         ],
