@@ -1,3 +1,4 @@
+import { reverseForOf } from "./util.ts";
 import {
   call,
   customEvent,
@@ -38,9 +39,9 @@ export const trackChildren = (node: Node) => {
       }
     }),
     cleanup = () => {
+      reverseForOf(nodes.values(), (cleanups) => reverseForOf(cleanups, call));
       untrackUnsub();
       trackUnsub();
-      forEach(nodes, (cleanups) => forEach(cleanups, call));
       nodes.clear();
     };
 

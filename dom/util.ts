@@ -50,6 +50,14 @@ export const forOf = <T>(iterable: Iterable<T>, cb: (item: T) => unknown) => {
   for (let i of iterable) cb(i);
 };
 
+export const reverseForOf = <T>(
+  iterable: Iterable<T>,
+  cb: (item: T) => unknown,
+): void => {
+  let arr = [...iterable], i = arr.length - 1;
+  for (; i >= 0; i--) cb(arr[i]);
+};
+
 export const id = <T>(v: T): T => v;
 
 export const isFunction = <T extends Function>(v: unknown): v is T =>
