@@ -1,6 +1,6 @@
 export type Resource<T extends JSONable> = {
-  uri: string;
-  value: T | PromiseLike<T>;
+  readonly uri: string;
+  readonly value: T | PromiseLike<T>;
 };
 
 export type JS<T> =

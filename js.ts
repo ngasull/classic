@@ -338,6 +338,9 @@ export const resource = <T extends Readonly<Record<string, JSONable>>>(
       get value() {
         return (value ??= [typeof fetch === "function" ? fetch() : fetch])[0];
       },
+      set value(v: T | PromiseLike<T>) {
+        value = [v];
+      },
     },
   }];
 
@@ -385,7 +388,9 @@ export const resources = <
 export const sync = async <J extends JSable<any>>(js: J): Promise<J> => {
   for (const { kind, value } of js[jsSymbol].replacements) {
     if (kind === JSReplacementKind.Resource) {
-      value.value = await Promise.resolve(value.value);
+      (value as Writable<Resource<JSONable>>).value = await Promise.resolve(
+        value.value,
+      );
     }
   }
   return js;
