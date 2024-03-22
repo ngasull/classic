@@ -1,6 +1,6 @@
 import { apiArg, argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
-import { JSONable, peek, setResources, subStore } from "./dom/store.ts";
+import { JSONable, store, StoreAPI } from "./dom/store.ts";
 import { call, doc, forEach, isArray, isFunction } from "./dom/util.ts";
 
 /**
@@ -17,24 +17,23 @@ type ActivationInfo =
 const arg0 = argn(0);
 
 type APIBase<T extends EventTarget> = {
-  target: T;
-  uris: readonly string[];
-  peek: (uri: string) => JSONable | undefined;
+  readonly target: T;
+  readonly store: StoreAPI;
 };
 
 const apiDef = {
   effect:
     (api: APIBase<EventTarget>) =>
-    (cb: () => void | (() => void), uris = api.uris): void => {
+    (cb: () => void | (() => void), uris?: readonly string[]): void => {
       let cleanup: (() => void) | void = cb(),
-        unsubStore = subStore(uris, () => {
+        unsubStore = uris && store.sub(uris, () => {
           isFunction(cleanup) && cleanup();
           cleanup = cb();
         });
       registerCleanup(
         api.target,
         () => {
-          unsubStore();
+          unsubStore?.();
           isFunction(cleanup) && cleanup();
         },
       );
@@ -63,7 +62,7 @@ const activateNode = (
   activation.flatMap(([childIndex, h1]) => {
     let child = nodes[childIndex],
       api = new Proxy(
-        { target: child, peek } as any,
+        { target: child, store } as any,
         apiHandler,
       );
 
@@ -89,7 +88,7 @@ export const a = (
   nodes: NodeList | Node[],
 ): Promise<void> => (
   trackChildren(doc),
-    setResources(resources),
+    store.set(...resources),
     Promise
       .all(modules.map((m) => import(m)))
       .then((ms) =>
@@ -99,7 +98,7 @@ export const a = (
             nodes,
             activation,
             ms,
-            (i) => peek(resources[i][0]),
+            (i) => store.peek(resources[i][0]),
           ),
           call,
         )

@@ -44,9 +44,12 @@ export const forEach = <
 >(
   iterable: T | null | undefined,
   cb: T extends Record<"forEach", (cb: infer Cb) => void> ? Cb : never,
-) => iterable?.forEach(cb);
+): void => iterable?.forEach(cb);
 
-export const forOf = <T>(iterable: Iterable<T>, cb: (item: T) => unknown) => {
+export const forOf = <T>(
+  iterable: Iterable<T>,
+  cb: (item: T) => unknown,
+): void => {
   for (let i of iterable) cb(i);
 };
 
