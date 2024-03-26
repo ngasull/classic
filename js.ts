@@ -288,6 +288,22 @@ const jsUtils = {
     return p as JS<T> & JSPromise<Awaited<T>>;
   },
 
+  string: (
+    tpl: ReadonlyArray<string>,
+    ...exprs: ImplicitlyJSable[]
+  ): JS<string> => {
+    const template = exprs.reduce<JS<string>>(
+      (a, b, i) => jsFn`${a}\${${b}}${jsString(tpl[i + 1])}`,
+      jsFn`${jsString(tpl[0])}`,
+    );
+
+    return jsFn`\`${template}\``;
+
+    function jsString(tpl: string) {
+      return unsafe(tpl.replaceAll("`", "\\`"));
+    }
+  },
+
   symbol: jsSymbol,
 
   track: (def: JSFn<[], any>): JS<void> => {
