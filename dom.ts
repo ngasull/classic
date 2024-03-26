@@ -1,7 +1,11 @@
-import { apiArg, argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
 import { JSONable, store, StoreAPI } from "./dom/store.ts";
-import { call, doc, forEach, isArray, isFunction } from "./dom/util.ts";
+import { doc, forEach, isArray, isFunction } from "./dom/util.ts";
+
+export type ActivationFn = (
+  modulesArg: string[],
+  resourcesArg: (i: number) => JSONable | undefined,
+) => Activation;
 
 /**
  * Tuple holding JS hooks produced by a jsx render.
@@ -10,11 +14,9 @@ import { call, doc, forEach, isArray, isFunction } from "./dom/util.ts";
 export type Activation = [number, ActivationInfo][];
 
 /** Either JS with resource dependencies or activation for child nodes. */
-type ActivationInfo =
-  | string // Raw JS
-  | Activation;
+export type ActivationInfo = ActivationRef | Activation;
 
-const arg0 = argn(0);
+export type ActivationRef = (api: RefAPI, apiArg: RefAPI) => void;
 
 type APIBase<T extends EventTarget> = {
   readonly target: T;
@@ -56,33 +58,19 @@ export type RefAPI<N extends EventTarget = EventTarget> = APIBase<N> & {
 const activateNode = (
   nodes: NodeList | Node[],
   activation: Activation,
-  modules: unknown[],
-  peekResIndex: (i: number) => JSONable | undefined,
-): ReadonlyArray<() => void> =>
-  activation.flatMap(([childIndex, h1]) => {
-    let child = nodes[childIndex],
-      api = new Proxy(
-        { target: child, store } as any,
-        apiHandler,
-      );
-
-    return isArray(h1)
-      ? activateNode(child.childNodes, h1, modules, peekResIndex)
-      : [() => {
-        new Function(arg0, apiArg, modulesArg, resourcesArg, h1)(
-          api,
-          api,
-          modules,
-          peekResIndex,
-        );
-      }];
-  });
+): ReadonlyArray<[ActivationRef, RefAPI]> =>
+  activation.flatMap(([childIndex, h1]) =>
+    isArray(h1) ? activateNode(nodes[childIndex].childNodes, h1) : [[
+      h1,
+      new Proxy({ target: nodes[childIndex], store } as any, apiHandler),
+    ]]
+  );
 
 /**
  * Attach JS hooks produced by a jsx render
  */
 export const a = (
-  activation: Activation,
+  activation: ActivationFn,
   modules: string[],
   resources: [string, JSONable][],
   nodes: NodeList | Node[],
@@ -96,11 +84,9 @@ export const a = (
           // Batch activations so that nodes are correctly read, allowing DOM manipulation
           activateNode(
             nodes,
-            activation,
-            ms,
-            (i) => store.peek(resources[i][0]),
+            activation(ms, (i) => store.peek(resources[i][0])),
           ),
-          call,
+          ([ref, api]) => ref(api, api),
         )
       )
 );

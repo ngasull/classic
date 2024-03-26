@@ -1,4 +1,11 @@
-import type { Activation, RefAPI } from "../dom.ts";
+import type {
+  Activation,
+  ActivationFn,
+  ActivationInfo,
+  ActivationRef,
+  RefAPI,
+} from "../dom.ts";
+import { apiArg, argn, modulesArg, resourcesArg } from "../dom/arg-alias.ts";
 import { voidElements } from "../dom/void.ts";
 import { fn, js, statements, sync, toRawJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
@@ -168,7 +175,7 @@ const writeActivationScript = (
   );
   if (!domPath) throw Error(`DOM lib is supposed to be bundled`);
 
-  if (activation.length) {
+  if (activation) {
     write("<script>(p=>");
     write(
       escapeScriptContent(
@@ -202,7 +209,7 @@ const writeActivationScript = (
 
 const deepActivation = (
   root: DOMNode[],
-): [Activation, string[], [string, JSONable][]] => {
+): [JSable<ActivationFn> | null, string[], [string, JSONable][]] => {
   let lastModuleIndex = -1;
   const modules = new Map<string, number>();
   const storeModule = (m: string) =>
@@ -222,8 +229,12 @@ const deepActivation = (
     return activationStore.get(uri)![0];
   };
 
+  const activation = domActivation(root, storeModule, storeResource);
+
   return [
-    domActivation(root, storeModule, storeResource),
+    activation.length
+      ? js`(${unsafe(modulesArg)},${unsafe(resourcesArg)})=>${activation}`
+      : null,
     [...modules.keys()],
     [...activationStore.values()].map(([, entry]) => entry),
   ];
@@ -234,17 +245,22 @@ const domActivation = (
   storeModule: (path: string) => number,
   storeResource: (resource: Resource<JSONable>) => number,
 ) => {
-  const activation: Activation = [];
+  const activation: JSable<[number, ActivationInfo]>[] = [];
 
   for (let i = 0; i < dom.length; i++) {
     const { kind, node, refs = [] } = dom[i];
     for (const ref of refs) {
       const { body } = ref[jsSymbol];
-      const refFnBody = Array.isArray(body)
-        ? statements(body as JSStatements<unknown>)
-        : body as JSable<unknown>;
+      const activationRef = js<ActivationRef>`((${unsafe(argn(0))},${
+        unsafe(apiArg)
+      })=>{${
+        Array.isArray(body) ? statements(body as JSStatements<unknown>) : body
+      }})`;
 
-      activation.push([i, toRawJS(refFnBody, { storeModule, storeResource })]);
+      activation.push([
+        i,
+        unsafe(toRawJS(activationRef, { storeModule, storeResource })),
+      ] as unknown as JSable<[number, ActivationRef]>);
     }
     if (kind === DOMNodeKind.Tag) {
       const childrenActivation = domActivation(
@@ -253,7 +269,9 @@ const domActivation = (
         storeResource,
       );
       if (childrenActivation.length > 0) {
-        activation.push([i, childrenActivation]);
+        activation.push(
+          [i, childrenActivation] as unknown as JSable<[number, Activation]>,
+        );
       }
     }
   }
