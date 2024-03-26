@@ -128,12 +128,16 @@ const jsFn = ((
 
   // Tracks the cumulated length of generated JS
   let exprIndex = 0;
+  const cumulate = (jsStr: string) => {
+    exprIndex += jsStr.length;
+    return jsStr;
+  };
 
   const handleExpression = (expr: ImplicitlyJSable): string => {
     if (expr === null) {
-      return `null`;
+      return cumulate(`null`);
     } else if (expr === undefined) {
-      return `undefined`;
+      return cumulate(`undefined`);
     } else if (
       (typeof expr === "function" || typeof expr === "object") &&
       jsSymbol in expr && expr[jsSymbol]
@@ -145,35 +149,44 @@ const jsFn = ((
         replacements.push({ position: exprIndex + position, ...def });
       }
 
-      return expr[jsSymbol].rawJS;
+      return cumulate(expr[jsSymbol].rawJS);
     } else if (typeof expr === "function") {
-      return handleExpression(fn(expr));
+      return cumulate(handleExpression(fn(expr)));
     } else if (Array.isArray(expr)) {
-      return `[${expr.map(handleExpression).join(",")}]`;
+      const handledExpr = `[${
+        expr.map((e) => {
+          exprIndex += 1;
+          return handleExpression(e);
+        }).join(",")
+      }]`;
+      exprIndex += 1;
+      return handledExpr;
     } else if (typeof expr === "object") {
-      return `{${
+      const handledExpr = `{${
         Object.entries(expr as { [k: string]: ImplicitlyJSable })
           .map(
-            ([k, expr]) =>
-              `${
+            ([k, expr]) => {
+              exprIndex += 1;
+              return `${
                 typeof k === "number" || safeRecordKeyRegExp.test(k)
                   ? k
                   : JSON.stringify(k)
-              }:${handleExpression(expr)}`,
+              }:${handleExpression(expr)}`;
+            },
           )
           .join(",")
       }}`;
+      exprIndex += 1;
+      return handledExpr;
     } else {
-      return JSON.stringify(expr);
+      return cumulate(JSON.stringify(expr));
     }
   };
 
   const rawParts = [];
   for (let i = 0; i < exprs.length; i++) {
     exprIndex += tpl[i].length;
-    const handledExpr = handleExpression(exprs[i]);
-    exprIndex += handledExpr.length;
-    rawParts.push(tpl[i], handledExpr);
+    rawParts.push(tpl[i], handleExpression(exprs[i]));
   }
 
   if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
