@@ -5,16 +5,16 @@ import type {
   ActivationRef,
   RefAPI,
 } from "../dom.ts";
-import { apiArg, argn, modulesArg, resourcesArg } from "../dom/arg-alias.ts";
+import { apiArg, modulesArg, resourcesArg } from "../dom/arg-alias.ts";
 import { voidElements } from "../dom/void.ts";
-import { fn, js, statements, sync, toRawJS, unsafe } from "../js.ts";
+import { fn, js, sync, toRawJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
 import {
   isJSable,
   JS,
   JSable,
   JSONable,
-  JSStatements,
+  JSReplacementKind,
   jsSymbol,
   Resource,
 } from "../js/types.ts";
@@ -179,10 +179,14 @@ const writeActivationScript = (
     write("<script>(p=>");
     write(
       escapeScriptContent(
-        js.promise(js<Promise<typeof import("../dom.ts")>>`import(${domPath})`)
-          .then((dom) =>
+        toRawJS(
+          js.promise(
+            js<Promise<typeof import("../dom.ts")>>`import(${domPath})`,
+          ).then((dom) =>
             dom.a(activation, publicModules, store, js<NodeList | Node[]>`p`)
-          )[jsSymbol].rawJS,
+          ),
+          { storeModule: neverStore, storeResource: neverStore },
+        ),
       ),
     );
     write(")(");
@@ -205,6 +209,10 @@ const writeActivationScript = (
 
     write("</script>");
   }
+};
+
+const neverStore = () => {
+  throw Error("Modules and resources must have already been stored");
 };
 
 const deepActivation = (
@@ -250,16 +258,16 @@ const domActivation = (
   for (let i = 0; i < dom.length; i++) {
     const { kind, node, refs = [] } = dom[i];
     for (const ref of refs) {
-      const { body } = ref[jsSymbol];
-      const activationRef = js<ActivationRef>`((${unsafe(argn(0))},${
-        unsafe(apiArg)
-      })=>{${
-        Array.isArray(body) ? statements(body as JSStatements<unknown>) : body
-      }})`;
+      const { args, replacements } = ref[jsSymbol];
+
+      replacements.some((v) =>
+        v.kind === JSReplacementKind.Argument && v.value.expr === args[0] &&
+        (v.value.name = apiArg, true)
+      );
 
       activation.push([
         i,
-        unsafe(toRawJS(activationRef, { storeModule, storeResource })),
+        unsafe(toRawJS<unknown>(ref, { storeModule, storeResource })),
       ] as unknown as JSable<[number, ActivationRef]>);
     }
     if (kind === DOMNodeKind.Tag) {
@@ -508,7 +516,11 @@ const nodeToDOMTree = async (
         kind: DOMNodeKind.Text,
         node: { text: String(syncRoot.element.text) },
         refs: syncRoot.element.ref
-          ? [await sync(fn((api) => syncRoot.element.ref!(api)))]
+          ? [
+            await sync(
+              fn((api: JS<RefAPI<Text>>) => syncRoot.element.ref!(api)),
+            ),
+          ]
           : [],
       }];
     }
@@ -518,7 +530,11 @@ const nodeToDOMTree = async (
         kind: DOMNodeKind.HTMLNode,
         node: { html: syncRoot.element.html },
         refs: syncRoot.element.ref
-          ? [await sync(fn((api) => syncRoot.element.ref!(api)))]
+          ? [
+            await sync(
+              fn((api: JS<RefAPI<Node>>) => syncRoot.element.ref!(api)),
+            ),
+          ]
           : [],
       }];
     }

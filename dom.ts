@@ -16,7 +16,7 @@ export type Activation = [number, ActivationInfo][];
 /** Either JS with resource dependencies or activation for child nodes. */
 export type ActivationInfo = ActivationRef | Activation;
 
-export type ActivationRef = (api: RefAPI, apiArg: RefAPI) => void;
+export type ActivationRef = (api: RefAPI) => void;
 
 type APIBase<T extends EventTarget> = {
   readonly target: T;
@@ -86,7 +86,7 @@ export const a = (
             nodes,
             activation(ms, (i) => store.peek(resources[i][0])),
           ),
-          ([ref, api]) => ref(api, api),
+          ([ref, api]) => ref(api),
         )
       )
 );

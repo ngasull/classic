@@ -64,6 +64,7 @@ declare global {
 type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 
 export enum JSReplacementKind {
+  Argument,
   Module,
   Resource,
 }
@@ -71,6 +72,13 @@ export enum JSReplacementKind {
 export type JSReplacement =
   & { readonly position: number }
   & ({
+    readonly kind: JSReplacementKind.Argument;
+    readonly value: {
+      readonly expr: JSable<unknown>;
+      readonly index: number;
+      name?: string;
+    };
+  } | {
     readonly kind: JSReplacementKind.Module;
     readonly value: { readonly url: string };
   } | {
@@ -83,6 +91,7 @@ export type JSMeta<T> = {
   readonly [returnSymbol]: false;
   readonly rawJS: string;
   readonly replacements: JSReplacement[];
+  readonly args?: readonly JSable<unknown>[];
   readonly body?: JSFnBody<unknown>;
   readonly isOptional?: boolean;
   readonly isThenable?: boolean;
@@ -100,7 +109,8 @@ export type JSFnBody<T> = JSable<T> | JSStatements<T>;
 export type JSWithBody<Args extends readonly unknown[], T> =
   & Omit<JS<(...args: Args) => T>, typeof jsSymbol>
   & {
-    [jsSymbol]: Omit<JSMeta<(...args: Args) => T>, "body"> & {
+    [jsSymbol]: Omit<JSMeta<(...args: Args) => T>, "args" | "body"> & {
+      readonly args: { [I in keyof Args]: JSable<Args[I]> };
       readonly body: JSFnBody<T>;
     };
   };

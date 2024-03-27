@@ -37,22 +37,21 @@ export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
   cb: Cb,
 ): Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
   : never => {
-  const argList = unsafe(
-    Array(cb.length).fill(0)
-      .map((_, i) => argn(i))
-      .join(","),
-  );
+  const args = Array(cb.length).fill(0).map((_, i) => arg(i));
 
-  const body = cb(
-    ...(Array(cb.length)
-      .fill(0)
-      .map((_, i) => jsFn`${unsafe(argn(i))}`)),
-  );
+  const argsJs = args.length > 1
+    ? jsFn`(${args.reduce((a, b) => jsFn`${a},${b}`)})`
+    : args.length === 1
+    ? args[0]
+    : unsafe("()");
+
+  const body = cb(...args);
 
   const jsfnExpr = Array.isArray(body)
-    ? jsFn`((${argList})=>{${statements(body as JSStatements<unknown>)}})`
-    : jsFn`((${argList})=>(${body}))`;
+    ? jsFn`(${argsJs}=>{${statements(body as JSStatements<unknown>)}})`
+    : jsFn`(${argsJs}=>(${body}))`;
 
+  (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).args = args;
   (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).body = body;
 
   return jsfnExpr as Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
@@ -198,7 +197,7 @@ const jsFn = ((
     ...argArray: ReadonlyArray<JSable<unknown> | JSONable>
   ) => {
     const jsArgs = argArray.length > 0
-      ? argArray.reduce((acc, a) => jsFn`${acc},${a}`)
+      ? argArray.reduce((a, b) => jsFn`${a},${b}`)
       : jsFn``;
     return jsFn`${expr}(${jsArgs})`;
   };
@@ -219,6 +218,16 @@ export const toRawJS = <T>(
 ): string => {
   const { replacements, rawJS } = expr[jsSymbol];
 
+  const argStore = new Map<JSable<unknown>, string>();
+  let argIndex = -1;
+  const storeArg = (expr: JSable<unknown>) =>
+    argStore.get(expr) ?? (() => {
+      argIndex += 1;
+      const name = argn(argIndex);
+      argStore.set(expr, name);
+      return name;
+    })();
+
   const jsParts = Array<string>(2 * replacements.length + 1);
   jsParts[0] = replacements.length > 0
     ? rawJS.slice(0, replacements[0].position)
@@ -228,7 +237,9 @@ export const toRawJS = <T>(
   for (const { position, kind, value } of replacements) {
     i++;
 
-    jsParts[i * 2 - 1] = kind === JSReplacementKind.Module
+    jsParts[i * 2 - 1] = kind === JSReplacementKind.Argument
+      ? value.name ?? storeArg(value.expr)
+      : kind === JSReplacementKind.Module
       ? `${modulesArg}[${storeModule(value.url)}]`
       : kind === JSReplacementKind.Resource
       ? `${resourcesArg}(${storeResource(value)})`
@@ -358,6 +369,25 @@ type JSWindowOverrides = {
       reject: (reason: any) => void;
     };
   };
+};
+
+export const arg = <T>(
+  index: number,
+  { name }: { name?: string } = {},
+): JS<T> => {
+  const expr = jsFn<T>``;
+
+  (expr[jsSymbol] as Writable<JSMeta<T>>).replacements = [{
+    position: 0,
+    kind: JSReplacementKind.Argument,
+    value: {
+      expr,
+      index,
+      name,
+    },
+  }];
+
+  return expr;
 };
 
 export const resource = <T extends Readonly<Record<string, JSONable>>>(
