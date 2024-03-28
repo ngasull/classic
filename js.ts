@@ -48,7 +48,7 @@ export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
   const body = cb(...args);
 
   const jsfnExpr = Array.isArray(body)
-    ? jsFn`(${argsJs}=>{${statements(body as JSStatements<unknown>)}})`
+    ? jsFn`(${argsJs}=>{${statements(body)}})`
     : jsFn`(${argsJs}=>(${body}))`;
 
   (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).args = args;

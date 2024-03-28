@@ -3,55 +3,59 @@ export type Resource<T extends JSONable> = {
   readonly value: T | PromiseLike<T>;
 };
 
-export type JS<T> =
+export type JS<T> = _JS<T, []>;
+
+type _JS<T, Depth extends unknown[]> =
   & JSable<T>
-  & (T extends string ? {
-      [K in keyof typeof String["prototype"]]: JS<
-        typeof String["prototype"][K]
-      >;
-    }
-    : T extends number ? {
-        [K in keyof typeof Number["prototype"]]: JS<
-          typeof Number["prototype"][K]
-        >;
-      }
-    : T extends bigint ? {
-        [K in keyof typeof BigInt["prototype"]]: JS<
-          typeof BigInt["prototype"][K]
-        >;
-      }
-    : T extends boolean ? {
-        [K in keyof typeof Boolean["prototype"]]: JS<
-          typeof Boolean["prototype"][K]
-        >;
-      }
+  & (T extends NonNullable<JSPrimitive>
+    ? { [K in keyof PrimitivePrototype<T>]: JS<PrimitivePrototype<T>[K]> }
     : JSOverride<T> extends never ? (
         & (T extends (...args: infer Args) => infer Ret ? (
-            <R = Ret>(
-              ...args: {
-                [I in keyof Args]: Args[I] extends infer Arg ?
-                    | JSable<Arg>
-                    | (Arg extends null | undefined ? Arg : never)
-                    | { [AI in keyof Arg]: JSable<Arg[AI]> }
-                    | (Arg extends
-                      ((...args: infer AArgs) => infer AR) | null | undefined
-                      ? JSFn<AArgs, AR>
-                      : Arg extends JSONable ? Arg
-                      : never)
-                  : never;
-              }
-            ) => JS<R>
+            <R = Ret>(...args: { [I in keyof Args]: JSArg<Args[I]> }) => JS<R>
           )
-          : T extends unknown[] ? { [I in keyof T]: JS<T[I]> }
+          : T extends unknown[] ? Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
+            : { [I in keyof T]: _JS<T[I], [0, ...Depth]> }
           : unknown)
-        & (T extends {} ? (
-            // Only map actual objects to avoid polluting debugging
-            {} extends T ? unknown
-              : { [K in keyof T]: K extends "then" ? JSable<T[K]> : JS<T[K]> }
-          )
+        & (Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
+          : T extends Record<any, any> ? (
+              // Only map actual objects to avoid polluting debugging
+              Record<any, never> extends T ? unknown
+                : {
+                  [K in keyof T]: K extends "then" ? JSable<T[K]>
+                    : _JS<T[K], [0, ...Depth]>;
+                }
+            )
           : unknown)
       )
     : JSOverride<T>);
+
+export type JSArg<Arg> = _JSArg<Arg, []>;
+
+type _JSArg<Arg, Depth extends unknown[]> =
+  | JSable<Arg>
+  | (OnlyJSArg<Arg, JSPrimitive> extends infer P extends JSPrimitive ? P
+    : never)
+  | (Depth["length"] extends 8 ? never // Prevent TS from infinitely recursing
+    : OnlyJSArg<Arg, JSMapped> extends infer Filtered extends JSMapped
+      ? { [I in keyof Filtered]: _JSArg<Filtered[I], [0, ...Depth]> }
+    : never)
+  | (OnlyJSArg<Arg, JSFunction> extends ((...args: infer AArgs) => infer AR)
+    ? JSFn<AArgs, AR>
+    : Arg extends JSONable ? Arg
+    : never);
+
+type PrimitivePrototype<T extends NonNullable<JSPrimitive>> = T extends string
+  ? typeof String["prototype"]
+  : T extends number ? typeof Number["prototype"]
+  : T extends bigint ? typeof BigInt["prototype"]
+  : T extends boolean ? typeof Boolean["prototype"]
+  : never;
+
+type JSArgUnion = JSMapped | JSFunction | JSPrimitive;
+type JSPrimitive = string | number | bigint | boolean | null | undefined;
+type JSMapped = readonly unknown[] | Record<any, any>;
+type JSFunction = Function | Record<any, any>;
+type OnlyJSArg<T, Filter> = Exclude<T, Exclude<JSArgUnion, Filter>>;
 
 declare global {
   namespace JSOverrides {
@@ -113,7 +117,7 @@ export type JSWithBody<Args extends readonly unknown[], T> =
     };
   };
 
-export type JSStatements<T> = readonly [
+export type JSStatements<T> = [
   JSable<unknown> | (JSable<T> & JSReturn),
   ...readonly (JSable<unknown> | (JSable<T> & JSReturn))[],
 ];
@@ -157,8 +161,8 @@ export type JSONArray = ReadonlyArray<JSONLiteral | JSONArray | JSONRecord>;
 export type JSONable = JSONLiteral | JSONRecord | JSONArray;
 
 export type ImplicitlyJSable<T = any> =
-  | JSFn<any, any>
   | JSable<T>
+  | JSFn<any, any>
   | JSONLiteral
   | undefined
   | readonly ImplicitlyJSable[]
