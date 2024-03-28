@@ -1,21 +1,17 @@
-import type {
-  Activation,
-  ActivationFn,
-  ActivationInfo,
-  ActivationRef,
-  RefAPI,
-} from "../dom.ts";
-import { apiArg, modulesArg, resourcesArg } from "../dom/arg-alias.ts";
+import type { Activation, EffectAPI } from "../dom.ts";
+import { apiArg, modulesArg, refsArg, resourcesArg } from "../dom/arg-alias.ts";
 import { voidElements } from "../dom/void.ts";
-import { fn, js, sync, toRawJS, unsafe } from "../js.ts";
+import { fn, js, mkRef, statements, sync, toRawJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
 import {
   isJSable,
   JS,
   JSable,
+  JSFn,
   JSONable,
   JSReplacementKind,
   jsSymbol,
+  JSWithBody,
   Resource,
 } from "../js/types.ts";
 import {
@@ -24,12 +20,12 @@ import {
   DOMNode,
   DOMNodeKind,
   ElementKind,
+  JSXComponentAPI,
   JSXContext,
   JSXContextAPI,
   JSXContextOf,
   JSXInitContext,
   JSXRef,
-  JSXSyncRef,
 } from "./types.ts";
 
 const id = <T>(v: T) => v;
@@ -62,15 +58,23 @@ export const renderToString = async (
 ) => {
   const acc: string[] = [];
   const ctxData = subContext(undefined, context);
+  ctxData.set(effectContext[contextSymbol], []);
+
   const bundle = mkContext(ctxData).get(bundleContext);
   const tree = await nodeToDOMTree(root, ctxData);
+  const effects = await Promise.all(
+    (ctxData.get(effectContext[contextSymbol]) as InferContext<
+      typeof effectContext
+    >)
+      .map((effect) => sync(fn(effect))),
+  );
 
   writeDOMTree(
     tree,
     (chunk) => acc.push(chunk),
     bundle
       ? ((partial) =>
-        writeActivationScript((chunk) => acc.push(chunk), tree, {
+        writeActivationScript((chunk) => acc.push(chunk), tree, effects, {
           bundle,
           partial,
         }))
@@ -90,23 +94,35 @@ export const renderToStream = (
         controller.enqueue(encoder.encode(chunk));
 
       const ctxData = subContext(undefined, context);
+      ctxData.set(effectContext[contextSymbol], []);
+
       const bundle = mkContext(ctxData).get(bundleContext);
 
-      nodeToDOMTree(root, ctxData).then((tree) => {
+      nodeToDOMTree(root, ctxData).then(async (tree) => {
+        const effects = await Promise.all(
+          (ctxData.get(effectContext[contextSymbol]) as InferContext<
+            typeof effectContext
+          >).map((effect) => sync(fn(effect))),
+        );
+
         writeDOMTree(
           tree,
           write,
           bundle
             ? ((partial) =>
-              writeActivationScript(write, tree, { bundle, partial }))
+              writeActivationScript(write, tree, effects, { bundle, partial }))
             : null,
         );
+
         controller.close();
       });
     },
   });
 
 type ContextData = Map<symbol, unknown>;
+
+export type InferContext<C extends JSXContext<any>> = C extends
+  JSXContext<infer T> ? T : never;
 
 export const createContext = <T>(name?: string): JSXContext<T> => {
   const context = (value: T) => [context[contextSymbol], value] as const;
@@ -149,6 +165,10 @@ const mkContext = (data: ContextData): JSXContextAPI => {
   return ctx;
 };
 
+const effectContext = createContext<JSFn<[EffectAPI], void | (() => void)>[]>(
+  "effect",
+);
+
 export const bundleContext = createContext<{
   readonly result: BundleResult;
   readonly watched?: boolean;
@@ -157,25 +177,73 @@ export const bundleContext = createContext<{
 const writeActivationScript = (
   write: (chunk: string) => void,
   children: DOMNode[],
+  effects: ReadonlyArray<JSWithBody<[EffectAPI], void | (() => void)>>,
   { bundle, partial = false }: {
     bundle: JSXContextOf<typeof bundleContext>;
     partial?: boolean;
   },
-) => {
-  const [activation, modules, store] = deepActivation(children);
-
-  const publicModules = modules.map((m) => {
-    const publicPath = bundle.result.publicPath(m);
-    if (!publicPath) throw Error(`Module expected to be bundled: ${m}`);
-    return publicPath;
-  });
-
-  const domPath = bundle.result.publicPath(
-    import.meta.resolve("../dom.ts"),
-  );
+): void => {
+  const domPath = bundle.result.publicPath(import.meta.resolve("../dom.ts"));
   if (!domPath) throw Error(`DOM lib is supposed to be bundled`);
 
-  if (activation) {
+  if (effects.length) {
+    for (const effect of effects) {
+      const { args } = effect[jsSymbol];
+
+      // Rename first arg to `apiArg`
+      if (args.length) {
+        (args[0][jsSymbol].replacements[0].value as { name?: string }).name =
+          apiArg;
+      }
+    }
+
+    const effectsExpr = fn(
+      (
+        modules: JS<readonly string[]>,
+        resources: JS<readonly [string, JSONable | undefined][]>,
+        refs: JS<readonly EventTarget[]>,
+      ) => {
+        (modules[jsSymbol].replacements[0].value as {
+          name?: string;
+        })
+          .name = modulesArg;
+        (resources[jsSymbol].replacements[0].value as { name?: string })
+          .name = resourcesArg;
+        (refs[jsSymbol].replacements[0].value as { name?: string })
+          .name = refsArg;
+        return js`${effects}`;
+      },
+    );
+
+    let lastModuleIndex = -1;
+    const modules = new Map<string, number>();
+    const storeModule = (m: string) =>
+      modules.get(m) ?? (modules.set(m, ++lastModuleIndex), lastModuleIndex);
+
+    const refs = new Map<JSable<EventTarget>, number>();
+    let lastRefIndex = -1;
+    for (const r of effectsExpr[jsSymbol].replacements) {
+      if (r.kind === JSReplacementKind.Ref && !refs.has(r.value.expr)) {
+        refs.set(r.value.expr, ++lastRefIndex);
+      }
+    }
+    const getRef = (expr: JSable<EventTarget>) => refs.get(expr);
+
+    const ress = new Map<string, [number, [string, JSONable]]>();
+    let lastResIndex = -1;
+    const storeResource = ({ uri, value }: Resource<JSONable>) => {
+      if (!ress.has(uri)) {
+        if (typeof (value as PromiseLike<JSONable>)?.then === "function") {
+          throw Error(
+            `Resource values should have been awaited with \`sync\` at this point`,
+          );
+        }
+        ress.set(uri, [++lastResIndex, [uri, value as JSONable]]);
+        return lastResIndex;
+      }
+      return ress.get(uri)![0];
+    };
+
     write("<script>(p=>");
     write(
       escapeScriptContent(
@@ -183,9 +251,22 @@ const writeActivationScript = (
           js.promise(
             js<Promise<typeof import("../dom.ts")>>`import(${domPath})`,
           ).then((dom) =>
-            dom.a(activation, publicModules, store, js<NodeList | Node[]>`p`)
+            dom.a(
+              domActivation(children, getRef),
+              unsafe(
+                toRawJS(effectsExpr, { storeModule, storeResource, getRef }),
+              ),
+              [...modules.keys()].map((m) => {
+                const publicPath = bundle.result.publicPath(m);
+                if (!publicPath) {
+                  throw Error(`Module expected to be bundled: ${m}`);
+                }
+                return publicPath;
+              }),
+              [...ress.values()].map(([, entry]) => entry),
+              js<NodeList | Node[]>`p`,
+            )
           ),
-          { storeModule: neverStore, storeResource: neverStore },
         ),
       ),
     );
@@ -211,75 +292,28 @@ const writeActivationScript = (
   }
 };
 
-const neverStore = () => {
-  throw Error("Modules and resources must have already been stored");
-};
-
-const deepActivation = (
-  root: DOMNode[],
-): [JSable<ActivationFn> | null, string[], [string, JSONable][]] => {
-  let lastModuleIndex = -1;
-  const modules = new Map<string, number>();
-  const storeModule = (m: string) =>
-    modules.get(m) ?? (modules.set(m, ++lastModuleIndex), lastModuleIndex);
-
-  const activationStore = new Map<string, [number, [string, JSONable]]>();
-  let storeIndex = 0;
-  const storeResource = ({ uri, value }: Resource<JSONable>) => {
-    if (!activationStore.has(uri)) {
-      if (typeof (value as PromiseLike<JSONable>)?.then === "function") {
-        throw Error(
-          `Resource values should have been awaited with \`sync\` at this point`,
-        );
-      }
-      activationStore.set(uri, [storeIndex++, [uri, value as JSONable]]);
-    }
-    return activationStore.get(uri)![0];
-  };
-
-  const activation = domActivation(root, storeModule, storeResource);
-
-  return [
-    activation.length
-      ? js`(${unsafe(modulesArg)},${unsafe(resourcesArg)})=>${activation}`
-      : null,
-    [...modules.keys()],
-    [...activationStore.values()].map(([, entry]) => entry),
-  ];
-};
-
 const domActivation = (
   dom: readonly DOMNode[],
-  storeModule: (path: string) => number,
-  storeResource: (resource: Resource<JSONable>) => number,
+  storeRef: (expr: JSable<EventTarget>) => number | undefined,
+  parent: readonly number[] = [],
 ) => {
-  const activation: JSable<[number, ActivationInfo]>[] = [];
+  const activation: Activation = [];
 
   for (let i = 0; i < dom.length; i++) {
-    const { kind, node, refs = [] } = dom[i];
-    for (const ref of refs) {
-      const { args, replacements } = ref[jsSymbol];
+    const { kind, node, ref } = dom[i];
 
-      replacements.some((v) =>
-        v.kind === JSReplacementKind.Argument && v.value.expr === args[0] &&
-        (v.value.name = apiArg, true)
-      );
-
-      activation.push([
-        i,
-        unsafe(toRawJS<unknown>(ref, { storeModule, storeResource })),
-      ] as unknown as JSable<[number, ActivationRef]>);
+    if (storeRef(ref) != null) {
+      activation.push([i]);
     }
+
     if (kind === DOMNodeKind.Tag) {
       const childrenActivation = domActivation(
         node.children,
-        storeModule,
-        storeResource,
+        storeRef,
+        [...parent, i],
       );
       if (childrenActivation.length > 0) {
-        activation.push(
-          [i, childrenActivation] as unknown as JSable<[number, Activation]>,
-        );
+        activation.push([i, childrenActivation]);
       }
     }
   }
@@ -379,6 +413,11 @@ const nodeToDOMTree = async (
   ctxData: ContextData,
 ): Promise<DOMNode[]> => {
   const syncRoot = await root;
+  const effects = ctxData.get(effectContext[contextSymbol]) as InferContext<
+    typeof effectContext
+  >;
+
+  const target: JS<EventTarget> = mkRef();
 
   if (Array.isArray(syncRoot)) {
     const children = await Promise
@@ -391,7 +430,11 @@ const nodeToDOMTree = async (
         children[i].kind === DOMNodeKind.Text &&
         children[i - 1].kind === DOMNodeKind.Text
       ) {
-        children.splice(i, 0, { kind: DOMNodeKind.Comment, node: "" });
+        children.splice(i, 0, {
+          kind: DOMNodeKind.Comment,
+          node: "",
+          ref: target,
+        });
       }
     }
 
@@ -402,11 +445,20 @@ const nodeToDOMTree = async (
     case ElementKind.Component: {
       const { Component, props } = syncRoot.element;
       const subCtxData = subContext(ctxData);
-      return nodeToDOMTree(Component(props, mkContext(subCtxData)), subCtxData);
+      const ctx = mkContext(subCtxData);
+      const api: JSXComponentAPI = new Proxy(
+        { context: ctx } as JSXComponentAPI,
+        componentApiHandler,
+      );
+      return nodeToDOMTree(Component(props, api), subCtxData);
     }
 
     case ElementKind.Comment: {
-      return [{ kind: DOMNodeKind.Comment, node: syncRoot.element }];
+      return [{
+        kind: DOMNodeKind.Comment,
+        node: syncRoot.element,
+        ref: target,
+      }];
     }
 
     case ElementKind.Intrinsic: {
@@ -421,13 +473,8 @@ const nodeToDOMTree = async (
         string,
         JSable<string | number | boolean | null>,
       ][] = [];
-      const refs: JSXSyncRef<Element>[] = ref
-        ? [
-          await sync(fn((api: JS<RefAPI<Element>>) =>
-            (ref as unknown as JSXRef<Element>)(api)
-          )),
-        ]
-        : [];
+
+      if (ref) (ref as unknown as JSXRef<Element>)(target as JS<Element>);
 
       const propEntries = Object.entries(props);
       let entry;
@@ -447,19 +494,13 @@ const nodeToDOMTree = async (
             const eventMatch = name.match(eventPropRegExp);
             if (eventMatch) {
               const eventType = eventMatch[1].toLowerCase();
-              refs.push(
-                await sync(
-                  fn(({ target }: JS<RefAPI<Element>>) =>
-                    js.track(() => [
-                      js`let c=${value}`,
-                      target.addEventListener(eventType, unsafe("c")),
-                      js`return ${
-                        target.removeEventListener(eventType, unsafe("c"))
-                      }`,
-                    ])
-                  ),
-                ),
-              );
+              effects.push(() => [
+                js`let c=${value}`,
+                target.addEventListener(eventType, unsafe("c")),
+                js`return ${
+                  target.removeEventListener(eventType, unsafe("c"))
+                }`,
+              ]);
             } else if (isJSable<string | number | boolean | null>(value)) {
               await recordAttr(name, await js.eval(value));
               reactiveAttributes.push([name, value]);
@@ -470,18 +511,20 @@ const nodeToDOMTree = async (
         })(name, value);
       }
 
-      refs.push(
-        ...(await Promise.all(
-          reactiveAttributes.map(([name, reactive]) =>
-            sync(
-              fn(({ target }: JS<RefAPI<Element>>) =>
-                js.track(() =>
-                  js`let k=${name},v=${reactive};!v&&v!==""?${target}.removeAttribute(k):${target}.setAttribute(k,v===true?"":String(v))`
-                )
-              ),
-            )
-          ),
-        )),
+      effects.push(
+        ...reactiveAttributes.flatMap(([name, reactive]) => {
+          const uris = reactive[jsSymbol].replacements.flatMap((r) =>
+            r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
+          );
+          return uris.length
+            ? [(api: JS<EffectAPI>) =>
+              api.sub(
+                target,
+                js`let k=${name},v=${reactive};!v&&v!==""?${target}.removeAttribute(k):${target}.setAttribute(k,v===true?"":String(v))`,
+                uris,
+              )]
+            : [];
+        }),
       );
 
       return [{
@@ -491,54 +534,99 @@ const nodeToDOMTree = async (
           attributes,
           children: await nodeToDOMTree(children, ctxData),
         },
-        refs,
+        ref: target,
       }];
     }
 
     case ElementKind.JS: {
+      const uris = syncRoot.element[jsSymbol].replacements.flatMap((r) =>
+        r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
+      );
+      if (uris.length) {
+        effects.push((api) =>
+          api.sub(
+            target,
+            js`_=>${target}.textContent=${(syncRoot.element)}`,
+            uris,
+          )
+        );
+      }
       return [{
         kind: DOMNodeKind.Text,
-        node: {
-          text: String(await js.eval(syncRoot.element) ?? ""),
-        },
-        refs: [
-          await sync(
-            fn(({ target }: JS<RefAPI<Text>>) =>
-              js.track(() => js`${target}.textContent=${(syncRoot.element)}`)
-            ),
-          ),
-        ],
+        node: { text: String(await js.eval(syncRoot.element) ?? "") },
+        ref: target,
       }];
     }
 
     case ElementKind.Text: {
+      if (syncRoot.element.ref) syncRoot.element.ref(target as JS<Text>);
       return [{
         kind: DOMNodeKind.Text,
         node: { text: String(syncRoot.element.text) },
-        refs: syncRoot.element.ref
-          ? [
-            await sync(
-              fn((api: JS<RefAPI<Text>>) => syncRoot.element.ref!(api)),
-            ),
-          ]
-          : [],
+        ref: target,
       }];
     }
 
     case ElementKind.HTMLNode: {
+      if (syncRoot.element.ref) syncRoot.element.ref(target as JS<Node>);
       return [{
         kind: DOMNodeKind.HTMLNode,
         node: { html: syncRoot.element.html },
-        refs: syncRoot.element.ref
-          ? [
-            await sync(
-              fn((api: JS<RefAPI<Node>>) => syncRoot.element.ref!(api)),
-            ),
-          ]
-          : [],
+        ref: target,
       }];
     }
   }
 
   throw Error(`Can't handle JSX node ${JSON.stringify(syncRoot)}`);
+};
+
+const componentApiHandler = {
+  get: (target: any, k) =>
+    target[k] ??= lazyComponentApi[k as keyof typeof lazyComponentApi]?.(
+      target,
+    ),
+} satisfies ProxyHandler<JSXComponentAPI>;
+
+const lazyComponentApi = {
+  effect: (target: JSXComponentAPI) =>
+  (
+    cb: JSFn<[EffectAPI], void | (() => void)>,
+    uris?:
+      | readonly string[]
+      | JSable<readonly string[]>
+      | readonly JSable<string>[],
+  ) => {
+    componentApiHandler.get(target, "context");
+    target.context(effectContext).push(
+      (api) => {
+        const effectJs = fn(cb);
+
+        // Make `cb` transparently use `api` from parent scope
+        if (effectJs[jsSymbol].args.length) {
+          (effectJs[jsSymbol].args[0][jsSymbol].replacements[0].value as {
+            name?: string;
+          }).name = apiArg;
+        }
+
+        const body = Array.isArray(effectJs[jsSymbol].body)
+          ? js`{${statements(effectJs[jsSymbol].body)}}`
+          : `(${effectJs[jsSymbol].body})`;
+
+        const subUris = uris ??
+          [
+            ...new Set(
+              effectJs[jsSymbol].replacements.flatMap((r) =>
+                r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
+              ),
+            ),
+          ];
+
+        return [
+          js`let cb=()=>${body}`,
+          js`cb()`,
+          js`return ${api.store.sub}(${subUris},cb)`,
+        ];
+      },
+    );
+  },
 };

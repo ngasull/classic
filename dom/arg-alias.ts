@@ -6,4 +6,6 @@ export const apiArg = "𐏑";
 
 export const modulesArg = "𐏓";
 
+export const refsArg = "𐏕";
+
 export const resourcesArg = "𐏔";

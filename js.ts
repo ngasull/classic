@@ -1,4 +1,4 @@
-import { apiArg } from "./dom/arg-alias.ts";
+import { refsArg } from "./dom/arg-alias.ts";
 import { argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import type {
   ImplicitlyJSable,
@@ -56,14 +56,6 @@ export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
 
   return jsfnExpr as Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
     : never;
-};
-
-export const effect = (cb: JSFn<[], void | (() => void)>): JS<void> => {
-  const cbFn = fn(cb);
-  const uris = cbFn[jsSymbol].replacements.flatMap(({ kind, value }) =>
-    kind === JSReplacementKind.Resource ? [value.uri] : []
-  );
-  return js<void>`${unsafe(apiArg)}.effect(${cbFn},${uris})`;
 };
 
 const targetSymbol = Symbol("target");
@@ -197,21 +189,26 @@ const jsFn = ((
 
 export const toRawJS = <T>(
   expr: JSable<T>,
-  { storeModule, storeResource }: {
-    readonly storeModule: (url: string) => number;
-    readonly storeResource: (resource: Resource<JSONable>) => number;
-  },
+  {
+    storeModule = neverStore,
+    storeResource = neverStore,
+    getRef = neverStore,
+  }: {
+    readonly storeModule?: (url: string) => number;
+    readonly storeResource?: (resource: Resource<JSONable>) => number;
+    readonly getRef?: (expr: JSable<EventTarget>) => number | undefined;
+  } = {},
 ): string => {
   const { replacements, rawJS } = expr[jsSymbol];
 
   const argStore = new Map<JSable<unknown>, string>();
   let argIndex = -1;
-  const storeArg = (expr: JSable<unknown>) =>
+  const storeArg = (expr: JSable<unknown>, name?: string) =>
     argStore.get(expr) ?? (() => {
       argIndex += 1;
-      const name = argn(argIndex);
-      argStore.set(expr, name);
-      return name;
+      const storedName = name ?? argn(argIndex);
+      argStore.set(expr, storedName);
+      return storedName;
     })();
 
   const jsParts = Array<string>(2 * replacements.length + 1);
@@ -222,7 +219,7 @@ export const toRawJS = <T>(
     i++;
 
     jsParts[i * 2 - 1] = kind === JSReplacementKind.Argument
-      ? value.name ?? storeArg(value.expr)
+      ? storeArg(value.expr, value.name)
       : kind === JSReplacementKind.Module
       ? `${modulesArg}[${storeModule(value.url)}]`
       : kind === JSReplacementKind.Ref
@@ -235,6 +232,10 @@ export const toRawJS = <T>(
   }
 
   return jsParts.join("");
+};
+
+const neverStore = () => {
+  throw Error("All modules, refs and resources must be stored");
 };
 
 const jsUtils = {
@@ -313,14 +314,6 @@ const jsUtils = {
 
   symbol: jsSymbol,
 
-  track: (def: JSFn<[], any>): JS<void> => {
-    const f = fn(def);
-    const uris = f[jsSymbol].replacements.flatMap((r) =>
-      r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
-    );
-    return js`${unsafe(apiArg)}.effect(${f},${uris})`;
-  },
-
   window: new Proxy({}, { get: (_, p) => jsFn`${unsafe(p as string)}` }) as
     & Readonly<Omit<JS<Window & typeof globalThis>, keyof JSWindowOverrides>>
     & JSWindowOverrides,
@@ -368,6 +361,18 @@ export const arg = <T>(
       index,
       name,
     },
+  }];
+
+  return expr;
+};
+
+export const mkRef = <T extends EventTarget>(): JS<T> => {
+  const expr = jsFn<T>``;
+
+  (expr[jsSymbol].rawJS as string[]).push("");
+  (expr[jsSymbol] as Writable<JSMeta<T>>).replacements = [{
+    kind: JSReplacementKind.Ref,
+    value: { expr },
   }];
 
   return expr;

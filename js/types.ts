@@ -70,6 +70,7 @@ type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 export enum JSReplacementKind {
   Argument,
   Module,
+  Ref,
   Resource,
 }
 
@@ -80,6 +81,9 @@ export type JSReplacement = {
     readonly index: number;
     name?: string;
   };
+} | {
+  readonly kind: JSReplacementKind.Ref;
+  readonly value: { readonly expr: JSable<EventTarget> };
 } | {
   readonly kind: JSReplacementKind.Module;
   readonly value: { readonly url: string };

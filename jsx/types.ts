@@ -1,5 +1,5 @@
-import type { RefAPI } from "../dom.ts";
-import type { JSable, JSFn, JSWithBody } from "../js/types.ts";
+import type { EffectAPI } from "../dom.ts";
+import type { JSable, JSFn } from "../js/types.ts";
 import type { JSXInternal } from "./dom.d.ts";
 
 declare global {
@@ -101,19 +101,25 @@ export type JSXChildren =
 
 export type DOMLiteral = string | number;
 
-export type JSXRef<T extends EventTarget> = JSFn<[RefAPI<T>], any>;
-
-export type JSXSyncRef<T extends EventTarget> = JSWithBody<[RefAPI<T>], void>;
+export type JSXRef<T extends EventTarget> = JSFn<[T], T | void>;
 
 export type JSXComponent<O extends Record<string, unknown> = {}> = (
   props: O,
-  ctx: JSXContextAPI,
+  api: JSXComponentAPI,
 ) => JSX.Element;
 
 export type JSXParentComponent<O extends Record<string, unknown> = {}> =
   JSXComponent<
     Omit<O, "children"> & { readonly children?: JSXChildren }
   >;
+
+export type JSXComponentAPI = {
+  readonly context: JSXContextAPI;
+  readonly effect: (
+    cb: JSFn<[EffectAPI], void | (() => void)>,
+    uris?: string[],
+  ) => void;
+};
 
 export type JSXInitContext<T> = readonly [symbol, T];
 
@@ -142,26 +148,26 @@ export type DOMNode =
       readonly attributes: ReadonlyMap<string, string | number | boolean>;
       readonly children: readonly DOMNode[];
     };
-    readonly refs?: readonly JSXSyncRef<Element>[];
+    readonly ref: JSable<EventTarget>;
   }
   | {
     readonly kind: DOMNodeKind.Text;
     readonly node: {
       readonly text: string;
     };
-    readonly refs?: readonly JSXSyncRef<Text>[];
+    readonly ref: JSable<EventTarget>;
   }
   | {
     readonly kind: DOMNodeKind.HTMLNode;
     readonly node: {
       readonly html: string;
     };
-    readonly refs?: readonly JSXSyncRef<Node>[];
+    readonly ref: JSable<EventTarget>;
   }
   | {
     readonly kind: DOMNodeKind.Comment;
     readonly node: string;
-    readonly refs?: readonly JSXSyncRef<Comment>[];
+    readonly ref: JSable<EventTarget>;
   };
 
 export enum DOMNodeKind {
