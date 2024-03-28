@@ -69,28 +69,26 @@ export enum JSReplacementKind {
   Resource,
 }
 
-export type JSReplacement =
-  & { readonly position: number }
-  & ({
-    readonly kind: JSReplacementKind.Argument;
-    readonly value: {
-      readonly expr: JSable<unknown>;
-      readonly index: number;
-      name?: string;
-    };
-  } | {
-    readonly kind: JSReplacementKind.Module;
-    readonly value: { readonly url: string };
-  } | {
-    readonly kind: JSReplacementKind.Resource;
-    readonly value: Resource<JSONable>;
-  });
+export type JSReplacement = {
+  readonly kind: JSReplacementKind.Argument;
+  readonly value: {
+    readonly expr: JSable<unknown>;
+    readonly index: number;
+    name?: string;
+  };
+} | {
+  readonly kind: JSReplacementKind.Module;
+  readonly value: { readonly url: string };
+} | {
+  readonly kind: JSReplacementKind.Resource;
+  readonly value: Resource<JSONable>;
+};
 
 export type JSMeta<T> = {
   readonly [typeSymbol]: T;
   readonly [returnSymbol]: false;
-  readonly rawJS: string;
-  readonly replacements: JSReplacement[];
+  readonly rawJS: readonly string[];
+  readonly replacements: readonly JSReplacement[];
   readonly args?: readonly JSable<unknown>[];
   readonly body?: JSFnBody<unknown>;
   readonly isOptional?: boolean;

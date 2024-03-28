@@ -110,87 +110,73 @@ const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
   };
 };
 
-export const unsafe = (js: string): JSable<unknown> => mkPureJS(js);
+export const unsafe = (js: string): JSable<unknown> => mkPureJS([js]);
 
-const mkPureJS = (rawJS: string) => ({
-  [jsSymbol]: ({
-    rawJS,
-    replacements: [],
-  }) as unknown as JSMeta<unknown>,
+const mkPureJS = (rawJS: readonly string[]) => ({
+  [jsSymbol]: ({ rawJS, replacements: [] }) as unknown as JSMeta<unknown>,
 });
 
 const jsFn = ((
   tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
 ) => {
+  const rawParts: string[] = [];
+  let last: string[] = [tpl[0]];
+
   const replacements: JSReplacement[] = [];
 
-  // Tracks the cumulated length of generated JS
-  let exprIndex = 0;
-  const cumulate = (jsStr: string) => {
-    exprIndex += jsStr.length;
-    return jsStr;
-  };
-
-  const handleExpression = (expr: ImplicitlyJSable): string => {
+  const handleExpression = (expr: ImplicitlyJSable): void => {
     if (expr === null) {
-      return cumulate(`null`);
+      last.push(`null`);
     } else if (expr === undefined) {
-      return cumulate(`undefined`);
+      last.push(`undefined`);
     } else if (
       (typeof expr === "function" || typeof expr === "object") &&
       jsSymbol in expr && expr[jsSymbol]
     ) {
-      for (
-        const { position, ...def } of expr[jsSymbol].replacements
-      ) {
-        // Preserves position ordering
-        replacements.push({ position: exprIndex + position, ...def });
+      const meta = expr[jsSymbol];
+      last.push(meta.rawJS[0]);
+      for (let i = 0; i < meta.replacements.length; i++) {
+        replacements.push(meta.replacements[i]);
+        rawParts.push(last.join(""));
+        last = [meta.rawJS[i + 1]];
       }
-
-      return cumulate(expr[jsSymbol].rawJS);
     } else if (typeof expr === "function") {
-      return cumulate(handleExpression(fn(expr)));
+      handleExpression(fn(expr));
     } else if (Array.isArray(expr)) {
-      const handledExpr = `[${
-        expr.map((e) => {
-          exprIndex += 1;
-          return handleExpression(e);
-        }).join(",")
-      }]`;
-      exprIndex += 1;
-      return handledExpr;
+      last.push(`[`);
+      for (let i = 0; i < expr.length; i++) {
+        if (i > 0) last.push(`,`);
+        handleExpression(expr[i]);
+      }
+      last.push(`]`);
     } else if (typeof expr === "object") {
-      const handledExpr = `{${
-        Object.entries(expr as { [k: string]: ImplicitlyJSable })
-          .map(
-            ([k, expr]) => {
-              exprIndex += 1;
-              return `${
-                typeof k === "number" || safeRecordKeyRegExp.test(k)
-                  ? k
-                  : JSON.stringify(k)
-              }:${handleExpression(expr)}`;
-            },
-          )
-          .join(",")
-      }}`;
-      exprIndex += 1;
-      return handledExpr;
+      last.push(`{`);
+      const entries = Object.entries(expr as { [k: string]: ImplicitlyJSable });
+      for (let i = 0; i < entries.length; i++) {
+        if (i > 0) last.push(`,`);
+        const [k, expr] = entries[i];
+        last.push(
+          typeof k === "number" || safeRecordKeyRegExp.test(k)
+            ? k
+            : JSON.stringify(k),
+          `:`,
+        );
+        handleExpression(expr);
+      }
+      last.push(`}`);
     } else {
-      return cumulate(JSON.stringify(expr));
+      last.push(JSON.stringify(expr));
     }
   };
 
-  const rawParts = [];
-  for (let i = 0; i < exprs.length; i++) {
-    exprIndex += tpl[i].length;
-    rawParts.push(tpl[i], handleExpression(exprs[i]));
-  }
+  exprs.forEach((expr, i) => {
+    handleExpression(expr);
+    last.push(tpl[i + 1]);
+  });
+  rawParts.push(last.join(""));
 
-  if (tpl.length > exprs.length) rawParts.push(tpl[exprs.length]);
-
-  const expr = mkPureJS(rawParts.join(""));
+  const expr = mkPureJS(rawParts);
   (expr[jsSymbol] as Writable<JSMeta<unknown>>).replacements = replacements;
 
   const callExpr = (
@@ -229,26 +215,23 @@ export const toRawJS = <T>(
     })();
 
   const jsParts = Array<string>(2 * replacements.length + 1);
-  jsParts[0] = replacements.length > 0
-    ? rawJS.slice(0, replacements[0].position)
-    : rawJS;
+  jsParts[0] = rawJS[0];
 
   let i = 0;
-  for (const { position, kind, value } of replacements) {
+  for (const { kind, value } of replacements) {
     i++;
 
     jsParts[i * 2 - 1] = kind === JSReplacementKind.Argument
       ? value.name ?? storeArg(value.expr)
       : kind === JSReplacementKind.Module
       ? `${modulesArg}[${storeModule(value.url)}]`
+      : kind === JSReplacementKind.Ref
+      ? `${refsArg}[${getRef(value.expr)}]`
       : kind === JSReplacementKind.Resource
       ? `${resourcesArg}(${storeResource(value)})`
       : "null";
 
-    jsParts[i * 2] = rawJS.slice(
-      position,
-      replacements[i]?.position ?? rawJS.length,
-    );
+    jsParts[i * 2] = rawJS[i];
   }
 
   return jsParts.join("");
@@ -290,8 +273,8 @@ const jsUtils = {
 
   module: <M>(path: string): JS<M> => {
     const expr = jsFn<M>``;
+    (expr[jsSymbol].rawJS as string[]).push("");
     (expr[jsSymbol] as Writable<JSMeta<M>>).replacements = [{
-      position: 0,
       kind: JSReplacementKind.Module,
       value: { url: path },
     }];
@@ -377,8 +360,8 @@ export const arg = <T>(
 ): JS<T> => {
   const expr = jsFn<T>``;
 
+  (expr[jsSymbol].rawJS as string[]).push("");
   (expr[jsSymbol] as Writable<JSMeta<T>>).replacements = [{
-    position: 0,
     kind: JSReplacementKind.Argument,
     value: {
       expr,
@@ -396,9 +379,10 @@ export const resource = <T extends Readonly<Record<string, JSONable>>>(
 ): JS<T> => {
   const expr = jsFn<T>``;
 
+  (expr[jsSymbol].rawJS as string[]).push("");
+
   let value: null | [T | PromiseLike<T>] = null;
   (expr[jsSymbol] as Writable<JSMeta<T>>).replacements = [{
-    position: 0,
     kind: JSReplacementKind.Resource,
     value: {
       uri,
