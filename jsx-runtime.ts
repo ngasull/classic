@@ -1,4 +1,5 @@
 import { VoidElement } from "./dom/void.ts";
+import { mkRef } from "./js.ts";
 import { isJSable } from "./js/types.ts";
 import {
   DOMLiteral,
@@ -6,7 +7,7 @@ import {
   IntrinsicElement,
   JSXChildren,
   JSXComponent,
-  JSXFragment,
+  JSXElement,
 } from "./jsx/types.ts";
 
 const jsx = ((
@@ -27,8 +28,9 @@ const jsx = ((
       element: {
         tag,
         props: props as IntrinsicElement["props"],
-        children: children as JSX.Element[],
+        children: children as JSXElement[],
       } satisfies IntrinsicElement,
+      ref: mkRef<Element>(),
     }
     : {
       kind: ElementKind.Component,
@@ -36,18 +38,19 @@ const jsx = ((
         Component: tag,
         props: ((props.children = children), props),
       },
+      ref: mkRef(),
     };
 }) as {
   <Tag extends Exclude<keyof JSX.IntrinsicElements, VoidElement>>(
     tag: Tag,
     props: JSX.IntrinsicElements[Tag] | null | undefined,
     ...children: JSXChildren[]
-  ): JSX.Element;
+  ): JSXElement;
 
   <Tag extends VoidElement>(
     tag: Tag,
     props: JSX.IntrinsicElements[Tag] | null | undefined,
-  ): JSX.Element;
+  ): JSXElement;
 
   <
     Cpt extends JSXComponent<Record<any, any>>,
@@ -67,7 +70,7 @@ const jsx = ((
   <Cpt extends JSXComponent<Record<any, any>>>(
     component: Cpt,
     props: NullableProps<ComponentProps<Cpt>>,
-  ): JSX.Element;
+  ): JSXElement;
 };
 
 type ComponentProps<Cpt extends JSXComponent<Record<any, any>>> = Cpt extends
@@ -80,8 +83,11 @@ type NullableProps<Props> =
     ? null | undefined
     : never);
 
-const Fragment = ({ children }: { children: JSXChildren }): JSXFragment =>
-  flatten(children);
+const Fragment = ({ children }: { children: JSXChildren }): JSXElement => ({
+  kind: ElementKind.Fragment,
+  element: flatten(children),
+  ref: mkRef(),
+});
 
 const flatten = (children: JSXChildren): JSX.Element[] => {
   if (!Array.isArray(children)) children = [children];
@@ -93,12 +99,13 @@ const flatten = (children: JSXChildren): JSX.Element[] => {
     } else if (child != null) {
       fragment.push(
         isJSable<DOMLiteral>(child)
-          ? { kind: ElementKind.JS, element: child }
+          ? { kind: ElementKind.JS, element: child, ref: mkRef() }
           : typeof child === "object"
           ? (child as JSX.Element)
           : {
             kind: ElementKind.Text,
             element: { text: child as string | number },
+            ref: mkRef(),
           },
       );
     }

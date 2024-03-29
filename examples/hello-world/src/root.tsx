@@ -10,15 +10,17 @@ import { bundle } from "./bundle.ts";
 
 const router = bundle.add("classic-web/dom/router.ts");
 
-const RootLayout: JSXParentComponent = ({ children }) => (
+const RootLayout: JSXParentComponent = ({ children }, { effect }) => (
   <html>
     <head>
       <title>Hello world</title>
       <meta charset="utf-8" />
     </head>
     <body
-      // Optional: client-side dynamic routing _à la_ Remix
-      ref={router.register}
+      ref={(body) => {
+        // Client-side dynamic routing _à la_ Remix
+        effect(() => router.register(body));
+      }}
     >
       {children}
     </body>

@@ -2,7 +2,7 @@
 
 export const argn = (n: number) => `𐏑${n}`;
 
-export const apiArg = "𐏑";
+export const clientArg = "𐏒";
 
 export const modulesArg = "𐏓";
 

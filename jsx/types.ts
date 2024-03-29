@@ -1,5 +1,5 @@
 import type { EffectAPI } from "../dom.ts";
-import type { JSable, JSFn } from "../js/types.ts";
+import type { JS, JSable, JSFn } from "../js/types.ts";
 import type { JSXInternal } from "./dom.d.ts";
 
 declare global {
@@ -23,31 +23,51 @@ declare global {
         };
     };
 
-    type Element = SyncElement | Promise<SyncElement>;
+    type Element = JSXElement | PromiseLike<JSXElement>;
   }
 }
 
-type JSOr<T> = T | JSable<T>;
-
-type SyncElement =
-  | JSXFragment
-  | { readonly kind: ElementKind.Comment; readonly element: string }
+export type JSXElement =
+  | {
+    readonly kind: ElementKind.Fragment;
+    readonly element: readonly JSXElement[];
+    readonly ref: JS<Comment>;
+  }
+  | {
+    readonly kind: ElementKind.Comment;
+    readonly element: string;
+    readonly ref: JS<Comment>;
+  }
   | {
     readonly kind: ElementKind.Component;
     readonly element: ComponentElement;
+    readonly ref: JS<EventTarget>;
   }
   | {
     readonly kind: ElementKind.Intrinsic;
     readonly element: IntrinsicElement;
+    readonly ref: JS<Element>;
   }
-  | { readonly kind: ElementKind.JS; readonly element: JSable<DOMLiteral> }
-  | { readonly kind: ElementKind.Text; readonly element: TextElement }
+  | {
+    readonly kind: ElementKind.JS;
+    readonly element: JSable<DOMLiteral>;
+    readonly ref: JS<Text>;
+  }
+  | {
+    readonly kind: ElementKind.Text;
+    readonly element: TextElement;
+    readonly ref: JS<Text>;
+  }
   | {
     readonly kind: ElementKind.HTMLNode;
     readonly element: HTMLNodeElement;
+    readonly ref: JS<Node>;
   };
 
+type JSOr<T> = T | JSable<T>;
+
 export enum ElementKind {
+  Fragment,
   Comment,
   Component,
   Intrinsic,
@@ -69,7 +89,7 @@ export interface IntrinsicElement {
       | undefined
     >
   >;
-  readonly children: JSX.Element[];
+  readonly children: readonly JSXElement[];
 }
 
 interface TextElement {
@@ -89,8 +109,6 @@ interface ComponentElement<
   readonly props: O;
 }
 
-export type JSXFragment = JSX.Element[];
-
 export type JSXChildren =
   | JSX.Element
   | DOMLiteral
@@ -101,12 +119,12 @@ export type JSXChildren =
 
 export type DOMLiteral = string | number;
 
-export type JSXRef<T extends EventTarget> = JSFn<[T], T | void>;
+export type JSXRef<T extends EventTarget> = (target: JS<T>) => unknown;
 
 export type JSXComponent<O extends Record<string, unknown> = {}> = (
   props: O,
   api: JSXComponentAPI,
-) => JSX.Element;
+) => JSX.Element | null;
 
 export type JSXParentComponent<O extends Record<string, unknown> = {}> =
   JSXComponent<
@@ -114,6 +132,7 @@ export type JSXParentComponent<O extends Record<string, unknown> = {}> =
   >;
 
 export type JSXComponentAPI = {
+  target: JSable<EventTarget>;
   readonly context: JSXContextAPI;
   readonly effect: (
     cb: JSFn<[EffectAPI], void | (() => void)>,
@@ -141,34 +160,38 @@ export type JSXContextOf<C extends JSXContext<any>> = C extends
 export const contextSymbol = Symbol("context");
 
 export type DOMNode =
-  | {
-    readonly kind: DOMNodeKind.Tag;
-    readonly node: {
-      readonly tag: string;
-      readonly attributes: ReadonlyMap<string, string | number | boolean>;
-      readonly children: readonly DOMNode[];
-    };
-    readonly ref: JSable<EventTarget>;
-  }
-  | {
-    readonly kind: DOMNodeKind.Text;
-    readonly node: {
-      readonly text: string;
-    };
-    readonly ref: JSable<EventTarget>;
-  }
-  | {
-    readonly kind: DOMNodeKind.HTMLNode;
-    readonly node: {
-      readonly html: string;
-    };
-    readonly ref: JSable<EventTarget>;
-  }
-  | {
-    readonly kind: DOMNodeKind.Comment;
-    readonly node: string;
-    readonly ref: JSable<EventTarget>;
+  | DOMNodeTag
+  | DOMNodeText
+  | DOMNodeHTMLNode
+  | DOMNodeComment;
+
+export type DOMNodeTag = {
+  readonly kind: DOMNodeKind.Tag;
+  readonly node: {
+    readonly tag: string;
+    readonly attributes: ReadonlyMap<string, string | number | boolean>;
+    readonly children: readonly DOMNode[];
   };
+  readonly ref: JSable<EventTarget>;
+};
+
+export type DOMNodeText = {
+  readonly kind: DOMNodeKind.Text;
+  readonly node: { readonly text: string };
+  readonly ref: JSable<EventTarget>;
+};
+
+export type DOMNodeHTMLNode = {
+  readonly kind: DOMNodeKind.HTMLNode;
+  readonly node: { readonly html: string };
+  readonly ref: JSable<EventTarget>;
+};
+
+export type DOMNodeComment = {
+  readonly kind: DOMNodeKind.Comment;
+  readonly node: string;
+  readonly ref: JSable<EventTarget>;
+};
 
 export enum DOMNodeKind {
   Tag,

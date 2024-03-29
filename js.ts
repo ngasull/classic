@@ -37,7 +37,7 @@ export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
   cb: Cb,
 ): Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
   : never => {
-  const args = Array(cb.length).fill(0).map((_, i) => arg(i));
+  const args = Array(cb.length).fill(0).map(() => arg());
 
   const argsJs = args.length > 1
     ? jsFn`(${args.reduce((a, b) => jsFn`${a},${b}`)})`
@@ -129,8 +129,8 @@ const jsFn = ((
       const meta = expr[jsSymbol];
       last.push(meta.rawJS[0]);
       for (let i = 0; i < meta.replacements.length; i++) {
-        replacements.push(meta.replacements[i]);
         rawParts.push(last.join(""));
+        replacements.push(meta.replacements[i]);
         last = [meta.rawJS[i + 1]];
       }
     } else if (typeof expr === "function") {
@@ -220,10 +220,10 @@ export const toRawJS = <T>(
 
     jsParts[i * 2 - 1] = kind === JSReplacementKind.Argument
       ? storeArg(value.expr, value.name)
-      : kind === JSReplacementKind.Module
-      ? `${modulesArg}[${storeModule(value.url)}]`
       : kind === JSReplacementKind.Ref
       ? `${refsArg}[${getRef(value.expr)}]`
+      : kind === JSReplacementKind.Module
+      ? `${modulesArg}[${storeModule(value.url)}]`
       : kind === JSReplacementKind.Resource
       ? `${resourcesArg}(${storeResource(value)})`
       : "null";

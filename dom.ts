@@ -1,12 +1,13 @@
 import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
 import { JSONable, store, StoreAPI } from "./dom/store.ts";
-import { doc, forEach, isFunction } from "./dom/util.ts";
+import { call, doc, forEach, isFunction } from "./dom/util.ts";
 
 export type EffectsFn = (
   modulesArg: string[],
   resourcesArg: (i: number) => JSONable | undefined,
   refsArg: readonly EventTarget[],
-) => ReadonlyArray<(api: EffectAPI) => void | (() => void)>;
+  api: EffectAPI,
+) => ReadonlyArray<() => void>;
 
 /**
  * Tuple holding JS hooks produced by a jsx render.
@@ -64,12 +65,15 @@ export const a = (
     store.set(...resources),
     Promise
       .all(modules.map((m) => import(m)))
-      .then((ms) => {
-        let refs = makeRefs(nodes, activation),
-          api: EffectAPI = { store, sub };
+      .then((ms) =>
         forEach(
-          effects(ms, (i) => store.peek(resources[i][0]), refs),
-          (effect) => effect(api),
-        );
-      })
+          effects(
+            ms,
+            (i) => store.peek(resources[i][0]),
+            makeRefs(nodes, activation),
+            { store, sub },
+          ),
+          call,
+        )
+      )
 );

@@ -1,5 +1,10 @@
 import type { Activation, EffectAPI } from "../dom.ts";
-import { apiArg, modulesArg, refsArg, resourcesArg } from "../dom/arg-alias.ts";
+import {
+  clientArg,
+  modulesArg,
+  refsArg,
+  resourcesArg,
+} from "../dom/arg-alias.ts";
 import { voidElements } from "../dom/void.ts";
 import { fn, js, mkRef, statements, sync, toRawJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
@@ -24,6 +29,7 @@ import {
   JSXContext,
   JSXContextAPI,
   JSXContextOf,
+  JSXElement,
   JSXInitContext,
   JSXRef,
 } from "./types.ts";
@@ -53,7 +59,7 @@ export const escapeScriptContent = (node: DOMLiteral) =>
   String(node).replaceAll("</script", "</scr\\ipt");
 
 export const renderToString = async (
-  root: JSX.Element,
+  root: JSXElement,
   { context }: { context?: JSXInitContext<unknown>[] } = {},
 ) => {
   const acc: string[] = [];
@@ -84,7 +90,7 @@ export const renderToString = async (
 };
 
 export const renderToStream = (
-  root: JSX.Element,
+  root: JSXElement,
   { context }: { context?: JSXInitContext<unknown>[] },
 ) =>
   new ReadableStream<Uint8Array>({
@@ -190,10 +196,10 @@ const writeActivationScript = (
     for (const effect of effects) {
       const { args } = effect[jsSymbol];
 
-      // Rename first arg to `apiArg`
+      // Rename first arg to `clientArg`
       if (args.length) {
         (args[0][jsSymbol].replacements[0].value as { name?: string }).name =
-          apiArg;
+          clientArg;
       }
     }
 
@@ -202,6 +208,7 @@ const writeActivationScript = (
         modules: JS<readonly string[]>,
         resources: JS<readonly [string, JSONable | undefined][]>,
         refs: JS<readonly EventTarget[]>,
+        client: JS<EffectAPI>,
       ) => {
         (modules[jsSymbol].replacements[0].value as {
           name?: string;
@@ -211,7 +218,9 @@ const writeActivationScript = (
           .name = resourcesArg;
         (refs[jsSymbol].replacements[0].value as { name?: string })
           .name = refsArg;
-        return js`${effects}`;
+        (client[jsSymbol].replacements[0].value as { name?: string })
+          .name = clientArg;
+        return js`${effects.map((effect) => fn(() => effect[jsSymbol].body))}`;
       },
     );
 
@@ -220,14 +229,21 @@ const writeActivationScript = (
     const storeModule = (m: string) =>
       modules.get(m) ?? (modules.set(m, ++lastModuleIndex), lastModuleIndex);
 
+    const usedRefs = new Set<JSable<EventTarget>>();
+    for (const r of effectsExpr[jsSymbol].replacements) {
+      if (r.kind === JSReplacementKind.Ref) usedRefs.add(r.value.expr);
+    }
+
     const refs = new Map<JSable<EventTarget>, number>();
     let lastRefIndex = -1;
-    for (const r of effectsExpr[jsSymbol].replacements) {
-      if (r.kind === JSReplacementKind.Ref && !refs.has(r.value.expr)) {
-        refs.set(r.value.expr, ++lastRefIndex);
+    const walkRef = (expr: JSable<EventTarget>) => {
+      if (usedRefs.has(expr)) {
+        refs.set(expr, ++lastRefIndex);
+        return true;
+      } else {
+        return false;
       }
-    }
-    const getRef = (expr: JSable<EventTarget>) => refs.get(expr);
+    };
 
     const ress = new Map<string, [number, [string, JSONable]]>();
     let lastResIndex = -1;
@@ -244,48 +260,43 @@ const writeActivationScript = (
       return ress.get(uri)![0];
     };
 
-    write("<script>(p=>");
-    write(
-      escapeScriptContent(
-        toRawJS(
-          js.promise(
-            js<Promise<typeof import("../dom.ts")>>`import(${domPath})`,
-          ).then((dom) =>
-            dom.a(
-              domActivation(children, getRef),
-              unsafe(
-                toRawJS(effectsExpr, { storeModule, storeResource, getRef }),
-              ),
-              [...modules.keys()].map((m) => {
-                const publicPath = bundle.result.publicPath(m);
-                if (!publicPath) {
-                  throw Error(`Module expected to be bundled: ${m}`);
-                }
-                return publicPath;
+    write("<script>");
+    write(escapeScriptContent(toRawJS(
+      js
+        .promise(js<Promise<typeof import("../dom.ts")>>`import(${domPath})`)
+        .then((dom) =>
+          dom.a(
+            domActivation(children, walkRef),
+            unsafe(
+              toRawJS(effectsExpr, {
+                storeModule,
+                storeResource,
+                getRef: (expr) => refs.get(expr)!,
               }),
-              [...ress.values()].map(([, entry]) => entry),
-              js<NodeList | Node[]>`p`,
-            )
-          ),
+            ),
+            [...modules.keys()].map((m) => {
+              const publicPath = bundle.result.publicPath(m);
+              if (!publicPath) {
+                throw Error(`Module expected to be bundled: ${m}`);
+              }
+              return publicPath;
+            }),
+            [...ress.values()].map(([, entry]) => entry),
+            partial
+              ? js<[Node]>`[document.currentScript.previousSibling]`
+              : js<NodeList>`document.childNodes`,
+          )
         ),
-      ),
-    );
-    write(")(");
-    write(
-      partial
-        ? `[document.currentScript.previousSibling]`
-        : `document.childNodes`,
-    );
-    write(");");
+    )));
 
     if (bundle.watched && !partial) {
       write(
-        `new EventSource("/hmr").addEventListener("change",()=>location.reload());`,
+        `;new EventSource("/hmr").addEventListener("change",()=>location.reload())`,
       );
     }
 
     if (partial) {
-      write(`document.currentScript.remove();`);
+      write(`;document.currentScript.remove()`);
     }
 
     write("</script>");
@@ -294,7 +305,7 @@ const writeActivationScript = (
 
 const domActivation = (
   dom: readonly DOMNode[],
-  storeRef: (expr: JSable<EventTarget>) => number | undefined,
+  walkRef: (expr: JSable<EventTarget>) => boolean,
   parent: readonly number[] = [],
 ) => {
   const activation: Activation = [];
@@ -302,14 +313,12 @@ const domActivation = (
   for (let i = 0; i < dom.length; i++) {
     const { kind, node, ref } = dom[i];
 
-    if (storeRef(ref) != null) {
-      activation.push([i]);
-    }
+    if (walkRef(ref)) activation.push([i]);
 
     if (kind === DOMNodeKind.Tag) {
       const childrenActivation = domActivation(
         node.children,
-        storeRef,
+        walkRef,
         [...parent, i],
       );
       if (childrenActivation.length > 0) {
@@ -409,64 +418,51 @@ const writeDOMTree = (
 };
 
 const nodeToDOMTree = async (
-  root: JSX.Element,
+  node: JSXElement,
   ctxData: ContextData,
 ): Promise<DOMNode[]> => {
-  const syncRoot = await root;
-  const effects = ctxData.get(effectContext[contextSymbol]) as InferContext<
-    typeof effectContext
-  >;
+  const effects = ctxData.get(
+    effectContext[contextSymbol],
+  ) as InferContext<typeof effectContext>;
 
-  const target: JS<EventTarget> = mkRef();
-
-  if (Array.isArray(syncRoot)) {
-    const children = await Promise
-      .all(syncRoot.map((child) => nodeToDOMTree(child, ctxData)))
-      .then((children) => children.flatMap(id));
-
-    // Make sure we have no adjacent text nodes (would be parsed as only one)
-    for (let i = children.length - 1; i > 0; i--) {
-      if (
-        children[i].kind === DOMNodeKind.Text &&
-        children[i - 1].kind === DOMNodeKind.Text
-      ) {
-        children.splice(i, 0, {
-          kind: DOMNodeKind.Comment,
-          node: "",
-          ref: target,
-        });
-      }
+  switch (node.kind) {
+    case ElementKind.Fragment: {
+      return [
+        { kind: DOMNodeKind.Comment, node: "", ref: node.ref },
+        ...(await Promise
+          .all(node.element.map((e) => nodeToDOMTree(e, ctxData)))
+          .then((children) => children.flatMap(id))),
+      ];
     }
 
-    return children;
-  }
-
-  switch (syncRoot.kind) {
     case ElementKind.Component: {
-      const { Component, props } = syncRoot.element;
+      const { Component, props } = node.element;
       const subCtxData = subContext(ctxData);
       const ctx = mkContext(subCtxData);
-      const api: JSXComponentAPI = new Proxy(
-        { context: ctx } as JSXComponentAPI,
+      const apiTarget: Partial<JSXComponentAPI> = { context: ctx };
+      const api = new Proxy<JSXComponentAPI>(
+        apiTarget as JSXComponentAPI,
         componentApiHandler,
       );
-      return nodeToDOMTree(Component(props, api), subCtxData);
+      const child = await Component(props, api);
+      if (child) {
+        apiTarget.target = child.ref;
+        return nodeToDOMTree(child, subCtxData);
+      } else {
+        return [];
+      }
     }
 
     case ElementKind.Comment: {
       return [{
         kind: DOMNodeKind.Comment,
-        node: syncRoot.element,
-        ref: target,
+        node: node.element,
+        ref: node.ref,
       }];
     }
 
     case ElementKind.Intrinsic: {
-      const {
-        tag,
-        props: { ref, ...props },
-        children,
-      } = syncRoot.element;
+      const { tag, props: { ref, ...props } } = node.element;
 
       const attributes = new Map<string, string | number | boolean>();
       const reactiveAttributes: [
@@ -474,7 +470,7 @@ const nodeToDOMTree = async (
         JSable<string | number | boolean | null>,
       ][] = [];
 
-      if (ref) (ref as unknown as JSXRef<Element>)(target as JS<Element>);
+      if (ref) (ref as unknown as JSXRef<Element>)(node.ref);
 
       const propEntries = Object.entries(props);
       let entry;
@@ -496,9 +492,9 @@ const nodeToDOMTree = async (
               const eventType = eventMatch[1].toLowerCase();
               effects.push(() => [
                 js`let c=${value}`,
-                target.addEventListener(eventType, unsafe("c")),
+                node.ref.addEventListener(eventType, unsafe("c")),
                 js`return ${
-                  target.removeEventListener(eventType, unsafe("c"))
+                  node.ref.removeEventListener(eventType, unsafe("c"))
                 }`,
               ]);
             } else if (isJSable<string | number | boolean | null>(value)) {
@@ -512,72 +508,88 @@ const nodeToDOMTree = async (
       }
 
       effects.push(
-        ...reactiveAttributes.flatMap(([name, reactive]) => {
-          const uris = reactive[jsSymbol].replacements.flatMap((r) =>
-            r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
-          );
+        ...reactiveAttributes.flatMap(([name, expr]) => {
+          const uris = uniqueURIs(expr);
           return uris.length
-            ? [(api: JS<EffectAPI>) =>
-              api.sub(
-                target,
-                js`let k=${name},v=${reactive};!v&&v!==""?${target}.removeAttribute(k):${target}.setAttribute(k,v===true?"":String(v))`,
+            ? [(client: JS<EffectAPI>) =>
+              client.sub(
+                node.ref,
+                js`let k=${name},v=${expr};!v&&v!==""?${node.ref}.removeAttribute(k):${node.ref}.setAttribute(k,v===true?"":String(v))`,
                 uris,
               )]
             : [];
         }),
       );
 
+      const children = await Promise
+        .all(
+          node.element.children.map((child) => nodeToDOMTree(child, ctxData)),
+        )
+        .then((children) => children.flatMap(id));
+
+      // Make sure we have no adjacent text nodes (would be parsed as only one)
+      for (let i = children.length - 1; i > 0; i--) {
+        if (
+          children[i].kind === DOMNodeKind.Text &&
+          children[i - 1].kind === DOMNodeKind.Text
+        ) {
+          children.splice(i, 0, {
+            kind: DOMNodeKind.Comment,
+            node: "",
+            ref: mkRef(),
+          });
+        }
+      }
+
       return [{
         kind: DOMNodeKind.Tag,
-        node: {
-          tag: tag,
-          attributes,
-          children: await nodeToDOMTree(children, ctxData),
-        },
-        ref: target,
+        node: { tag, attributes, children },
+        ref: node.ref,
       }];
     }
 
     case ElementKind.JS: {
-      const uris = syncRoot.element[jsSymbol].replacements.flatMap((r) =>
-        r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
-      );
+      const uris = uniqueURIs(node.element);
       if (uris.length) {
-        effects.push((api) =>
-          api.sub(
-            target,
-            js`_=>${target}.textContent=${(syncRoot.element)}`,
-            uris,
-          )
+        effects.push(() =>
+          js`${
+            unsafe(clientArg)
+          }.sub(${node.ref},_=>${node.ref}.textContent=${node.element},${uris})`
         );
       }
       return [{
         kind: DOMNodeKind.Text,
-        node: { text: String(await js.eval(syncRoot.element) ?? "") },
-        ref: target,
+        node: { text: String(await js.eval(node.element) ?? "") },
+        ref: node.ref,
       }];
     }
 
     case ElementKind.Text: {
-      if (syncRoot.element.ref) syncRoot.element.ref(target as JS<Text>);
       return [{
         kind: DOMNodeKind.Text,
-        node: { text: String(syncRoot.element.text) },
-        ref: target,
+        node: { text: String(node.element.text) },
+        ref: node.ref,
       }];
     }
 
     case ElementKind.HTMLNode: {
-      if (syncRoot.element.ref) syncRoot.element.ref(target as JS<Node>);
       return [{
         kind: DOMNodeKind.HTMLNode,
-        node: { html: syncRoot.element.html },
-        ref: target,
+        node: { html: node.element.html },
+        ref: node.ref,
       }];
     }
   }
 
-  throw Error(`Can't handle JSX node ${JSON.stringify(syncRoot)}`);
+  throw Error(`Can't handle JSX node ${JSON.stringify(node)}`);
+};
+
+const uniqueURIs = (expr: JSable<unknown>): string[] => {
+  const uris = new Set<string>();
+  for (const r of expr[jsSymbol].replacements) {
+    if (r.kind === JSReplacementKind.Resource) uris.add(r.value.uri);
+  }
+  return [...uris];
 };
 
 const componentApiHandler = {
@@ -598,34 +610,31 @@ const lazyComponentApi = {
   ) => {
     componentApiHandler.get(target, "context");
     target.context(effectContext).push(
-      (api) => {
+      (client) => {
         const effectJs = fn(cb);
 
-        // Make `cb` transparently use `api` from parent scope
+        // Make `cb` transparently use `client` from parent scope
         if (effectJs[jsSymbol].args.length) {
           (effectJs[jsSymbol].args[0][jsSymbol].replacements[0].value as {
             name?: string;
-          }).name = apiArg;
+          }).name = clientArg;
         }
 
-        const body = Array.isArray(effectJs[jsSymbol].body)
-          ? js`{${statements(effectJs[jsSymbol].body)}}`
-          : `(${effectJs[jsSymbol].body})`;
+        const subCb = Array.isArray(effectJs[jsSymbol].body)
+          ? js<() => void | (() => void)>`_=>{${
+            statements(effectJs[jsSymbol].body)
+          }}`
+          : js<() => void | (() => void)>`=>(${effectJs[jsSymbol].body})`;
 
-        const subUris = uris ??
-          [
-            ...new Set(
-              effectJs[jsSymbol].replacements.flatMap((r) =>
-                r.kind === JSReplacementKind.Resource ? [r.value.uri] : []
-              ),
+        const subUris = uris ?? [
+          ...new Set(
+            effectJs[jsSymbol].replacements.flatMap((r) =>
+              r.kind === JSReplacementKind.Resource ? r.value.uri : []
             ),
-          ];
-
-        return [
-          js`let cb=()=>${body}`,
-          js`cb()`,
-          js`return ${api.store.sub}(${subUris},cb)`,
+          ),
         ];
+
+        return client.sub(target.target, subCb, subUris);
       },
     );
   },
