@@ -1,6 +1,7 @@
-import { refsArg } from "./dom/arg-alias.ts";
+import { refsArg, varArg } from "./dom/arg-alias.ts";
 import { argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
 import type {
+  Fn,
   ImplicitlyJSable,
   JS,
   JSable,
@@ -9,10 +10,8 @@ import type {
   JSMeta,
   JSONable,
   JSPromise,
-  JSReplacement,
   JSStatements,
   JSStatementsReturn,
-  JSWithBody,
   ParamKeys,
   Resource,
   ResourceGroup,
@@ -27,35 +26,9 @@ export const statements = <S extends JSStatements<unknown>>(
 ): JSStatementsReturn<S> => {
   const tpl = Array(stmts.length).fill(";");
   tpl[0] = "";
-  return jsFn(
-    tpl,
-    ...stmts,
-  ) as JSStatementsReturn<S>;
-};
-
-export const fn = <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
-  cb: Cb,
-): Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
-  : never => {
-  const args = Array(cb.length).fill(0).map(() => arg());
-
-  const argsJs = args.length > 1
-    ? jsFn`(${args.reduce((a, b) => jsFn`${a},${b}`)})`
-    : args.length === 1
-    ? args[0]
-    : unsafe("()");
-
-  const body = cb(...args);
-
-  const jsfnExpr = Array.isArray(body)
-    ? jsFn`(${argsJs}=>{${statements(body)}})`
-    : jsFn`(${argsJs}=>(${body}))`;
-
-  (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).args = args;
-  (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).body = body;
-
-  return jsfnExpr as Cb extends JSFn<infer Args, infer T> ? JSWithBody<Args, T>
-    : never;
+  const res = jsTpl(tpl, ...stmts) as JSStatementsReturn<S>;
+  (res[jsSymbol] as Writable<JSMeta<unknown>>).isntAssignable = true;
+  return res;
 };
 
 const targetSymbol = Symbol("target");
@@ -70,21 +43,31 @@ const jsProxyHandler: ProxyHandler<{
 
   get: (target, p) => {
     const expr = target[targetSymbol];
-    const { isOptional, isThenable } = expr[jsSymbol];
-    return p === Symbol.iterator
-      ? () => jsIterator(expr)
-      : typeof p === "symbol"
-      ? expr[p as keyof JSable<unknown>]
-      : p === "then" && !isThenable
-      ? {
+    const { isOptional, isThenable, isntAssignable } = expr[jsSymbol];
+
+    if (p === Symbol.iterator) {
+      return () => jsIterator(expr);
+    } else if (typeof p === "symbol") {
+      return expr[p as keyof JSable<unknown>];
+    } else if (p === "then" && !isThenable) {
+      return {
         [jsSymbol]:
-          jsFn`${expr}${unsafe(isOptional ? "?." : ".")}then`[jsSymbol],
-      }
-      : !isNaN(parseInt(p))
-      ? jsFn`${expr}${unsafe(isOptional ? "?." : "")}[${unsafe(p)}]`
+          jsTpl`${expr}${unsafe(isOptional ? "?." : ".")}then`[jsSymbol],
+      };
+    }
+
+    const accessedExpr = !isNaN(parseInt(p))
+      ? jsTpl`${expr}${unsafe(isOptional ? "?." : "")}[${unsafe(p)}]`
       : safeRecordKeyRegExp.test(p as string)
-      ? jsFn`${expr}${unsafe(isOptional ? "?." : ".")}${unsafe(p)}`
-      : jsFn`${expr}${unsafe(isOptional ? "?." : "")}[${p}]`;
+      ? jsTpl`${expr}${unsafe(isOptional ? "?." : ".")}${unsafe(p)}`
+      : jsTpl`${expr}${unsafe(isOptional ? "?." : "")}[${p}]`;
+
+    if (isntAssignable) {
+      (accessedExpr[jsSymbol] as Writable<JSMeta<unknown>>).isntAssignable =
+        true;
+    }
+
+    return accessedExpr;
   },
 };
 
@@ -96,45 +79,80 @@ const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
       return {
         // Iterator is meant for destructuring through JS. Prevent infinite iteration
         done: i > 50,
-        value: jsFn<T>`${expr}[${i}]`,
+        value: jsTpl<T>`${expr}[${i}]`,
       };
     },
   };
 };
 
-export const unsafe = (js: string): JSable<unknown> => mkPureJS([js]);
+export const unsafe = (js: string): JSable<unknown> => {
+  const expr = mkPureJS([js]);
+  (expr[jsSymbol] as Writable<JSMeta<unknown>>).isntAssignable = true;
+  return expr;
+};
 
 const mkPureJS = (rawJS: readonly string[]) => ({
-  [jsSymbol]: ({ rawJS, replacements: [] }) as unknown as JSMeta<unknown>,
+  [jsSymbol]:
+    ({ rawJS, replacements: [], scope: new Map() }) as unknown as JSMeta<
+      unknown
+    >,
 });
 
-const jsFn = ((
+const jsTpl = ((
   tpl: ReadonlyArray<string>,
   ...exprs: ImplicitlyJSable[]
 ) => {
-  const rawParts: string[] = [];
-  let last: string[] = [tpl[0]];
+  const builtExpr = mkPureJS([]);
+  const { rawJS, replacements, scope } = builtExpr[jsSymbol] as {
+    [K in keyof JSMeta<unknown>]: Writable<JSMeta<unknown>[K]>;
+  };
 
-  const replacements: JSReplacement[] = [];
+  let last: string[] = [tpl[0]];
 
   const handleExpression = (expr: ImplicitlyJSable): void => {
     if (expr === null) {
       last.push(`null`);
     } else if (expr === undefined) {
-      last.push(`undefined`);
+      last.push(`void 0`);
     } else if (
       (typeof expr === "function" || typeof expr === "object") &&
       jsSymbol in expr && expr[jsSymbol]
     ) {
-      const meta = expr[jsSymbol];
-      last.push(meta.rawJS[0]);
-      for (let i = 0; i < meta.replacements.length; i++) {
-        rawParts.push(last.join(""));
-        replacements.push(meta.replacements[i]);
-        last = [meta.rawJS[i + 1]];
+      if (expr[jsSymbol].isntAssignable) {
+        // Inline parts, replacements and scope
+        const meta = expr[jsSymbol];
+        last.push(meta.rawJS[0]);
+        for (let i = 0; i < meta.replacements.length; i++) {
+          rawJS.push(last.join(""));
+          replacements.push(meta.replacements[i]);
+          last = [meta.rawJS[i + 1]];
+        }
+
+        meta.scope.forEach(([count, parents], k) => {
+          const existing = scope.get(k);
+          if (existing) {
+            existing[0] += count;
+            parents.forEach((p) => existing[1].add(p));
+          } else {
+            scope.set(expr, [count, parents]);
+          }
+        });
+      } else {
+        // Treat as potential variable
+        rawJS.push(last.join(""));
+        replacements.push({ kind: JSReplacementKind.Var, value: expr });
+        last = [];
+
+        const existing = scope.get(expr);
+        if (existing) {
+          existing[0] += 1;
+          existing[1].add(builtExpr);
+        } else {
+          scope.set(expr, [1, new Set([builtExpr])]);
+        }
       }
     } else if (typeof expr === "function") {
-      handleExpression(fn(expr));
+      handleExpression(js.fn(expr));
     } else if (Array.isArray(expr)) {
       last.push(`[`);
       for (let i = 0; i < expr.length; i++) {
@@ -166,40 +184,47 @@ const jsFn = ((
     handleExpression(expr);
     last.push(tpl[i + 1]);
   });
-  rawParts.push(last.join(""));
-
-  const expr = mkPureJS(rawParts);
-  (expr[jsSymbol] as Writable<JSMeta<unknown>>).replacements = replacements;
+  rawJS.push(last.join(""));
 
   const callExpr = (
     ...argArray: ReadonlyArray<JSable<unknown> | JSONable>
   ) => {
     const jsArgs = argArray.length > 0
-      ? argArray.reduce((a, b) => jsFn`${a},${b}`)
-      : jsFn``;
-    return jsFn`${expr}(${jsArgs})`;
+      ? argArray.reduce((a, b) => jsTpl`${a},${b}`)
+      : jsTpl``;
+    return jsTpl`${builtExpr}(${jsArgs})`;
   };
 
-  callExpr[targetSymbol] = expr;
+  callExpr[targetSymbol] = builtExpr;
 
   return new Proxy(callExpr, jsProxyHandler) as unknown as JS<unknown>;
 }) as {
   <T>(tpl: ReadonlyArray<string>, ...exprs: ImplicitlyJSable[]): JS<T>;
 };
 
-export const toRawJS = <T>(
-  expr: JSable<T>,
-  {
-    storeModule = neverStore,
-    storeResource = neverStore,
-    getRef = neverStore,
-  }: {
-    readonly storeModule?: (url: string) => number;
-    readonly storeResource?: (resource: Resource<JSONable>) => number;
-    readonly getRef?: (expr: JSable<EventTarget>) => number | undefined;
-  } = {},
-): string => {
-  const { replacements, rawJS } = expr[jsSymbol];
+export const toRawJS = <A extends readonly unknown[]>(
+  f: Fn<A, unknown>,
+  { storeModule = neverStore, storeResource = neverStore, getRef = neverStore }:
+    {
+      readonly storeModule?: (url: string) => number;
+      readonly storeResource?: (resource: Resource<JSONable>) => number;
+      readonly getRef?: (expr: JSable<EventTarget>) => number | undefined;
+    } = {},
+): [string, ...{ -readonly [I in keyof A]: string }] => {
+  const fnExpr = js.fn(f as Fn<readonly any[], unknown>);
+  const { args, body, scope } = fnExpr[jsSymbol];
+
+  const wholeScope = new Map<JSable<unknown>, [number, Set<JSable<unknown>>]>();
+  scope.forEach(function recScope([count, parents], expr) {
+    const existing = wholeScope.get(expr);
+    if (existing) {
+      existing[0] += count;
+      for (const p of parents) existing[1].add(p);
+    } else {
+      wholeScope.set(expr, [count, new Set(parents)]);
+    }
+    expr[jsSymbol].scope.forEach(recScope);
+  });
 
   const argStore = new Map<JSable<unknown>, string>();
   let argIndex = -1;
@@ -211,27 +236,143 @@ export const toRawJS = <T>(
       return storedName;
     })();
 
-  const jsParts = Array<string>(2 * replacements.length + 1);
-  jsParts[0] = rawJS[0];
+  const argsToString = (args: readonly JSable<unknown>[]) =>
+    args.map((a) =>
+      storeArg(a, (a[jsSymbol].replacements[0].value as { name?: string }).name)
+    );
 
-  let i = 0;
-  for (const { kind, value } of replacements) {
-    i++;
+  const bodyToRawStatements = (
+    expr: JSFn<readonly any[], unknown>,
+    parentOwnScope: Map<JSable<unknown>, [number, Set<JSable<unknown>>]> | null,
+  ): readonly string[] => {
+    const body = expr[jsSymbol].body;
+    const ownScope = new Map<JSable<unknown>, [number, Set<JSable<unknown>>]>();
+    const rawStatements = Array.isArray(body)
+      ? body.map((s) => exprToRawJS(s, ownScope))
+      : [exprToRawJS(body, ownScope)];
 
-    jsParts[i * 2 - 1] = kind === JSReplacementKind.Argument
-      ? storeArg(value.expr, value.name)
-      : kind === JSReplacementKind.Ref
-      ? `${refsArg}[${getRef(value.expr)}]`
-      : kind === JSReplacementKind.Module
-      ? `${modulesArg}[${storeModule(value.url)}]`
-      : kind === JSReplacementKind.Resource
-      ? `${resourcesArg}(${storeResource(value)})`
-      : "null";
+    const assignments: string[] = [];
+    for (const [value, scoped] of ownScope) {
+      (function recScope(value, [count, parents]) {
+        if (parentOwnScope && count < wholeScope.get(value)![0]) {
+          const existing = parentOwnScope.get(value);
+          if (existing) {
+            existing[0] += count;
+            for (const p of parents) existing[1].add(p);
+          } else {
+            parentOwnScope.set(value, [count, new Set(parents)]);
+          }
+        } else {
+          const assignment = varIds.get(value);
+          if (assignment) {
+            const [varId, expr] = assignment;
+            varIds.delete(value);
 
-    jsParts[i * 2] = rawJS[i];
+            assignments.push(`${varArg}${varId}=${expr}`);
+
+            for (const p of parents) {
+              const parentInScope = ownScope.get(p);
+              if (parentInScope) recScope(p, parentInScope);
+            }
+          }
+        }
+      })(value, scoped);
+    }
+
+    if (assignments.length) {
+      rawStatements.unshift(`let ${assignments.join(",")}`);
+
+      if (!Array.isArray(body)) {
+        rawStatements[1] = `return ${rawStatements[1]}`;
+      }
+    }
+
+    return rawStatements;
+  };
+
+  const exprToRawJS = (
+    expr: JSable<unknown>,
+    ownScope: Map<JSable<unknown>, [number, Set<JSable<unknown>>]>,
+  ): string => {
+    const assignment = varIds.get(expr);
+    if (assignment != null) {
+      const [varId] = assignment;
+      const existing = ownScope.get(expr);
+      if (existing) {
+        existing[0] += 1;
+        existing[1].add(expr);
+      } else {
+        ownScope.set(expr, [1, new Set([expr])]);
+      }
+      return `${varArg}${varId}`;
+    }
+
+    const { replacements, rawJS, args, body } = expr[jsSymbol];
+
+    if (args && body) {
+      const argNames = argsToString(args);
+      const argsStr = argNames.length === 1
+        ? argNames[0]
+        : `(${argNames.join(",")})`;
+      const stmts = bodyToRawStatements(
+        expr as JSFn<unknown[], unknown>,
+        ownScope,
+      );
+      const bodyStr = stmts.length === 1 && !Array.isArray(body)
+        ? `(${stmts[0]})`
+        : `{${stmts.join(";")}}`;
+      return `(${argsStr}=>${bodyStr})`;
+    }
+
+    const jsParts = Array<string>(2 * replacements.length + 1);
+    jsParts[0] = rawJS[0];
+    for (let r = 0; r < replacements.length; r++) {
+      const { kind, value } = replacements[r];
+      const p = r + 1;
+
+      if (kind === JSReplacementKind.Var) {
+        jsParts[p * 2 - 1] = exprToRawJS(value, ownScope);
+      } else {
+        jsParts[p * 2 - 1] = kind === JSReplacementKind.Argument
+          ? storeArg(value.expr, value.name)
+          : kind === JSReplacementKind.Ref
+          ? `${refsArg}[${getRef(value.expr)}]`
+          : kind === JSReplacementKind.Module
+          ? `${modulesArg}[${storeModule(value.url)}]`
+          : kind === JSReplacementKind.Resource
+          ? `${resourcesArg}(${storeResource(value)})`
+          : "null";
+      }
+
+      jsParts[p * 2] = rawJS[p];
+    }
+
+    return jsParts.join("");
+  };
+
+  const varIds = new Map<
+    JSable<unknown>,
+    [number, string, Map<JSable<unknown>, [number, Set<JSable<unknown>>]>]
+  >();
+  let lastVarId = -1;
+  for (const [v, parents] of wholeScope) {
+    if (parents[0] > 1) {
+      const ownScope = new Map<
+        JSable<unknown>,
+        [number, Set<JSable<unknown>>]
+      >();
+      varIds.set(v, [++lastVarId, exprToRawJS(v, ownScope), ownScope]);
+    }
   }
 
-  return jsParts.join("");
+  const argStrs = argsToString(args) as { -readonly [I in keyof A]: string };
+  return [
+    bodyToRawStatements(
+      Array.isArray(body) ? fnExpr : js.fn(() => [js`return ${body}`]),
+      null,
+    ).join(";"),
+    ...argStrs,
+  ];
 };
 
 const neverStore = () => {
@@ -239,6 +380,13 @@ const neverStore = () => {
 };
 
 const jsUtils = {
+  comma: <T>(...exprs: [...JSable<unknown>[], JSable<T>]): JS<T> => {
+    const template = exprs.length > 1
+      ? exprs.reduce((a, b) => jsTpl`${a},${b}`)
+      : exprs[0];
+    return jsTpl`(${template})`;
+  },
+
   eval: async <T>(expr: JSable<T>): Promise<T> => {
     let m = 0, r = 0;
     const mStore: Record<string, number> = {};
@@ -246,16 +394,16 @@ const jsUtils = {
     const rStore: Record<string, number> = {};
     const rArg: (JSONable | PromiseLike<JSONable>)[] = [];
 
-    const argsBody = [`return(${
-      toRawJS(expr, {
+    const argsBody = [
+      toRawJS(() => expr, {
         storeModule: (url) => (
           mStore[url] ??= (mArg.push(import(url)), m++)
         ),
         storeResource: (res) => (
           rStore[res.uri] ??= (rArg.push(res.value), r++)
         ),
-      })
-    })`];
+      })[0],
+    ];
     const args: unknown[] = [];
 
     if (m > 0) {
@@ -272,8 +420,33 @@ const jsUtils = {
     return new Function(...argsBody)(...args);
   },
 
+  fn: <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
+    cb: Cb,
+  ): Cb extends Fn<infer Args, infer T> ? JSFn<Args, T>
+    : never => {
+    const args = Array(cb.length).fill(0).map(() => arg());
+
+    const argsJs = args.length > 1
+      ? jsTpl`(${args.reduce((a, b) => jsTpl`${a},${b}`)})`
+      : args.length === 1
+      ? args[0]
+      : unsafe("()");
+
+    const body = cb(...args);
+
+    const jsfnExpr = Array.isArray(body)
+      ? jsTpl`(${argsJs}=>{${statements(body)}})`
+      : jsTpl`(${argsJs}=>(${body}))`;
+
+    (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).args = args;
+    (jsfnExpr[jsSymbol] as Writable<JSMeta<unknown>>).body = body;
+
+    return jsfnExpr as Cb extends Fn<infer Args, infer T> ? JSFn<Args, T>
+      : never;
+  },
+
   module: <M>(path: string): JS<M> => {
-    const expr = jsFn<M>``;
+    const expr = jsTpl<M>``;
     (expr[jsSymbol].rawJS as string[]).push("");
     (expr[jsSymbol] as Writable<JSMeta<M>>).replacements = [{
       kind: JSReplacementKind.Module,
@@ -301,11 +474,11 @@ const jsUtils = {
     ...exprs: ImplicitlyJSable[]
   ): JS<string> => {
     const template = exprs.reduce<JS<string>>(
-      (a, b, i) => jsFn`${a}\${${b}}${jsString(tpl[i + 1])}`,
-      jsFn`${jsString(tpl[0])}`,
+      (a, b, i) => jsTpl`${a}\${${b}}${jsString(tpl[i + 1])}`,
+      jsTpl`${jsString(tpl[0])}`,
     );
 
-    return jsFn`\`${template}\``;
+    return jsTpl`\`${template}\``;
 
     function jsString(tpl: string) {
       return unsafe(tpl.replaceAll("`", "\\`"));
@@ -314,13 +487,13 @@ const jsUtils = {
 
   symbol: jsSymbol,
 
-  window: new Proxy({}, { get: (_, p) => jsFn`${unsafe(p as string)}` }) as
+  window: new Proxy({}, { get: (_, p) => jsTpl`${unsafe(p as string)}` }) as
     & Readonly<Omit<JS<Window & typeof globalThis>, keyof JSWindowOverrides>>
     & JSWindowOverrides,
 };
 
-export const js = Object.assign(jsFn, jsUtils) as
-  & typeof jsFn
+export const js = Object.assign(jsTpl, jsUtils) as
+  & typeof jsTpl
   & typeof jsUtils;
 
 type JSWindowOverrides = {
@@ -347,33 +520,28 @@ type JSWindowOverrides = {
   };
 };
 
-export const arg = <T>(
-  index: number,
-  { name }: { name?: string } = {},
-): JS<T> => {
-  const expr = jsFn<T>``;
+export const arg = <T>(name?: string): JS<T> => {
+  const expr = jsTpl<T>``;
 
   (expr[jsSymbol].rawJS as string[]).push("");
   (expr[jsSymbol] as Writable<JSMeta<T>>).replacements = [{
     kind: JSReplacementKind.Argument,
-    value: {
-      expr,
-      index,
-      name,
-    },
+    value: { expr, name },
   }];
+  (expr[jsSymbol] as Writable<JSMeta<unknown>>).isntAssignable = true;
 
   return expr;
 };
 
 export const mkRef = <T extends EventTarget>(): JS<T> => {
-  const expr = jsFn<T>``;
+  const expr = jsTpl<T>``;
 
   (expr[jsSymbol].rawJS as string[]).push("");
   (expr[jsSymbol] as Writable<JSMeta<T>>).replacements = [{
     kind: JSReplacementKind.Ref,
     value: { expr },
   }];
+  (expr[jsSymbol] as Writable<JSMeta<unknown>>).isntAssignable = true;
 
   return expr;
 };
@@ -382,7 +550,7 @@ export const resource = <T extends Readonly<Record<string, JSONable>>>(
   uri: string,
   fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
 ): JS<T> => {
-  const expr = jsFn<T>``;
+  const expr = jsTpl<T>``;
 
   (expr[jsSymbol].rawJS as string[]).push("");
 
@@ -399,6 +567,7 @@ export const resource = <T extends Readonly<Record<string, JSONable>>>(
       },
     },
   }];
+  (expr[jsSymbol] as Writable<JSMeta<unknown>>).isntAssignable = true;
 
   return expr;
 };
@@ -447,6 +616,8 @@ export const sync = async <J extends JSable<any>>(js: J): Promise<J> => {
       (value as Writable<Resource<JSONable>>).value = await Promise.resolve(
         value.value,
       );
+    } else if (kind === JSReplacementKind.Var) {
+      await sync(value);
     }
   }
   return js;

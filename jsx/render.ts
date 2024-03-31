@@ -6,9 +6,10 @@ import {
   resourcesArg,
 } from "../dom/arg-alias.ts";
 import { voidElements } from "../dom/void.ts";
-import { fn, js, mkRef, statements, sync, toRawJS, unsafe } from "../js.ts";
+import { js, mkRef, sync, toRawJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
 import {
+  Fn,
   isJSable,
   JS,
   JSable,
@@ -16,7 +17,6 @@ import {
   JSONable,
   JSReplacementKind,
   jsSymbol,
-  JSWithBody,
   Resource,
 } from "../js/types.ts";
 import {
@@ -72,7 +72,7 @@ export const renderToString = async (
     (ctxData.get(effectContext[contextSymbol]) as InferContext<
       typeof effectContext
     >)
-      .map((effect) => sync(fn(effect))),
+      .map((effect) => sync(js.fn(effect))),
   );
 
   writeDOMTree(
@@ -108,7 +108,7 @@ export const renderToStream = (
         const effects = await Promise.all(
           (ctxData.get(effectContext[contextSymbol]) as InferContext<
             typeof effectContext
-          >).map((effect) => sync(fn(effect))),
+          >).map((effect) => sync(js.fn(effect))),
         );
 
         writeDOMTree(
@@ -171,7 +171,7 @@ const mkContext = (data: ContextData): JSXContextAPI => {
   return ctx;
 };
 
-const effectContext = createContext<JSFn<[EffectAPI], void | (() => void)>[]>(
+const effectContext = createContext<Fn<[EffectAPI], void | (() => void)>[]>(
   "effect",
 );
 
@@ -183,7 +183,7 @@ export const bundleContext = createContext<{
 const writeActivationScript = (
   write: (chunk: string) => void,
   children: DOMNode[],
-  effects: ReadonlyArray<JSWithBody<[EffectAPI], void | (() => void)>>,
+  effects: ReadonlyArray<JSFn<[EffectAPI], void | (() => void)>>,
   { bundle, partial = false }: {
     bundle: JSXContextOf<typeof bundleContext>;
     partial?: boolean;
@@ -203,7 +203,7 @@ const writeActivationScript = (
       }
     }
 
-    const effectsExpr = fn(
+    const effectsExpr = js.fn(
       (
         modules: JS<readonly string[]>,
         resources: JS<readonly [string, JSONable | undefined][]>,
@@ -220,19 +220,24 @@ const writeActivationScript = (
           .name = refsArg;
         (client[jsSymbol].replacements[0].value as { name?: string })
           .name = clientArg;
-        return js`${effects.map((effect) => fn(() => effect[jsSymbol].body))}`;
+        return js`${
+          effects.map((effect) => js.fn(() => effect[jsSymbol].body))
+        }`;
       },
     );
+
+    const usedRefs = new Set<JSable<EventTarget>>();
+    (function storeRefs(expr: JSable<unknown>) {
+      for (const r of expr[jsSymbol].replacements) {
+        if (r.kind === JSReplacementKind.Ref) usedRefs.add(r.value.expr);
+        else if (r.kind === JSReplacementKind.Var) storeRefs(r.value);
+      }
+    })(effectsExpr);
 
     let lastModuleIndex = -1;
     const modules = new Map<string, number>();
     const storeModule = (m: string) =>
       modules.get(m) ?? (modules.set(m, ++lastModuleIndex), lastModuleIndex);
-
-    const usedRefs = new Set<JSable<EventTarget>>();
-    for (const r of effectsExpr[jsSymbol].replacements) {
-      if (r.kind === JSReplacementKind.Ref) usedRefs.add(r.value.expr);
-    }
 
     const refs = new Map<JSable<EventTarget>, number>();
     let lastRefIndex = -1;
@@ -260,34 +265,41 @@ const writeActivationScript = (
       return ress.get(uri)![0];
     };
 
+    const [activationScript, ms, rs] = toRawJS(
+      (publicModules: JS<string[]>, resources: JS<[string, JSONable][]>) => [
+        js.promise(js<Promise<typeof import("../dom.ts")>>`import(${domPath})`)
+          .then((dom) =>
+            dom.a(
+              domActivation(children, walkRef),
+              effectsExpr,
+              publicModules,
+              resources,
+              partial
+                ? js<[Node]>`[document.currentScript.previousSibling]`
+                : js<NodeList>`document.childNodes`,
+            )
+          ),
+      ],
+      { storeModule, storeResource, getRef: (expr) => refs.get(expr)! },
+    );
+
     write("<script>");
-    write(escapeScriptContent(toRawJS(
-      js
-        .promise(js<Promise<typeof import("../dom.ts")>>`import(${domPath})`)
-        .then((dom) =>
-          dom.a(
-            domActivation(children, walkRef),
-            unsafe(
-              toRawJS(effectsExpr, {
-                storeModule,
-                storeResource,
-                getRef: (expr) => refs.get(expr)!,
-              }),
-            ),
-            [...modules.keys()].map((m) => {
-              const publicPath = bundle.result.publicPath(m);
-              if (!publicPath) {
-                throw Error(`Module expected to be bundled: ${m}`);
-              }
-              return publicPath;
-            }),
-            [...ress.values()].map(([, entry]) => entry),
-            partial
-              ? js<[Node]>`[document.currentScript.previousSibling]`
-              : js<NodeList>`document.childNodes`,
-          )
-        ),
-    )));
+    write("let ");
+    write(ms);
+    write("=");
+    write(JSON.stringify([...modules.keys()].map((m) => {
+      const publicPath = bundle.result.publicPath(m);
+      if (!publicPath) {
+        throw Error(`Module expected to be bundled: ${m}`);
+      }
+      return publicPath;
+    })));
+    write(",");
+    write(rs);
+    write("=");
+    write(JSON.stringify([...ress.values()].map(([, entry]) => entry)));
+    write(";");
+    write(escapeScriptContent(activationScript));
 
     if (bundle.watched && !partial) {
       write(
@@ -551,11 +563,7 @@ const nodeToDOMTree = async (
     case ElementKind.JS: {
       const uris = uniqueURIs(node.element);
       if (uris.length) {
-        effects.push(() =>
-          js`${
-            unsafe(clientArg)
-          }.sub(${node.ref},_=>${node.ref}.textContent=${node.element},${uris})`
-        );
+        effects.push(() => subText(node.ref, () => node.element, uris));
       }
       return [{
         kind: DOMNodeKind.Text,
@@ -584,10 +592,23 @@ const nodeToDOMTree = async (
   throw Error(`Can't handle JSX node ${JSON.stringify(node)}`);
 };
 
+const subText = js.fn((
+  node: JS<Text>,
+  value: JS<() => DOMLiteral>,
+  uris: JS<readonly string[]>,
+) =>
+  js<() => void>`${
+    unsafe(clientArg)
+  }.sub(${node},_=>${node}.textContent=${value}(),${uris})`
+);
+
 const uniqueURIs = (expr: JSable<unknown>): string[] => {
   const uris = new Set<string>();
   for (const r of expr[jsSymbol].replacements) {
     if (r.kind === JSReplacementKind.Resource) uris.add(r.value.uri);
+    else if (r.kind === JSReplacementKind.Var) {
+      for (const u of uniqueURIs(r.value)) uris.add(u);
+    }
   }
   return [...uris];
 };
@@ -602,7 +623,7 @@ const componentApiHandler = {
 const lazyComponentApi = {
   effect: (target: JSXComponentAPI) =>
   (
-    cb: JSFn<[EffectAPI], void | (() => void)>,
+    cb: Fn<[EffectAPI], void | (() => void)>,
     uris?:
       | readonly string[]
       | JSable<readonly string[]>
@@ -611,30 +632,27 @@ const lazyComponentApi = {
     componentApiHandler.get(target, "context");
     target.context(effectContext).push(
       (client) => {
-        const effectJs = fn(cb);
-
-        // Make `cb` transparently use `client` from parent scope
-        if (effectJs[jsSymbol].args.length) {
-          (effectJs[jsSymbol].args[0][jsSymbol].replacements[0].value as {
-            name?: string;
-          }).name = clientArg;
-        }
-
-        const subCb = Array.isArray(effectJs[jsSymbol].body)
-          ? js<() => void | (() => void)>`_=>{${
-            statements(effectJs[jsSymbol].body)
-          }}`
-          : js<() => void | (() => void)>`=>(${effectJs[jsSymbol].body})`;
+        const effectJs = js.fn(() => cb(unsafe(clientArg) as JS<EffectAPI>));
 
         const subUris = uris ?? [
           ...new Set(
-            effectJs[jsSymbol].replacements.flatMap((r) =>
-              r.kind === JSReplacementKind.Resource ? r.value.uri : []
+            effectJs[jsSymbol].replacements.flatMap(
+              function rec(r): string | string[] {
+                return r.kind === JSReplacementKind.Resource
+                  ? r.value.uri
+                  : r.kind === JSReplacementKind.Var
+                  ? r.value[jsSymbol].replacements.flatMap(rec)
+                  : [];
+              },
             ),
           ),
         ];
 
-        return client.sub(target.target, subCb, subUris);
+        console.log(
+          effectJs[jsSymbol].rawJS,
+          JSON.stringify([...effectJs[jsSymbol].scope]),
+        );
+        return client.sub(target.target, effectJs, subUris);
       },
     );
   },

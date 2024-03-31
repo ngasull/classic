@@ -5,29 +5,29 @@ export type Resource<T extends JSONable> = {
 
 export type JS<T> = _JS<T, []>;
 
-type _JS<T, Depth extends unknown[]> =
-  & JSable<T>
-  & (T extends NonNullable<JSPrimitive>
-    ? { [K in keyof PrimitivePrototype<T>]: JS<PrimitivePrototype<T>[K]> }
-    : JSOverride<T> extends never ? (
-        & (T extends (...args: infer Args) => infer Ret ? (
-            <R = Ret>(...args: { [I in keyof Args]: JSArg<Args[I]> }) => JS<R>
+type _JS<T, Depth extends unknown[]> = JSable<T> & _JSProxy<T, Depth>;
+
+type _JSProxy<T, Depth extends unknown[]> = T extends NonNullable<JSPrimitive>
+  ? { [K in keyof PrimitivePrototype<T>]: JS<PrimitivePrototype<T>[K]> }
+  : JSOverride<T> extends never ? (
+      & (T extends (...args: infer Args) => infer Ret ? (
+          <R = Ret>(...args: { [I in keyof Args]: JSArg<Args[I]> }) => JS<R>
+        )
+        : T extends unknown[] ? Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
+          : { [I in keyof T]: _JS<T[I], [0, ...Depth]> }
+        : unknown)
+      & (Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
+        : T extends Record<any, any> ? (
+            // Only map actual objects to avoid polluting debugging
+            Record<any, never> extends T ? unknown
+              : {
+                [K in keyof T]: K extends "then" ? JSable<T[K]>
+                  : _JS<T[K], [0, ...Depth]>;
+              }
           )
-          : T extends unknown[] ? Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
-            : { [I in keyof T]: _JS<T[I], [0, ...Depth]> }
-          : unknown)
-        & (Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
-          : T extends Record<any, any> ? (
-              // Only map actual objects to avoid polluting debugging
-              Record<any, never> extends T ? unknown
-                : {
-                  [K in keyof T]: K extends "then" ? JSable<T[K]>
-                    : _JS<T[K], [0, ...Depth]>;
-                }
-            )
-          : unknown)
-      )
-    : JSOverride<T>);
+        : unknown)
+    )
+  : JSOverride<T>;
 
 export type JSArg<Arg> = _JSArg<Arg, []>;
 
@@ -40,7 +40,7 @@ type _JSArg<Arg, Depth extends unknown[]> =
       ? { [I in keyof Filtered]: _JSArg<Filtered[I], [0, ...Depth]> }
     : never)
   | (OnlyJSArg<Arg, JSFunction> extends ((...args: infer AArgs) => infer AR)
-    ? JSFn<AArgs, AR>
+    ? Fn<AArgs, AR>
     : Arg extends JSONable ? Arg
     : never);
 
@@ -69,6 +69,7 @@ type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 
 export enum JSReplacementKind {
   Argument,
+  Var,
   Ref,
   Module,
   Resource,
@@ -80,6 +81,9 @@ export type JSReplacement = {
     readonly expr: JSable<unknown>;
     name?: string;
   };
+} | {
+  readonly kind: JSReplacementKind.Var;
+  readonly value: JSable<unknown>;
 } | {
   readonly kind: JSReplacementKind.Ref;
   readonly value: { readonly expr: JSable<EventTarget> };
@@ -96,8 +100,10 @@ export type JSMeta<T> = {
   readonly [returnSymbol]: false;
   readonly rawJS: readonly string[];
   readonly replacements: readonly JSReplacement[];
+  readonly scope: Map<JSable<unknown>, [number, Set<JSable<unknown>>]>;
   readonly args?: readonly JSable<unknown>[];
   readonly body?: JSFnBody<unknown>;
+  readonly isntAssignable?: boolean;
   readonly isOptional?: boolean;
   readonly isThenable?: boolean;
 };
@@ -105,14 +111,14 @@ declare const typeSymbol: unique symbol;
 
 export type JSable<T> = { readonly [jsSymbol]: JSMeta<T> };
 
-export type JSFn<Args extends readonly unknown[], T = void> = (
+export type Fn<Args extends readonly unknown[], T = void> = (
   ...args: { [I in keyof Args]: JS<Args[I]> }
 ) => JSFnBody<T>;
 
 export type JSFnBody<T> = JSable<T> | JSStatements<T>;
 
-export type JSWithBody<Args extends readonly unknown[], T> =
-  & Omit<JS<(...args: Args) => T>, typeof jsSymbol>
+export type JSFn<Args extends readonly unknown[], T> =
+  & _JSProxy<(...args: Args) => T, []>
   & {
     [jsSymbol]: Omit<JSMeta<(...args: Args) => T>, "args" | "body"> & {
       readonly args: { [I in keyof Args]: JSable<Args[I]> };
@@ -165,7 +171,7 @@ export type JSONable = JSONLiteral | JSONRecord | JSONArray;
 
 export type ImplicitlyJSable<T = any> =
   | JSable<T>
-  | JSFn<any, any>
+  | Fn<any, any>
   | JSONLiteral
   | undefined
   | readonly ImplicitlyJSable[]
@@ -181,7 +187,7 @@ export type ExtractImplicitlyJSable<T> = ExtractFlat<T> extends infer E
   : never;
 
 type ExtractFlat<T> = T extends JSable<infer T> ? T
-  : T extends JSFn<infer Args, infer R> ? (...args: Args) => R
+  : T extends Fn<infer Args, infer R> ? (...args: Args) => R
   : T;
 
 type Exact<A, B> = A extends B ? B extends A ? true : false : false;
