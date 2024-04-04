@@ -6,16 +6,24 @@ import {
   resourcesArg,
 } from "../dom/arg-alias.ts";
 import { voidElements } from "../dom/void.ts";
-import { js, mkRef, sync, toRawJS, unsafe } from "../js.ts";
+import {
+  arg,
+  forEachInExpression,
+  js,
+  mkRef,
+  sync,
+  toRawJS,
+  unsafe,
+} from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
 import {
   Fn,
   isJSable,
   JS,
   JSable,
-  JSFn,
+  JSableArgument,
+  JSMetaKind,
   JSONable,
-  JSReplacementKind,
   jsSymbol,
   Resource,
 } from "../js/types.ts";
@@ -58,6 +66,8 @@ const escapeComment = (comment: string) =>
 export const escapeScriptContent = (node: DOMLiteral) =>
   String(node).replaceAll("</script", "</scr\\ipt");
 
+const clientGlobal = arg<EffectAPI>(clientArg);
+
 export const renderToString = async (
   root: JSXElement,
   { context }: { context?: JSXInitContext<unknown>[] } = {},
@@ -68,14 +78,11 @@ export const renderToString = async (
 
   const bundle = mkContext(ctxData).get(bundleContext);
   const tree = await nodeToDOMTree(root, ctxData);
-  const effects = await Promise.all(
-    (ctxData.get(effectContext[contextSymbol]) as InferContext<
-      typeof effectContext
-    >)
-      .map((effect) => sync(js.fn(effect))),
-  );
+  const effects = ctxData.get(
+    effectContext[contextSymbol],
+  ) as InferContext<typeof effectContext>;
 
-  writeDOMTree(
+  await writeDOMTree(
     tree,
     (chunk) => acc.push(chunk),
     bundle
@@ -104,14 +111,13 @@ export const renderToStream = (
 
       const bundle = mkContext(ctxData).get(bundleContext);
 
-      nodeToDOMTree(root, ctxData).then(async (tree) => {
-        const effects = await Promise.all(
-          (ctxData.get(effectContext[contextSymbol]) as InferContext<
-            typeof effectContext
-          >).map((effect) => sync(js.fn(effect))),
-        );
+      (async () => {
+        const tree = await nodeToDOMTree(root, ctxData);
+        const effects = ctxData.get(
+          effectContext[contextSymbol],
+        ) as InferContext<typeof effectContext>;
 
-        writeDOMTree(
+        await writeDOMTree(
           tree,
           write,
           bundle
@@ -121,7 +127,7 @@ export const renderToStream = (
         );
 
         controller.close();
-      });
+      })();
     },
   });
 
@@ -180,59 +186,31 @@ export const bundleContext = createContext<{
   readonly watched?: boolean;
 }>("bundle");
 
-const writeActivationScript = (
+const writeActivationScript = async (
   write: (chunk: string) => void,
   children: DOMNode[],
-  effects: ReadonlyArray<JSFn<[EffectAPI], void | (() => void)>>,
+  effects: ReadonlyArray<Fn<[EffectAPI], void | (() => void)>>,
   { bundle, partial = false }: {
     bundle: JSXContextOf<typeof bundleContext>;
     partial?: boolean;
   },
-): void => {
+): Promise<void> => {
   const domPath = bundle.result.publicPath(import.meta.resolve("../dom.ts"));
   if (!domPath) throw Error(`DOM lib is supposed to be bundled`);
 
   if (effects.length) {
-    for (const effect of effects) {
-      const { args } = effect[jsSymbol];
-
-      // Rename first arg to `clientArg`
-      if (args.length) {
-        (args[0][jsSymbol].replacements[0].value as { name?: string }).name =
-          clientArg;
-      }
-    }
-
-    const effectsExpr = js.fn(
-      (
-        modules: JS<readonly string[]>,
-        resources: JS<readonly [string, JSONable | undefined][]>,
-        refs: JS<readonly EventTarget[]>,
-        client: JS<EffectAPI>,
-      ) => {
-        (modules[jsSymbol].replacements[0].value as {
-          name?: string;
-        })
-          .name = modulesArg;
-        (resources[jsSymbol].replacements[0].value as { name?: string })
-          .name = resourcesArg;
-        (refs[jsSymbol].replacements[0].value as { name?: string })
-          .name = refsArg;
-        (client[jsSymbol].replacements[0].value as { name?: string })
-          .name = clientArg;
-        return js`${
-          effects.map((effect) => js.fn(() => effect[jsSymbol].body))
-        }`;
-      },
+    const effectsExpr = js.fn(() =>
+      js`${effects.map((effect) => js.fn(() => effect(clientGlobal)))}`
     );
 
+    await sync(effectsExpr);
+
     const usedRefs = new Set<JSable<EventTarget>>();
-    (function storeRefs(expr: JSable<unknown>) {
-      for (const r of expr[jsSymbol].replacements) {
-        if (r.kind === JSReplacementKind.Ref) usedRefs.add(r.value.expr);
-        else if (r.kind === JSReplacementKind.Var) storeRefs(r.value);
+    forEachInExpression(effectsExpr, (expr) => {
+      if (expr[jsSymbol].kind === JSMetaKind.Ref) {
+        usedRefs.add(expr as JSable<EventTarget>);
       }
-    })(effectsExpr);
+    });
 
     let lastModuleIndex = -1;
     const modules = new Map<string, number>();
@@ -265,39 +243,57 @@ const writeActivationScript = (
       return ress.get(uri)![0];
     };
 
-    const [activationScript, ms, rs] = toRawJS(
-      (publicModules: JS<string[]>, resources: JS<[string, JSONable][]>) => [
-        js.promise(js<Promise<typeof import("../dom.ts")>>`import(${domPath})`)
-          .then((dom) =>
-            dom.a(
-              domActivation(children, walkRef),
-              effectsExpr,
-              publicModules,
-              resources,
-              partial
-                ? js<[Node]>`[document.currentScript.previousSibling]`
-                : js<NodeList>`document.childNodes`,
-            )
-          ),
-      ],
-      { storeModule, storeResource, getRef: (expr) => refs.get(expr)! },
-    );
+    const resources = js<readonly [string, JSONable][]>`${
+      [...ress.values()].map(([, entry]) => entry)
+    }`;
 
-    write("<script>");
-    write("let ");
-    write(ms);
-    write("=");
-    write(JSON.stringify([...modules.keys()].map((m) => {
+    const activation = domActivation(children, walkRef);
+
+    const [activationScript] = toRawJS(() => {
+      const makeRefs = js.fn((
+        nodes: JS<NodeList | readonly Node[]>,
+        activation: JS<Activation>,
+      ): JSable<readonly EventTarget[]> =>
+        activation.flatMap(([childIndex, h1]) => {
+          const child = js<ChildNode>`${nodes}[${childIndex}]`;
+          return h1 ? makeRefs(child.childNodes, h1) : child;
+        })
+      );
+      return [
+        js`${unsafe(refsArg)}=${
+          makeRefs(
+            partial
+              ? js<[Node]>`[document.currentScript.previousSibling]`
+              : js<NodeList>`document.childNodes`,
+            activation,
+          )
+        }`,
+        js`${
+          unsafe(resourcesArg)
+        }=i=>${clientGlobal}.store.peek(${resources}[i][0])`,
+        js<typeof import("../dom.ts")["a"]>`dom.a`(effectsExpr, resources),
+      ];
+    }, { storeModule, storeResource, getRef: (expr) => refs.get(expr)! });
+
+    const publicModules = [...modules.keys()].map((m) => {
       const publicPath = bundle.result.publicPath(m);
       if (!publicPath) {
         throw Error(`Module expected to be bundled: ${m}`);
       }
       return publicPath;
-    })));
+    });
+
+    write(`<script type="module">`);
+    write(`let[dom,...`);
+    write(modulesArg);
+    write("]=await Promise.all(");
+    write(JSON.stringify([domPath, ...publicModules]));
+    write(`.map(p=>import(p))),`);
+    write(clientArg);
+    write("=dom.api,");
+    write(refsArg);
     write(",");
-    write(rs);
-    write("=");
-    write(JSON.stringify([...ress.values()].map(([, entry]) => entry)));
+    write(resourcesArg);
     write(";");
     write(escapeScriptContent(activationScript));
 
@@ -342,10 +338,10 @@ const domActivation = (
   return activation;
 };
 
-const writeDOMTree = (
+const writeDOMTree = async (
   tree: readonly DOMNode[],
   write: (chunk: string) => void,
-  writeRootActivation: ((partial?: boolean) => void) | null,
+  writeRootActivation: ((partial?: boolean) => Promise<void>) | null,
   root = true,
 ) => {
   const partialRoot = root && (tree.length !== 1 ||
@@ -397,10 +393,15 @@ const writeDOMTree = (
               }
             }
           } else {
-            writeDOMTree(node.children, write, writeRootActivation, false);
+            await writeDOMTree(
+              node.children,
+              write,
+              writeRootActivation,
+              false,
+            );
 
             if (!partialRoot && node.tag === "head") {
-              writeRootActivation?.();
+              await writeRootActivation?.();
             }
           }
 
@@ -410,7 +411,7 @@ const writeDOMTree = (
         }
 
         if (partialRoot && node.tag !== "script") {
-          writeRootActivation?.(true);
+          await writeRootActivation?.(true);
           write("</body></html>");
         }
         break;
@@ -604,12 +605,11 @@ const subText = js.fn((
 
 const uniqueURIs = (expr: JSable<unknown>): string[] => {
   const uris = new Set<string>();
-  for (const r of expr[jsSymbol].replacements) {
-    if (r.kind === JSReplacementKind.Resource) uris.add(r.value.uri);
-    else if (r.kind === JSReplacementKind.Var) {
-      for (const u of uniqueURIs(r.value)) uris.add(u);
+  forEachInExpression(expr, (e) => {
+    if (e[jsSymbol].kind === JSMetaKind.Resource) {
+      uris.add(e[jsSymbol].resource.uri);
     }
-  }
+  });
   return [...uris];
 };
 
@@ -632,27 +632,14 @@ const lazyComponentApi = {
     componentApiHandler.get(target, "context");
     target.context(effectContext).push(
       (client) => {
-        const effectJs = js.fn(() => cb(unsafe(clientArg) as JS<EffectAPI>));
-
-        const subUris = uris ?? [
-          ...new Set(
-            effectJs[jsSymbol].replacements.flatMap(
-              function rec(r): string | string[] {
-                return r.kind === JSReplacementKind.Resource
-                  ? r.value.uri
-                  : r.kind === JSReplacementKind.Var
-                  ? r.value[jsSymbol].replacements.flatMap(rec)
-                  : [];
-              },
-            ),
-          ),
-        ];
-
-        console.log(
-          effectJs[jsSymbol].rawJS,
-          JSON.stringify([...effectJs[jsSymbol].scope]),
+        const effectJs = js.fn(() =>
+          cb(unsafe(clientArg) as JS<EffectAPI> & JSableArgument<EffectAPI>)
         );
-        return client.sub(target.target, effectJs, subUris);
+        return client.sub(
+          target.target,
+          effectJs,
+          uris ?? uniqueURIs(effectJs),
+        );
       },
     );
   },

@@ -20,10 +20,7 @@ type _JSProxy<T, Depth extends unknown[]> = T extends NonNullable<JSPrimitive>
         : T extends Record<any, any> ? (
             // Only map actual objects to avoid polluting debugging
             Record<any, never> extends T ? unknown
-              : {
-                [K in keyof T]: K extends "then" ? JSable<T[K]>
-                  : _JS<T[K], [0, ...Depth]>;
-              }
+              : { [K in keyof T]: _JS<T[K], [0, ...Depth]> }
           )
         : unknown)
     )
@@ -67,64 +64,100 @@ declare global {
 
 type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 
-export enum JSReplacementKind {
+export type JSable<T = unknown> = { readonly [jsSymbol]: JSMeta<T> };
+
+export type JSableFunction<T = unknown> = JSable<T> & {
+  readonly [jsSymbol]: JSMeta<T> & JSMetaFunction;
+};
+
+export type JSableArgument<T = unknown> = JSable<T> & {
+  readonly [jsSymbol]: JSMeta<T> & JSMetaArgument;
+};
+
+export type JSableRef<T = unknown> = JSable<T> & {
+  readonly [jsSymbol]: JSMeta<T> & JSMetaRef;
+};
+
+export type JSableResource<T = unknown> = JSable<T> & {
+  readonly [jsSymbol]: JSMeta<T> & JSMetaResource;
+};
+
+export type JSMeta<T = unknown> =
+  & JSableType<T, boolean>
+  & {
+    scope?: JSMeta & JSMetaFunction;
+    thenable?: JSable;
+    isAwaited?: boolean;
+    readonly isntAssignable?: boolean;
+    readonly isOptional?: boolean;
+  }
+  & (
+    | JSMetaTemplate
+    | JSMetaFunction
+    | JSMetaArgument
+    | JSMetaCall
+    | JSMetaRef
+    | JSMetaModule
+    | JSMetaResource
+  );
+declare const typeSymbol: unique symbol;
+
+export type JSableType<T, R = false> = {
+  [typeSymbol]: T;
+  [returnSymbol]: R;
+};
+
+export enum JSMetaKind {
+  Template,
+  Function,
   Argument,
-  Var,
+  Call,
   Ref,
   Module,
   Resource,
 }
 
-export type JSReplacement = {
-  readonly kind: JSReplacementKind.Argument;
-  readonly value: {
-    readonly expr: JSable<unknown>;
-    name?: string;
-  };
-} | {
-  readonly kind: JSReplacementKind.Var;
-  readonly value: JSable<unknown>;
-} | {
-  readonly kind: JSReplacementKind.Ref;
-  readonly value: { readonly expr: JSable<EventTarget> };
-} | {
-  readonly kind: JSReplacementKind.Module;
-  readonly value: { readonly url: string };
-} | {
-  readonly kind: JSReplacementKind.Resource;
-  readonly value: Resource<JSONable>;
-};
-
-export type JSMeta<T> = {
-  readonly [typeSymbol]: T;
-  readonly [returnSymbol]: false;
+export type JSMetaTemplate = {
+  readonly kind: JSMetaKind.Template;
   readonly rawJS: readonly string[];
-  readonly replacements: readonly JSReplacement[];
-  readonly scope: Map<JSable<unknown>, [number, Set<JSable<unknown>>]>;
-  readonly args?: readonly JSable<unknown>[];
-  readonly body?: JSFnBody<unknown>;
-  readonly isntAssignable?: boolean;
-  readonly isOptional?: boolean;
-  readonly isThenable?: boolean;
+  readonly replacements: readonly JSable[];
 };
-declare const typeSymbol: unique symbol;
 
-export type JSable<T> = { readonly [jsSymbol]: JSMeta<T> };
+export type JSMetaFunction = {
+  readonly kind: JSMetaKind.Function;
+  readonly args: readonly (JS<unknown> & JSableArgument)[];
+  readonly body: JSFnBody<unknown>;
+};
+
+export type JSMetaArgument = {
+  readonly kind: JSMetaKind.Argument;
+};
+
+export type JSMetaCall = {
+  readonly kind: JSMetaKind.Call;
+  readonly callable: JSable;
+  readonly values: readonly JSable[];
+};
+
+export type JSMetaRef = {
+  readonly kind: JSMetaKind.Ref;
+};
+
+export type JSMetaModule = {
+  readonly kind: JSMetaKind.Module;
+  readonly url: string;
+};
+
+export type JSMetaResource = {
+  readonly kind: JSMetaKind.Resource;
+  readonly resource: Resource<JSONable>;
+};
 
 export type Fn<Args extends readonly unknown[], T = void> = (
-  ...args: { [I in keyof Args]: JS<Args[I]> }
+  ...args: { [I in keyof Args]: JS<Args[I]> & JSableArgument<Args[I]> }
 ) => JSFnBody<T>;
 
 export type JSFnBody<T> = JSable<T> | JSStatements<T>;
-
-export type JSFn<Args extends readonly unknown[], T> =
-  & _JSProxy<(...args: Args) => T, []>
-  & {
-    [jsSymbol]: Omit<JSMeta<(...args: Args) => T>, "args" | "body"> & {
-      readonly args: { [I in keyof Args]: JSable<Args[I]> };
-      readonly body: JSFnBody<T>;
-    };
-  };
 
 export type JSStatements<T> = [
   JSable<unknown> | (JSable<T> & JSReturn),
