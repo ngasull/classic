@@ -30,6 +30,8 @@ declare module "../deps/hono.ts" {
   }
 }
 
+const effect = (a: never): never => {};
+
 export const honoContext = createContext("hono");
 
 const domRouterSymbol = Symbol("domRouter");
@@ -64,7 +66,7 @@ export const jsxRenderer = <
       if (c.req.query("_layout") != null && !Layout) return c.notFound();
 
       content = jsx("div", {
-        ref: (api) => domRouter.ref(api, c.req.path),
+        ref: (target) => effect(() => domRouter.subSegment(target, c.req.path)),
         children: content,
       });
 
@@ -74,7 +76,9 @@ export const jsxRenderer = <
             ? jsx(
               Layout!,
               c.req.param() as any,
-              jsx("progress", { ref: domRouter.ref }),
+              jsx("progress", {
+                ref: (target) => effect(() => domRouter.subSegment(target)),
+              }),
             )
             : c.req.query("_index") == null && ComposedLayout
             ? jsx(ComposedLayout, null, content)
@@ -125,12 +129,14 @@ async (c, next) => {
         jsx(
           "div",
           {
-            ref: (api) =>
-              domRouter.ref(
-                api,
-                c.req.path.split("/")
-                  .slice(0, routePath.replace(/\/\*?$/, "").split("/").length)
-                  .join("/"),
+            ref: (target) =>
+              effect(() =>
+                domRouter.subSegment(
+                  target,
+                  c.req.path.split("/")
+                    .slice(0, routePath.replace(/\/\*?$/, "").split("/").length)
+                    .join("/"),
+                )
               ),
           },
           jsx(

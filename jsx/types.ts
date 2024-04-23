@@ -1,4 +1,3 @@
-import type { EffectAPI } from "../dom.ts";
 import type { Fn, JS, JSable } from "../js/types.ts";
 import type { JSXInternal } from "./dom.d.ts";
 
@@ -135,7 +134,7 @@ export type JSXComponentAPI = {
   target: JSable<EventTarget>;
   readonly context: JSXContextAPI;
   readonly effect: (
-    cb: Fn<[EffectAPI], void | (() => void)>,
+    cb: Fn<[], void | (() => void)>,
     uris?: string[],
   ) => void;
 };

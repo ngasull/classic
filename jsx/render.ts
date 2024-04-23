@@ -1,32 +1,9 @@
-import type { Activation, EffectAPI } from "../dom.ts";
-import {
-  clientArg,
-  modulesArg,
-  refsArg,
-  resourcesArg,
-} from "../dom/arg-alias.ts";
+import type { Activation } from "../dom.ts";
 import { voidElements } from "../dom/void.ts";
-import {
-  arg,
-  forEachInExpression,
-  js,
-  mkRef,
-  sync,
-  toRawJS,
-  unsafe,
-} from "../js.ts";
+import { client, indexedUris } from "../js.ts";
+import { js, jsResources, mkRef, toJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
-import {
-  Fn,
-  isJSable,
-  JS,
-  JSable,
-  JSableArgument,
-  JSMetaKind,
-  JSONable,
-  jsSymbol,
-  Resource,
-} from "../js/types.ts";
+import { Fn, isJSable, JS, JSable } from "../js/types.ts";
 import {
   contextSymbol,
   DOMLiteral,
@@ -66,8 +43,6 @@ const escapeComment = (comment: string) =>
 export const escapeScriptContent = (node: DOMLiteral) =>
   String(node).replaceAll("</script", "</scr\\ipt");
 
-const clientGlobal = arg<EffectAPI>(clientArg);
-
 export const renderToString = async (
   root: JSXElement,
   { context }: { context?: JSXInitContext<unknown>[] } = {},
@@ -86,11 +61,21 @@ export const renderToString = async (
     tree,
     (chunk) => acc.push(chunk),
     bundle
-      ? ((partial) =>
-        writeActivationScript((chunk) => acc.push(chunk), tree, effects, {
-          bundle,
-          partial,
-        }))
+      ? (async (partial) => {
+        try {
+          return writeActivationScript(
+            (chunk) => acc.push(chunk),
+            tree,
+            effects,
+            {
+              bundle,
+              partial,
+            },
+          );
+        } catch (e) {
+          console.log(e);
+        }
+      })
       : null,
   );
   return acc.join("");
@@ -121,8 +106,16 @@ export const renderToStream = (
           tree,
           write,
           bundle
-            ? ((partial) =>
-              writeActivationScript(write, tree, effects, { bundle, partial }))
+            ? (async (partial) => {
+              try {
+                return writeActivationScript(write, tree, effects, {
+                  bundle,
+                  partial,
+                });
+              } catch (e) {
+                console.log(e);
+              }
+            })
             : null,
         );
 
@@ -177,9 +170,7 @@ const mkContext = (data: ContextData): JSXContextAPI => {
   return ctx;
 };
 
-const effectContext = createContext<Fn<[EffectAPI], void | (() => void)>[]>(
-  "effect",
-);
+const effectContext = createContext<Fn<[], void | (() => void)>[]>("effect");
 
 export const bundleContext = createContext<{
   readonly result: BundleResult;
@@ -189,112 +180,41 @@ export const bundleContext = createContext<{
 const writeActivationScript = async (
   write: (chunk: string) => void,
   children: DOMNode[],
-  effects: ReadonlyArray<Fn<[EffectAPI], void | (() => void)>>,
+  effects: ReadonlyArray<Fn<[], void | (() => void)>>,
   { bundle, partial = false }: {
     bundle: JSXContextOf<typeof bundleContext>;
     partial?: boolean;
   },
 ): Promise<void> => {
-  const domPath = bundle.result.publicPath(import.meta.resolve("../dom.ts"));
-  if (!domPath) throw Error(`DOM lib is supposed to be bundled`);
-
   if (effects.length) {
-    const effectsExpr = js.fn(() =>
-      js`${effects.map((effect) => js.fn(() => effect(clientGlobal)))}`
+    const refs: JSable<EventTarget>[] = [];
+    const activation = domActivation(children, (expr: JSable<EventTarget>) => {
+      refs.push(expr);
+      return true;
+    });
+
+    const [activationScript] = await toJS(
+      () => effects.map((effect) => js.fn(effect)()),
+      {
+        isServer: false,
+        activation: [
+          partial
+            ? js<[Node]>`[document.currentScript.previousSibling]`
+            : js<NodeList>`document.childNodes`,
+          activation,
+          refs,
+        ],
+        resolve: (url) => {
+          const publicPath = bundle.result.publicPath(url);
+          if (!publicPath) {
+            throw Error(`Module expected to be bundled: ${url}`);
+          }
+          return publicPath;
+        },
+      },
     );
 
-    await sync(effectsExpr);
-
-    const usedRefs = new Set<JSable<EventTarget>>();
-    forEachInExpression(effectsExpr, (expr) => {
-      if (expr[jsSymbol].kind === JSMetaKind.Ref) {
-        usedRefs.add(expr as JSable<EventTarget>);
-      }
-    });
-
-    let lastModuleIndex = -1;
-    const modules = new Map<string, number>();
-    const storeModule = (m: string) =>
-      modules.get(m) ?? (modules.set(m, ++lastModuleIndex), lastModuleIndex);
-
-    const refs = new Map<JSable<EventTarget>, number>();
-    let lastRefIndex = -1;
-    const walkRef = (expr: JSable<EventTarget>) => {
-      if (usedRefs.has(expr)) {
-        refs.set(expr, ++lastRefIndex);
-        return true;
-      } else {
-        return false;
-      }
-    };
-
-    const ress = new Map<string, [number, [string, JSONable]]>();
-    let lastResIndex = -1;
-    const storeResource = ({ uri, value }: Resource<JSONable>) => {
-      if (!ress.has(uri)) {
-        if (typeof (value as PromiseLike<JSONable>)?.then === "function") {
-          throw Error(
-            `Resource values should have been awaited with \`sync\` at this point`,
-          );
-        }
-        ress.set(uri, [++lastResIndex, [uri, value as JSONable]]);
-        return lastResIndex;
-      }
-      return ress.get(uri)![0];
-    };
-
-    const resources = js<readonly [string, JSONable][]>`${
-      [...ress.values()].map(([, entry]) => entry)
-    }`;
-
-    const activation = domActivation(children, walkRef);
-
-    const [activationScript] = toRawJS(() => {
-      const makeRefs = js.fn((
-        nodes: JS<NodeList | readonly Node[]>,
-        activation: JS<Activation>,
-      ): JSable<readonly EventTarget[]> =>
-        activation.flatMap(([childIndex, h1]) => {
-          const child = js<ChildNode>`${nodes}[${childIndex}]`;
-          return h1 ? makeRefs(child.childNodes, h1) : child;
-        })
-      );
-      return [
-        js`${unsafe(refsArg)}=${
-          makeRefs(
-            partial
-              ? js<[Node]>`[document.currentScript.previousSibling]`
-              : js<NodeList>`document.childNodes`,
-            activation,
-          )
-        }`,
-        js`${
-          unsafe(resourcesArg)
-        }=i=>${clientGlobal}.store.peek(${resources}[i][0])`,
-        js<typeof import("../dom.ts")["a"]>`dom.a`(effectsExpr, resources),
-      ];
-    }, { storeModule, storeResource, getRef: (expr) => refs.get(expr)! });
-
-    const publicModules = [...modules.keys()].map((m) => {
-      const publicPath = bundle.result.publicPath(m);
-      if (!publicPath) {
-        throw Error(`Module expected to be bundled: ${m}`);
-      }
-      return publicPath;
-    });
-
     write(`<script type="module">`);
-    write(`let[dom,...`);
-    write(modulesArg);
-    write("]=await Promise.all(");
-    write(JSON.stringify([domPath, ...publicModules]));
-    write(`.map(p=>import(p))),`);
-    write(clientArg);
-    write("=dom.api,");
-    write(refsArg);
-    write(",");
-    write(resourcesArg);
-    write(";");
     write(escapeScriptContent(activationScript));
 
     if (bundle.watched && !partial) {
@@ -522,14 +442,14 @@ const nodeToDOMTree = async (
 
       effects.push(
         ...reactiveAttributes.flatMap(([name, expr]) => {
-          const uris = uniqueURIs(expr);
+          const uris = jsResources(expr);
           return uris.length
-            ? [(client: JS<EffectAPI>) =>
+            ? () =>
               client.sub(
                 node.ref,
                 js`let k=${name},v=${expr};!v&&v!==""?${node.ref}.removeAttribute(k):${node.ref}.setAttribute(k,v===true?"":String(v))`,
-                uris,
-              )]
+                indexedUris(uris),
+              )
             : [];
         }),
       );
@@ -562,9 +482,16 @@ const nodeToDOMTree = async (
     }
 
     case ElementKind.JS: {
-      const uris = uniqueURIs(node.element);
+      const uris = jsResources(node.element);
       if (uris.length) {
-        effects.push(() => subText(node.ref, () => node.element, uris));
+        effects.push(() =>
+          subText(
+            node.ref,
+            () => node.element,
+            // js.comma(js.reassign(node.element, node.element), node.element),
+            indexedUris(uris),
+          )
+        );
       }
       return [{
         kind: DOMNodeKind.Text,
@@ -598,20 +525,10 @@ const subText = js.fn((
   value: JS<() => DOMLiteral>,
   uris: JS<readonly string[]>,
 ) =>
-  js<() => void>`${
-    unsafe(clientArg)
-  }.sub(${node},_=>${node}.textContent=${value}(),${uris})`
+  js<
+    () => void
+  >`${client.sub}(${node},_=>${node}.textContent=${value}(),${uris})`
 );
-
-const uniqueURIs = (expr: JSable<unknown>): string[] => {
-  const uris = new Set<string>();
-  forEachInExpression(expr, (e) => {
-    if (e[jsSymbol].kind === JSMetaKind.Resource) {
-      uris.add(e[jsSymbol].resource.uri);
-    }
-  });
-  return [...uris];
-};
 
 const componentApiHandler = {
   get: (target: any, k) =>
@@ -623,24 +540,20 @@ const componentApiHandler = {
 const lazyComponentApi = {
   effect: (target: JSXComponentAPI) =>
   (
-    cb: Fn<[EffectAPI], void | (() => void)>,
+    cb: Fn<[], void | (() => void)>,
     uris?:
       | readonly string[]
       | JSable<readonly string[]>
       | readonly JSable<string>[],
   ) => {
     componentApiHandler.get(target, "context");
-    target.context(effectContext).push(
-      (client) => {
-        const effectJs = js.fn(() =>
-          cb(unsafe(clientArg) as JS<EffectAPI> & JSableArgument<EffectAPI>)
-        );
-        return client.sub(
-          target.target,
-          effectJs,
-          uris ?? uniqueURIs(effectJs),
-        );
-      },
-    );
+    target.context(effectContext).push(() => {
+      const effectJs = js.fn(cb);
+      return client.sub(
+        target.target,
+        effectJs,
+        uris ? indexedUris(uris) : [],
+      );
+    });
   },
 };

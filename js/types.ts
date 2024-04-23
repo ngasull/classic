@@ -66,40 +66,21 @@ type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 
 export type JSable<T = unknown> = { readonly [jsSymbol]: JSMeta<T> };
 
-export type JSableFunction<T = unknown> = JSable<T> & {
-  readonly [jsSymbol]: JSMeta<T> & JSMetaFunction;
-};
-
-export type JSableArgument<T = unknown> = JSable<T> & {
-  readonly [jsSymbol]: JSMeta<T> & JSMetaArgument;
-};
-
-export type JSableRef<T = unknown> = JSable<T> & {
-  readonly [jsSymbol]: JSMeta<T> & JSMetaRef;
-};
-
-export type JSableResource<T = unknown> = JSable<T> & {
-  readonly [jsSymbol]: JSMeta<T> & JSMetaResource;
-};
-
 export type JSMeta<T = unknown> =
   & JSableType<T, boolean>
   & {
-    scope?: JSMeta & JSMetaFunction;
+    scope?: JSMeta & { body: { [jsSymbol]: { fnBody: JSFnBody } } };
     thenable?: JSable;
     isAwaited?: boolean;
+    readonly hasResources?: boolean;
     readonly isntAssignable?: boolean;
     readonly isOptional?: boolean;
-  }
-  & (
-    | JSMetaTemplate
-    | JSMetaFunction
-    | JSMetaArgument
-    | JSMetaCall
-    | JSMetaRef
-    | JSMetaModule
-    | JSMetaResource
-  );
+
+    template(
+      context: unknown,
+    ): (string | JSable)[] | Promise<(string | JSable)[]>;
+  };
+
 declare const typeSymbol: unique symbol;
 
 export type JSableType<T, R = false> = {
@@ -107,61 +88,16 @@ export type JSableType<T, R = false> = {
   [returnSymbol]: R;
 };
 
-export enum JSMetaKind {
-  Template,
-  Function,
-  Argument,
-  Call,
-  Ref,
-  Module,
-  Resource,
-}
-
-export type JSMetaTemplate = {
-  readonly kind: JSMetaKind.Template;
-  readonly rawJS: readonly string[];
-  readonly replacements: readonly JSable[];
-};
-
-export type JSMetaFunction = {
-  readonly kind: JSMetaKind.Function;
-  readonly args: readonly (JS<unknown> & JSableArgument)[];
-  readonly body: JSFnBody<unknown>;
-};
-
-export type JSMetaArgument = {
-  readonly kind: JSMetaKind.Argument;
-};
-
-export type JSMetaCall = {
-  readonly kind: JSMetaKind.Call;
-  readonly callable: JSable;
-  readonly values: readonly JSable[];
-};
-
-export type JSMetaRef = {
-  readonly kind: JSMetaKind.Ref;
-};
-
-export type JSMetaModule = {
-  readonly kind: JSMetaKind.Module;
-  readonly url: string;
-};
-
-export type JSMetaResource = {
-  readonly kind: JSMetaKind.Resource;
-  readonly resource: Resource<JSONable>;
-};
-
 export type Fn<Args extends readonly unknown[], T = void> = (
-  ...args: { [I in keyof Args]: JS<Args[I]> & JSableArgument<Args[I]> }
+  ...args: { [I in keyof Args]: JS<Args[I]> }
+  // ...args: { [I in keyof Args]: JS<Args[I]> & JSableArgument<Args[I]> }
 ) => JSFnBody<T>;
 
-export type JSFnBody<T> = JSable<T> | JSStatements<T>;
+export type JSFnBody<T = unknown> = JSable<T> | JSStatements<T>;
 
 export type JSStatements<T> = [
-  JSable<unknown> | (JSable<T> & JSReturn),
-  ...readonly (JSable<unknown> | (JSable<T> & JSReturn))[],
+  JSable | (JSable<T> & JSReturn),
+  ...readonly (JSable | (JSable<T> & JSReturn))[],
 ];
 
 export type JSStatementsReturn<S extends JSStatements<unknown>> = S extends
@@ -198,7 +134,7 @@ export type JSONRecord = {
   readonly [jsSymbol]?: never;
 };
 
-export type JSONArray = ReadonlyArray<JSONLiteral | JSONArray | JSONRecord>;
+export type JSONArray = Array<JSONLiteral | JSONArray | JSONRecord>;
 
 export type JSONable = JSONLiteral | JSONRecord | JSONArray;
 
@@ -207,7 +143,7 @@ export type ImplicitlyJSable<T = any> =
   | Fn<any, any>
   | JSONLiteral
   | undefined
-  | readonly ImplicitlyJSable[]
+  | ImplicitlyJSable[]
   | { readonly [k: string]: ImplicitlyJSable; readonly [jsSymbol]?: undefined };
 
 export type ExtractImplicitlyJSable<T> = ExtractFlat<T> extends infer E
@@ -225,7 +161,7 @@ type ExtractFlat<T> = T extends JSable<infer T> ? T
 
 type Exact<A, B> = A extends B ? B extends A ? true : false : false;
 
-export const jsSymbol = Symbol("js");
+export const jsSymbol = Symbol.for("classic.js");
 
 export const isJSable = <T>(v: unknown): v is JSable<T> =>
   v != null && (typeof v === "object" || typeof v === "function") &&

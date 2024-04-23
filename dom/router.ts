@@ -1,4 +1,3 @@
-import type { RefAPI } from "../dom.ts";
 import { cleanup, trackChildren } from "./lifecycle.ts";
 import {
   adoptNode,
@@ -17,11 +16,9 @@ import {
   querySelector,
   querySelectorAll,
   replaceWith,
-  routeFormEvent,
   routeLoadEvent,
   startsWith,
   subEvent,
-  submit,
   win,
 } from "./util.ts";
 
@@ -194,11 +191,6 @@ export const navigate = (path: string): boolean => {
   return navigated;
 };
 
-export const ref = (
-  { effect, target }: RefAPI<ChildNode>,
-  path?: string,
-): void => effect(() => subSegment(target, path));
-
 const subRoot = () => {
   let t: EventTarget | null,
     body = doc.body,
@@ -217,11 +209,11 @@ const subRoot = () => {
 
       subEvent(
         body,
-        submit,
+        "submit",
         (e) =>
           (t = e.target) instanceof HTMLFormElement &&
           t.method == "get" &&
-          !dispatchPrevented(t, customEvent(routeFormEvent)) &&
+          !e.defaultPrevented &&
           navigate(t.action) &&
           preventDefault(e),
       ),
@@ -238,7 +230,7 @@ const subRoot = () => {
   };
 };
 
-const subSegment = (target: ChildNode, path?: string) => {
+export const subSegment = (target: ChildNode, path?: string) => {
   if (!segments.size) subRoot();
 
   if (path) segments.set(target, { p: path });

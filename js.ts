@@ -1,52 +1,42 @@
-import { refsArg, varArg } from "./dom/arg-alias.ts";
-import { argn, modulesArg, resourcesArg } from "./dom/arg-alias.ts";
+import type { Activation } from "./dom.ts";
+import { varArg } from "./dom/arg-alias.ts";
+import { argn } from "./dom/arg-alias.ts";
 import type {
   Fn,
   ImplicitlyJSable,
   JS,
   JSable,
-  JSableArgument,
-  JSableFunction,
-  JSableResource,
   JSableType,
   JSFnBody,
   JSMeta,
-  JSMetaArgument,
-  JSMetaFunction,
-  JSMetaRef,
   JSONable,
   ParamKeys,
   Resource,
   ResourceGroup,
   Resources,
 } from "./js/types.ts";
-import { JSMetaCall } from "./js/types.ts";
-import { JSMetaKind, jsSymbol } from "./js/types.ts";
+import { isJSable, jsSymbol } from "./js/types.ts";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
-export const forEachInExpression = (
-  expr: JSable,
-  cb: (expr: JSable, parent?: JSable) => unknown,
-  parent?: JSable,
-): void => {
-  cb(expr, parent);
+type IJSMeta = {
+  scope?: JSMeta & { body: JSFnBody };
+  template(
+    context: IJSMetaContext,
+  ): (string | JSable)[] | Promise<(string | JSable)[]>;
+};
 
-  switch (expr[jsSymbol].kind) {
-    case JSMetaKind.Template:
-      return expr[jsSymbol].replacements.forEach((r) =>
-        forEachInExpression(r, cb, expr)
-      );
-    case JSMetaKind.Function:
-      return Array.isArray(expr[jsSymbol].body)
-        ? expr[jsSymbol].body.forEach((s) => forEachInExpression(s, cb, expr))
-        : forEachInExpression(expr[jsSymbol].body, cb, expr);
-    case JSMetaKind.Call:
-      forEachInExpression(expr[jsSymbol].callable, cb, expr);
-      return expr[jsSymbol].values.forEach((v) =>
-        forEachInExpression(v, cb, expr)
-      );
-  }
+type IJSMetaContext = {
+  isServer?: boolean;
+  asyncScopes: Set<JSMetaFunction | undefined>;
+  scopedDeclarations: Map<JSFnBody, JSMeta[]>;
+  declaredNames: Map<JSMeta, string>;
+  implicitRefs: Map<ImplicitlyJSable, JSable>;
+  argn: number;
+  args: Map<JSMetaArgument, string>;
+  modules: JSable & { [jsSymbol]: JSMetaModuleStore };
+  refs?: JSMetaRefStore;
+  resources?: JSable & { [jsSymbol]: JSMetaResources };
 };
 
 const targetSymbol = Symbol("target");
@@ -106,90 +96,175 @@ const jsIterator = <T>(expr: JSable<T>): Iterator<JS<T>> => {
 };
 
 export const unsafe = (js: string): JSable<unknown> =>
-  jsable(
-    {
-      kind: JSMetaKind.Template,
-      rawJS: [js],
-      replacements: [],
-      isntAssignable: true,
-    } as const,
-  )<unknown>();
+  jsable({ template: () => [js], isntAssignable: true } as const)<unknown>();
 
-const jsTpl = <T>(
-  tpl: ReadonlyArray<string>,
+const jsTpl = ((
+  tpl: ReadonlyArray<string> | ((...args: any[]) => JSFnBody<any>),
   ...exprs: ImplicitlyJSable[]
-): JS<T> => {
-  const rawJS: string[] = [];
-  const replacements: JSable[] = [];
-
-  const builtExpr = jsable(
-    { kind: JSMetaKind.Template, rawJS, replacements } as const,
-  )<T>();
-
-  let last: string[] = [tpl[0]];
-
-  const handleExpression = (expr: ImplicitlyJSable): void => {
-    if (expr === null) {
-      last.push(`null`);
-    } else if (expr === undefined) {
-      last.push(`void 0`);
-    } else if (
-      (typeof expr === "function" || typeof expr === "object") &&
-      jsSymbol in expr && expr[jsSymbol]
-    ) {
-      rawJS.push(last.join(""));
-      replacements.push(expr);
-      last = [];
-    } else if (typeof expr === "function") {
-      handleExpression(js.fn(expr));
-    } else if (Array.isArray(expr)) {
-      last.push(`[`);
-      for (let i = 0; i < expr.length; i++) {
-        if (i > 0) last.push(`,`);
-        handleExpression(expr[i]);
-      }
-      last.push(`]`);
-    } else if (typeof expr === "object") {
-      last.push(`{`);
-      const entries = Object.entries(expr as { [k: string]: ImplicitlyJSable });
-      for (let i = 0; i < entries.length; i++) {
-        if (i > 0) last.push(`,`);
-        const [k, expr] = entries[i];
-        last.push(
-          typeof k === "number" || safeRecordKeyRegExp.test(k)
-            ? k
-            : JSON.stringify(k),
-          `:`,
-        );
-        handleExpression(expr);
-      }
-      last.push(`}`);
-    } else {
-      last.push(JSON.stringify(expr));
-    }
+) =>
+  typeof tpl === "function"
+    ? makeConvenient(jsable(new JSMetaFunction(tpl))())
+    : makeConvenient(jsable(new JSMetaTemplate(tpl, exprs))())) as {
+    <T>(tpl: ReadonlyArray<string>, ...exprs: ImplicitlyJSable[]): JS<T>;
+    <Cb extends (...args: any[]) => JSFnBody<any>>(
+      cb: Cb,
+    ): Cb extends Fn<infer Args, infer T>
+      ? JS<(...args: Args) => T> & { [jsSymbol]: JSMetaFunction }
+      : never;
   };
 
-  exprs.forEach((expr, i) => {
-    handleExpression(expr);
-    last.push(tpl[i + 1]);
-  });
-  rawJS.push(last.join(""));
+class JSMetaTemplate implements IJSMeta {
+  public readonly hasResources: boolean;
 
-  return makeConvenient(builtExpr);
+  constructor(
+    readonly tpl: readonly string[],
+    readonly exprs: ImplicitlyJSable[],
+  ) {
+    this.hasResources = this.exprs.some((e) =>
+      isJSable(e) && e[jsSymbol].hasResources
+    );
+  }
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    const r = Array<string | JSable>(
+      this.tpl.length + this.exprs.length,
+    );
+    let i = 0;
+    for (; i < this.exprs.length; i++) {
+      r[i * 2] = this.tpl[i];
+      r[i * 2 + 1] = implicit(context, this.exprs[i], (this as IJSMeta).scope);
+    }
+    r[i * 2] = this.tpl[i];
+    return r;
+  }
+
+  [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions) {
+    return this.tpl.map((t, i) => {
+      const expr = this.exprs[i];
+      return `${t}${
+        i < this.exprs.length
+          ? Deno.inspect(isJSable(expr) ? expr[jsSymbol] : expr, opts)
+          : ""
+      }`;
+    }).join("");
+  }
+}
+
+const implicit = (
+  context: IJSMetaContext,
+  expr: ImplicitlyJSable,
+  scope: undefined | JSMeta & { body: JSFnBody },
+): JSable | string => {
+  if (expr === null) {
+    return `null`;
+  } else if (expr === undefined) {
+    return `void 0`;
+  } else if ((typeof expr === "object" || typeof expr === "function")) {
+    if (jsSymbol in expr && expr[jsSymbol]) return expr as JSable;
+
+    const existing = context.implicitRefs.get(expr);
+    if (existing) return existing;
+
+    const newImplicit = typeof expr === "function"
+      ? jsable(new JSMetaFunction(expr))()
+      : Array.isArray(expr)
+      ? jsable(new JSMetaArray(expr))()
+      : jsable(new JSMetaObject(expr))();
+    // @ts-ignore
+    newImplicit[jsSymbol].scope = scope;
+    // @ts-ignore
+    context.implicitRefs.set(expr, newImplicit);
+    // @ts-ignore
+    return newImplicit;
+  } else {
+    return JSON.stringify(expr);
+  }
 };
+
+class JSMetaObject implements IJSMeta {
+  constructor(
+    private readonly expr: {
+      readonly [k: string]: ImplicitlyJSable;
+      readonly [jsSymbol]?: undefined;
+    },
+  ) {}
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    const entries = Object.entries(
+      this.expr as { [k: string]: ImplicitlyJSable },
+    );
+    if (!entries.length) return [`{}`];
+    else {
+      const tpl = Array<string | JSable>(entries.length * 3 + 1);
+      tpl[0] = `{`;
+      for (let i = 0; i < entries.length; i++) {
+        const [k, v] = entries[i];
+        tpl[i * 3 + 1] = `${
+          typeof k === "number" || safeRecordKeyRegExp.test(k)
+            ? k
+            : JSON.stringify(k)
+        }:`;
+        tpl[i * 3 + 2] = implicit(context, v, (this as IJSMeta).scope);
+        tpl[i * 3 + 3] = `,`;
+      }
+      tpl[tpl.length - 1] = `}`;
+      return tpl;
+    }
+  }
+
+  [Symbol.for("Deno.customInspect")]({ ...opts }: Deno.InspectOptions) {
+    opts.depth ??= 4;
+    if (--opts.depth < 0) return `{...}`;
+    return `{${
+      Object.entries(this.expr).map(([k, v]) =>
+        `${k}: ${Deno.inspect(v, opts)}`
+      )
+        .join(", ")
+    }}`;
+  }
+}
+
+class JSMetaArray implements IJSMeta {
+  constructor(private readonly expr: readonly ImplicitlyJSable[]) {}
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    if (!this.expr.length) return [`[]`];
+    else {
+      const tpl = Array<string | JSable>(this.expr.length * 2 + 1);
+      tpl[0] = `[`;
+      for (let i = 0; i < this.expr.length; i++) {
+        tpl[i * 2 + 1] = implicit(
+          context,
+          this.expr[i],
+          (this as IJSMeta).scope,
+        );
+        tpl[i * 2 + 2] = `,`;
+      }
+      tpl[tpl.length - 1] = `]`;
+      return tpl;
+    }
+  }
+
+  [Symbol.for("Deno.customInspect")]({ ...opts }: Deno.InspectOptions) {
+    opts.depth ??= 4;
+    if (--opts.depth < 0) return `[...]`;
+    return `[${this.expr.map((e) => Deno.inspect(e, opts)).join(", ")}]`;
+  }
+}
 
 const makeConvenient = <J extends JSable>(
   expr: J,
 ): J extends JSable<infer T> ? JS<T> & J : never => {
   const callExpr = (...argArray: ReadonlyArray<JSable | JSONable>) => {
     const e = makeConvenient(
-      jsable<JSMetaCall>({
-        kind: JSMetaKind.Call,
-        callable: expr,
-        values: argArray.map((a) =>
-          typeof a === "function" && jsSymbol in a ? a : js`${a}`
+      jsable<JSMetaCall>(
+        new JSMetaCall(
+          expr as unknown as JSable & { [jsSymbol]: JSMetaFunction },
+          argArray.map((a) =>
+            typeof a === "function" && jsSymbol in a ? a : js`${a}`
+          ),
         ),
-      })(),
+      )(),
     );
 
     // Event loop might be await-ing for the JS<> ; resolve with a non-thenable
@@ -202,9 +277,9 @@ const makeConvenient = <J extends JSable>(
       !(jsSymbol in argArray[1])
     ) {
       const scope = expr[jsSymbol].thenable[jsSymbol].scope;
-      const awaited = jsTpl`(await ${expr[jsSymbol].thenable})`;
-      awaited[jsSymbol].isAwaited = true;
-      (argArray[0] as (r: unknown) => void)(awaited);
+      (argArray[0] as (r: unknown) => void)(
+        makeConvenient(jsable(new JSMetaAwait(expr[jsSymbol].thenable))()),
+      );
     }
 
     return e;
@@ -213,249 +288,272 @@ const makeConvenient = <J extends JSable>(
   return new Proxy(callExpr, jsProxyHandler) as any;
 };
 
-export const toRawJS = <A extends readonly unknown[]>(
-  f: Fn<A, unknown>,
-  { storeModule = neverStore, storeResource = neverStore, getRef = neverStore }:
-    {
-      readonly storeModule?: (url: string) => number;
-      readonly storeResource?: (resource: Resource<JSONable>) => number;
-      readonly getRef?: (expr: JSMetaRef) => number | undefined;
-    } = {},
-): [string, ...{ -readonly [I in keyof A]: string }] => {
-  const globalArgs = Array(f.length).fill(0).map(() => arg());
-  const globalBody = (f as Fn<readonly any[], unknown>)(...globalArgs);
+class JSMetaCall implements IJSMeta {
+  readonly hasResources: boolean;
 
-  const scopeToRefs = new Map<JSMetaFunction | undefined, Set<JSMeta>>();
-  const refToParentReuse = new Map<JSMeta, Map<JSMeta | undefined, boolean>>();
-  const buildScopes = (
-    meta: JSMeta,
-    parent?: JSMeta,
-    enclosing?: JSMetaFunction | undefined,
-  ): void => {
-    switch (meta.kind) {
-      case JSMetaKind.Template:
-      case JSMetaKind.Function:
-      case JSMetaKind.Call: {
-        const wasWalked = refToParentReuse.has(meta);
-        const parentDefs = refToParentReuse.get(meta) ??
-          new Map<JSMeta | undefined, boolean>();
-        refToParentReuse.set(meta, parentDefs);
-        parentDefs.set(
-          parent,
-          parentDefs.has(parent) || enclosing !== meta.scope,
-        );
-        scopeToRefs.set(
-          meta.scope,
-          (scopeToRefs.get(meta.scope) ?? new Set()).add(meta),
-        );
+  constructor(
+    private readonly callable: JSable,
+    private readonly values: readonly JSable[],
+  ) {
+    this.hasResources = values.some((v) => v[jsSymbol].hasResources);
+  }
 
-        if (!wasWalked) {
-          if (meta.kind === JSMetaKind.Function) {
-            Array.isArray(meta.body)
-              ? meta.body.forEach((s) => buildScopes(s[jsSymbol], meta, meta))
-              : buildScopes(meta.body[jsSymbol], meta, meta);
-          } else if (meta.kind === JSMetaKind.Call) {
-            buildScopes(meta.callable[jsSymbol], meta, enclosing);
-            meta.values.forEach((v) =>
-              buildScopes(v[jsSymbol], meta, enclosing)
-            );
-          } else {
-            meta.replacements.forEach((r) =>
-              buildScopes(r[jsSymbol], meta, enclosing)
-            );
-          }
+  template(context: IJSMetaContext): (string | JSable)[] {
+    return [
+      ...(context.declaredNames.has(this.callable[jsSymbol]) ||
+          !(this.callable[jsSymbol] instanceof JSMetaFunction)
+        ? [this.callable]
+        : ["(", this.callable, ")"]),
+      "(",
+      ...this.values.flatMap((v, i) => i > 0 ? [",", v] : v),
+      ")",
+    ];
+  }
+
+  [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions) {
+    return `[${Deno.inspect(this.callable[jsSymbol], opts)}](${
+      this.values.map((v) => Deno.inspect(v[jsSymbol], opts)).join(", ")
+    })`;
+  }
+}
+
+class JSMetaAwait implements IJSMeta {
+  isAwaited = true;
+
+  constructor(private readonly _expr: JSable) {}
+
+  template(): (string | JSable)[] {
+    return ["(await ", this._expr, ")"];
+  }
+
+  [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions) {
+    return `await ${Deno.inspect(this._expr[jsSymbol], opts)}`;
+  }
+}
+
+export const toJS = async <A extends readonly unknown[]>(f: Fn<A, unknown>, {
+  activation,
+  resolve,
+  isServer,
+}: {
+  resolve?: (url: string) => string;
+  activation?: [
+    JS<NodeList | readonly Node[]>,
+    Activation,
+    readonly JSable<EventTarget>[],
+  ];
+  isServer?: boolean;
+} = {}): Promise<[string, ...{ -readonly [I in keyof A]: string }]> => {
+  const globalFn = jsable(
+    new JSMetaFunction(f as Fn<readonly any[], unknown>, false),
+  )()[jsSymbol];
+  const globalBody = globalFn.body[jsSymbol];
+
+  let lastVarId = -1;
+  const context: IJSMetaContext = mkMetaContext({ isServer, resolve });
+
+  if (activation) {
+    context.refs = new JSMetaRefStore(
+      activation[0],
+      activation[1],
+      activation[2],
+    );
+  }
+
+  const scopeToRefs = new Map<JSMeta | undefined, Set<JSMeta>>();
+  const refToParentReuse = new Map<
+    JSMeta,
+    Map<JSMeta | undefined, { reused?: boolean; outOfScope: boolean }>
+  >();
+  const refToChildren = new Map<JSMeta, readonly JSMeta[]>();
+  {
+    type Job =
+      | readonly [JSMeta]
+      | readonly [JSMeta, JSMeta | undefined, JSMetaFunction | undefined];
+    const jobs: Job[] = [[globalBody]];
+    for (let job; (job = jobs.shift());) {
+      const [meta, parent, enclosing] = job;
+
+      const refParentReuse = refToParentReuse.get(meta) ??
+        new Map<
+          JSMeta | undefined,
+          { reused?: boolean; outOfScope: boolean }
+        >();
+      refToParentReuse.set(meta, refParentReuse);
+
+      const def = refParentReuse.get(parent) ?? { outOfScope: false };
+      def.reused = def.reused != null;
+      def.outOfScope ||= enclosing !== meta.scope;
+      refParentReuse.set(parent, def);
+
+      scopeToRefs.set(
+        meta.scope,
+        (scopeToRefs.get(meta.scope) ?? new Set()).add(meta),
+      );
+
+      if (meta.isAwaited) {
+        context.asyncScopes.add(meta.scope as unknown as JSMetaFunction);
+      }
+
+      if (!refToChildren.has(meta)) {
+        const children: JSMeta[] = [];
+        for (const c of await meta.template(context)) {
+          if (typeof c !== "string") children.push(c[jsSymbol]);
         }
+        refToChildren.set(meta, children);
+
+        const subEnclosing = meta instanceof JSMetaFunction ? meta : enclosing;
+        jobs.unshift(...children.map((c) => [c, meta, subEnclosing] as const));
       }
     }
-  };
-
-  if (Array.isArray(globalBody)) {
-    globalBody.forEach((s) => buildScopes(s[jsSymbol]));
-  } else {
-    buildScopes(globalBody[jsSymbol]);
   }
 
   const visitedRefs = new Set<JSMeta>();
   const declaredRefs = new Set<JSMeta>();
-  const scopedDeclarations = new Map<JSFnBody<unknown>, JSMeta[]>();
-  const shouldDeclare = (source: JSMeta): boolean => {
+  const shouldDeclare = (meta: JSMeta): boolean => {
     let used = false;
-    const rec = (meta: JSMeta) => {
-      if (meta.isntAssignable) return false;
-      for (const [parent, parentReused] of refToParentReuse.get(meta)!) {
-        if (used) return true;
-        if (parent && declaredRefs.has(parent)) continue;
-        if (parentReused || parent && shouldDeclare(parent)) {
-          return true;
-        }
+    if (meta.isntAssignable) return false;
+
+    for (
+      const [parent, { reused, outOfScope }] of refToParentReuse.get(meta)!
+    ) {
+      if (reused) return true;
+      if (!(parent && declaredRefs.has(parent))) {
+        if (
+          used || (outOfScope && (!parent || !hasAssignedParentInScope(parent)))
+        ) return true;
         used = true;
       }
-      return false;
-    };
-    return rec(source);
-  };
-
-  scopeToRefs.forEach((refs) =>
-    refs.forEach(function declareIfNeeded(meta) {
-      if (
-        visitedRefs.has(meta) ||
-        (meta.kind !== JSMetaKind.Function && meta.kind !== JSMetaKind.Call &&
-          meta.kind !== JSMetaKind.Template)
-      ) return;
-      visitedRefs.add(meta);
-
-      if (shouldDeclare(meta)) {
-        declaredRefs.add(meta);
-
-        // Try declare contained expressions, pretending current is declared
-        if (meta.kind === JSMetaKind.Function) {
-          if (Array.isArray(meta.body)) {
-            meta.body.forEach((s) => declareIfNeeded(s[jsSymbol]));
-          } else {
-            declareIfNeeded(meta.body[jsSymbol]);
-          }
-        } else if (meta.kind === JSMetaKind.Call) {
-          declareIfNeeded(meta.callable[jsSymbol]);
-          meta.values.forEach((v) => declareIfNeeded(v[jsSymbol]));
-        } else if (meta.kind === JSMetaKind.Template) {
-          for (const r of meta.replacements) {
-            declareIfNeeded(r[jsSymbol]);
-          }
-        }
-
-        // Ensure current should still be declared
-        if (shouldDeclare(meta)) {
-          const ds = scopedDeclarations.get(meta.scope?.body ?? globalBody);
-          if (ds) ds.push(meta);
-          else scopedDeclarations.set(meta.scope?.body ?? globalBody, [meta]);
-        } else {
-          declaredRefs.delete(meta);
-        }
-      }
-    })
-  );
-
-  let argIndex = -1;
-  const argNames = new Map<JSMeta & JSMetaArgument, string>();
-  const argName = (arg: JSMeta & JSMetaArgument) =>
-    argNames.get(arg) ?? (() => {
-      const name = argn(++argIndex);
-      argNames.set(arg, name);
-      return name;
-    })();
-
-  let lastVarId = -1;
-  const declared = new Map<JSMeta, string>();
-
-  const bodyToRawStatements = (body: JSFnBody<unknown>): readonly string[] => {
-    const rawStatements: string[] = [];
-
-    const assignments: string[] = [];
-    scopedDeclarations.get(body)?.forEach((scoped) => {
-      if (!declared.has(scoped)) {
-        const name = `${varArg}${++lastVarId}`;
-        declared.set(scoped, name);
-        assignments.push(`${name}=${exprToRawJS(scoped, true)}`);
-      }
-    });
-
-    if (assignments.length) {
-      rawStatements.push(`let ${assignments.join(",")}`);
     }
 
-    if (Array.isArray(body)) {
-      rawStatements.push(
-        ...body.map((s) => exprToRawJS(s[jsSymbol])),
+    return false;
+  };
+  const hasAssignedParentInScope = (meta: JSMeta): boolean => {
+    for (const parent of refToParentReuse.get(meta)!.keys()) {
+      if (parent && parent.scope === meta.scope) {
+        if (declaredRefs.has(parent) || hasAssignedParentInScope(parent)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const declareIfNeeded = (meta: JSMeta): boolean => {
+    if (visitedRefs.has(meta)) return false;
+    visitedRefs.add(meta);
+
+    if (shouldDeclare(meta)) {
+      declaredRefs.add(meta);
+    }
+    let assignedChildren = false;
+
+    // Try declare contained expressions, pretending current is declared
+    for (const c of refToChildren.get(meta)!) {
+      if (!visitedRefs.has(c) && declareIfNeeded(c)) assignedChildren = true;
+    }
+
+    // Ensure current should still be declared
+    if (declaredRefs.has(meta) && (!assignedChildren || shouldDeclare(meta))) {
+      context.declaredNames.set(meta, `${varArg}${++lastVarId}`);
+      const ds = context.scopedDeclarations.get(
+        (meta.scope as unknown as JSMetaFunction ?? globalFn).body[jsSymbol]
+          .fnBody,
       );
+      if (ds) ds.push(meta);
+      else {
+        context.scopedDeclarations.set(
+          (meta.scope as unknown as JSMetaFunction ?? globalFn).body[jsSymbol]
+            .fnBody,
+          [meta],
+        );
+      }
+      return true;
     } else {
-      rawStatements.push(exprToRawJS(body[jsSymbol]));
-
-      if (rawStatements.length === 2) {
-        rawStatements[1] = `return ${rawStatements[1]}`;
-      }
+      declaredRefs.delete(meta);
     }
-
-    return rawStatements;
+    return false;
   };
 
-  const exprToRawJS = (meta: JSMeta, declare?: boolean): string => {
-    const varName = declared.get(meta);
-    if (varName && !declare) return varName;
-
-    switch (meta.kind) {
-      case JSMetaKind.Function: {
-        const { args, body } = meta;
-        const argNames = args.map((a) => argName(a[jsSymbol]));
-        const argsStr = argNames.length === 1
-          ? argNames[0]
-          : `(${argNames.join(",")})`;
-
-        const stmts = bodyToRawStatements(body);
-        const bodyStr = stmts.length === 1 && !Array.isArray(body)
-          ? `(${stmts[0]})`
-          : `{${stmts.join(";")}}`;
-        return declare ? `${argsStr}=>${bodyStr}` : `(${argsStr}=>${bodyStr})`;
-      }
-
-      case JSMetaKind.Call: {
-        return `${exprToRawJS(meta.callable[jsSymbol])}(${
-          meta.values.map((v) => exprToRawJS(v[jsSymbol])).join(",")
-        })`;
-      }
-
-      case JSMetaKind.Template: {
-        const { rawJS, replacements } = meta;
-        const jsParts = Array<string>(2 * replacements.length + 1);
-        jsParts[0] = rawJS[0];
-        for (let r = 0; r < replacements.length; r++) {
-          const p = r + 1;
-          jsParts[p * 2 - 1] = exprToRawJS(replacements[r][jsSymbol]);
-          jsParts[p * 2] = rawJS[p];
-        }
-        return jsParts.join("");
-      }
-
-      case JSMetaKind.Argument:
-        return argName(meta);
-
-      case JSMetaKind.Ref:
-        return `${refsArg}[${getRef(meta)}]`;
-
-      case JSMetaKind.Module:
-        return `${modulesArg}[${storeModule(meta.url)}]`;
-
-      case JSMetaKind.Resource:
-        return `${resourcesArg}(${storeResource(meta.resource)})`;
+  for (const refs of scopeToRefs.values()) {
+    for (const meta of refs) {
+      declareIfNeeded(meta);
     }
-  };
+  }
 
-  const argsName = globalArgs.map((a) => argName(a[jsSymbol])) as {
-    -readonly [I in keyof A]: string;
-  };
-  const statements = bodyToRawStatements(globalBody);
+  const argsName = globalFn.args.map((a) =>
+    (a[jsSymbol].template(context) as string[]).join("")
+  ) as { -readonly [I in keyof A]: string };
+  const globalBodyStr = await metaToJS(context, globalBody);
 
   return [
-    statements.length > 1 || Array.isArray(globalBody)
-      ? statements.join(";") + ";"
-      : `return ${statements[0]};`,
+    globalBody.isExpression(context)
+      ? `return ${globalBodyStr};`
+      : globalBodyStr.slice(1, -1) + ";",
     ...argsName,
   ];
 };
 
-const neverStore = () => {
-  throw Error("All modules, refs and resources must be stored");
+const mkMetaContext = (
+  { resolve = (url) => import.meta.resolve(url), isServer = true }: {
+    resolve?: (uri: string) => string;
+    isServer?: boolean;
+  } = {},
+): IJSMetaContext => ({
+  isServer,
+  argn: -1,
+  args: new Map(),
+  scopedDeclarations: new Map(),
+  declaredNames: new Map(),
+  implicitRefs: new Map(),
+  asyncScopes: new Set(),
+  modules: jsable(new JSMetaModuleStore(resolve))(),
+});
+
+const metaToJS = async (
+  context: IJSMetaContext,
+  meta: JSMeta,
+  declare?: boolean,
+): Promise<string> => {
+  const parts = [];
+  const templates: (string | JSable)[] = [jsable(meta)()];
+
+  for (let first; (first = templates.shift()) != null;) {
+    if (typeof first === "string") {
+      parts.push(first);
+    } else {
+      const d = context.declaredNames.get(first[jsSymbol]);
+      if (d && !declare) {
+        if (first[jsSymbol].hasResources) parts.push(d, "()");
+        else parts.push(d);
+      } else {
+        declare = false;
+        templates.unshift(...await first[jsSymbol].template(context));
+      }
+    }
+  }
+
+  return parts.join("");
 };
 
-const trackedScopes: (JSMeta & JSMetaFunction)[] = [];
-
-const jsable =
-  <M>(meta: M) => <T, R = false>(): { [jsSymbol]: M & JSableType<T, R> } => {
-    (meta as { scope: JSMetaFunction }).scope = trackedScopes[0];
-    const expr = {
-      [jsSymbol]: meta as M & JSableType<T, R>,
-    } as const;
-    return expr;
-  };
+export const jsResources = (expr: JSable): string[] => {
+  const context: IJSMetaContext = mkMetaContext();
+  const r = new Set<string>();
+  const visited = new Set<JSable>();
+  const children: (JSable | string)[] = [expr];
+  for (let c; (c = children.pop());) {
+    if (typeof c !== "string" && !visited.has(c)) {
+      visited.add(c);
+      const meta = c[jsSymbol];
+      if (meta instanceof JSMetaResource) r.add(meta.uri);
+      else {
+        const tpl = meta.template(context);
+        if (!(tpl instanceof Promise)) children.push(...tpl);
+      }
+    }
+  }
+  return [...r];
+};
 
 const jsUtils = {
   comma: <T>(...exprs: [...JSable<unknown>[], JSable<T>]): JS<T> => {
@@ -469,76 +567,37 @@ const jsUtils = {
   },
 
   eval: async <T>(expr: JSable<T>): Promise<T> => {
-    let m = 0, r = 0;
-    const mStore: Record<string, number> = {};
-    const mArg: Promise<unknown>[] = [];
-    const rStore: Record<string, number> = {};
-    const rArg: (JSONable | PromiseLike<JSONable>)[] = [];
-
-    const argsBody = [
-      toRawJS(() => expr, {
-        storeModule: (url) => (
-          mStore[url] ??= (mArg.push(import(url)), m++)
-        ),
-        storeResource: (res) => (
-          rStore[res.uri] ??= (rArg.push(res.value), r++)
-        ),
-      })[0],
-    ];
-    const args: unknown[] = [];
-
-    if (m > 0) {
-      argsBody.unshift(modulesArg);
-      args.unshift(await Promise.all(mArg));
+    const [rawJS] = await toJS(() => expr, { isServer: true });
+    const jsBody = `return(async()=>{${rawJS}})()`;
+    try {
+      return new Function("document", "window", jsBody)();
+    } catch (e) {
+      console.error("Failed evaluating function with the following JS", jsBody);
+      throw e;
     }
-
-    if (r > 0) {
-      const resources = await Promise.all(rArg);
-      argsBody.unshift(resourcesArg);
-      args.unshift((i: number) => resources[i]);
-    }
-
-    return new Function(...argsBody)(...args);
   },
 
-  fn: <Cb extends (...args: readonly any[]) => JSFnBody<any>>(
+  fn: <Cb extends (...args: any[]) => JSFnBody<any>>(
     cb: Cb,
   ): Cb extends Fn<infer Args, infer T>
-    ? JS<(...args: Args) => T> & JSableFunction<(...args: Args) => T>
-    : never => {
-    const args = Array(cb.length).fill(0).map(() => arg());
-    const expr = jsable(
-      { kind: JSMetaKind.Function, args, body: null! } as const,
-    )<Cb extends Fn<infer Args, infer T> ? (...args: Args) => T : never>();
-
-    // Making body lazy allows self-referencing functions
-    let body: JSFnBody<unknown> | null = null;
-    Object.defineProperty(expr[jsSymbol], "body", {
-      get() {
-        if (!body) {
-          trackedScopes.unshift(expr[jsSymbol]);
-          body = cb(...args);
-          trackedScopes.shift();
-        }
-        return body;
-      },
-    });
-
-    return makeConvenient(expr) as Cb extends Fn<infer Args, infer T>
-      ? JS<(...args: Args) => T> & JSableFunction<(...args: Args) => T>
-      : never;
-  },
+    ? JS<(...args: Args) => T> & { [jsSymbol]: JSMetaFunction }
+    : never =>
+    makeConvenient(jsable(new JSMetaFunction(cb))()) as Cb extends
+      Fn<infer Args, infer T>
+      ? JS<(...args: Args) => T> & { [jsSymbol]: JSMetaFunction }
+      : never,
 
   module: <M>(path: string): JS<M> =>
-    makeConvenient(
-      jsable({ kind: JSMetaKind.Module, url: path } as const)<M>(),
-    ),
+    makeConvenient(jsable(new JSMetaModule(path))<M>()),
 
   optional: <T>(expr: JSable<T>): JS<NonNullable<T>> => {
     const p = js<NonNullable<T>>`${expr}`;
     (p[jsSymbol] as Writable<JSMeta<NonNullable<T>>>).isOptional = true;
     return p;
   },
+
+  reassign: <T>(varMut: JSable<T>, expr: JSable<T>): JS<T> =>
+    makeConvenient(jsable(new JSMetaReassign(varMut, expr))<T>()),
 
   string: (
     tpl: ReadonlyArray<string>,
@@ -587,43 +646,427 @@ type JSWindowOverrides = {
   };
 };
 
-export const arg = <T>(name?: string): JS<T> & JSableArgument<T> =>
-  makeConvenient(
-    jsable({ kind: JSMetaKind.Argument, name, isntAssignable: true } as const)<
-      T
-    >(),
+const trackedScopes: JSMetaFunction[] = [];
+
+const jsable =
+  <M>(meta: M) => <T, R = false>(): { [jsSymbol]: M & JSableType<T, R> } => {
+    (meta as { scope: JSMetaFunction }).scope ??= trackedScopes[0];
+    const expr = {
+      [jsSymbol]: meta as M & JSableType<T, R>,
+      [Symbol.for("Deno.customInspect")]: (opts: Deno.InspectOptions) =>
+        Deno.inspect(meta, opts),
+    } as const;
+    return expr;
+  };
+
+class JSMetaFunction implements IJSMeta {
+  readonly args: readonly (JS<unknown> & { [jsSymbol]: JSMetaArgument })[];
+
+  constructor(
+    private readonly cb: Fn<readonly unknown[], unknown>,
+    private readonly scoped = true,
+  ) {
+    this.args = Array(cb.length).fill(0).map(() =>
+      makeConvenient(jsable(new JSMetaArgument())())
+    );
+  }
+
+  private _hasResources?: boolean;
+  get hasResources() {
+    return this._hasResources ??= this.body[jsSymbol].hasResources;
+  }
+
+  // Making body lazy allows self-referencing functions
+  private _body?: JSable & { [jsSymbol]: JSMetaFunctionBody };
+  get body(): JSable & { [jsSymbol]: JSMetaFunctionBody } {
+    if (!this._body) {
+      if (this.scoped) trackedScopes.unshift(this);
+      this._body = jsable(new JSMetaFunctionBody(this.cb(...this.args)))();
+      if (this.scoped) trackedScopes.shift();
+    }
+    return this._body;
+  }
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    const args: (string | JSable)[] = this.args.length === 1
+      ? [this.args[0]]
+      : ["(", ...this.args.flatMap((a, i) => i ? [",", a] : a), ")"];
+
+    if (context.asyncScopes.has(this)) {
+      args.unshift("async ");
+    }
+
+    return [...args, "=>", this.body];
+  }
+
+  [Symbol.for("Deno.customInspect")]({ ...opts }: Deno.InspectOptions) {
+    opts.depth ??= 4;
+    return `function(${
+      this.args.map((a) => Deno.inspect(a[jsSymbol], opts)).join(", ")
+    }) ${opts.depth! < 0 ? "..." : Deno.inspect(this.body, opts)}`;
+  }
+}
+
+class JSMetaFunctionBody implements IJSMeta {
+  readonly hasResources?: boolean;
+
+  constructor(public readonly fnBody: JSFnBody) {
+    this.hasResources = Array.isArray(this.fnBody)
+      ? this.fnBody.some((s) => s[jsSymbol].hasResources)
+      : this.fnBody[jsSymbol].hasResources;
+  }
+
+  isExpression(context: IJSMetaContext): boolean {
+    return !Array.isArray(this.fnBody) &&
+      !context.scopedDeclarations.get(this.fnBody)?.length;
+  }
+
+  async template(context: IJSMetaContext): Promise<(string | JSable)[]> {
+    const { scopedDeclarations, declaredNames } = context;
+    const parts: (string | JSable)[] = ["{"];
+
+    const assignments: string[] = [];
+    for (const scoped of scopedDeclarations.get(this.fnBody) ?? []) {
+      assignments.push(
+        `${declaredNames.get(scoped)}=${
+          scoped.hasResources ? "()=>" : ""
+        }${await metaToJS(context, scoped, true)}`,
+      );
+    }
+
+    if (assignments.length) {
+      parts.push(`let ${assignments.join(",")};`);
+    }
+
+    if (Array.isArray(this.fnBody)) {
+      const lastIndex = this.fnBody.length - 1;
+      this.fnBody.forEach((s, i) =>
+        i < lastIndex ? parts.push(s, ";") : parts.push(s)
+      );
+    } else {
+      if (assignments.length) {
+        parts.push("return ", this.fnBody);
+      } else {
+        let firstBodyMeta = this.fnBody[jsSymbol];
+        while (firstBodyMeta instanceof JSMetaTemplate) {
+          const e = implicit(
+            context,
+            firstBodyMeta.exprs[0],
+            firstBodyMeta.scope as any,
+          );
+          if (typeof e === "string") break;
+          else firstBodyMeta = e[jsSymbol];
+        }
+
+        if (
+          firstBodyMeta instanceof JSMetaObject &&
+          !context.declaredNames.has(firstBodyMeta)
+        ) {
+          return ["(", this.fnBody, ")"];
+        }
+
+        return [this.fnBody];
+      }
+    }
+
+    parts.push("}");
+    return parts;
+  }
+
+  [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions) {
+    return Array.isArray(this.fnBody)
+      ? this.fnBody.length
+        ? `{${
+          this.fnBody.map((s) => `\n  ${Deno.inspect(s[jsSymbol], opts)};`)
+            .join("")
+        }\n}`
+        : `{}`
+      : Deno.inspect(this.fnBody[jsSymbol], opts);
+  }
+}
+
+class JSMetaArgument implements IJSMeta {
+  readonly isntAssignable = true;
+
+  constructor(private name?: string) {}
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    const existing = context.args.get(this);
+    if (existing) return [existing];
+
+    const newName = this.name ?? argn(++context.argn);
+    context.args.set(this, newName);
+    return [newName];
+  }
+
+  [Symbol.for("Deno.customInspect")]() {
+    return this.name ? this.name : "?";
+  }
+}
+
+class JSMetaModule implements IJSMeta {
+  constructor(private url: string) {}
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    return [context.modules, `[${context.modules[jsSymbol].index(this.url)}]`];
+  }
+
+  [Symbol.for("Deno.customInspect")]() {
+    return `import(${this.url})`;
+  }
+}
+
+class JSMetaModuleStore implements IJSMeta {
+  isAwaited = true;
+  readonly #urls: Record<string, number> = {};
+  #i = 0;
+
+  constructor(private readonly resolve: (url: string) => string) {}
+
+  template(_: IJSMetaContext): (string | JSable)[] {
+    return [
+      `await Promise.all(${
+        JSON.stringify(Object.keys(this.#urls).map(this.resolve))
+      }.map(u=>import(u)))`,
+    ];
+  }
+
+  index(url: string) {
+    return this.#urls[url] ??= this.#i++;
+  }
+
+  [Symbol.for("Deno.customInspect")]() {
+    return `modules`;
+  }
+}
+
+class JSMetaRef implements IJSMeta {
+  readonly isntAssignable = true;
+
+  constructor() {}
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    if (!context.refs) throw Error(`Must provide activation when using refs`);
+    return [context.refs.js, `[${context.refs.byMeta.get(this)}]`];
+  }
+
+  [Symbol.for("Deno.customInspect")]() {
+    return `ref`;
+  }
+}
+
+const makeRefs = js.fn((
+  nodes: JS<NodeList | readonly Node[]>,
+  activation: JS<Activation>,
+): JSable<readonly EventTarget[]> =>
+  // @ts-ignore
+  activation.flatMap(([childIndex, h1]) => {
+    const child = js<ChildNode>`${nodes}[${childIndex}]`;
+    // @ts-ignore
+    return js`${h1}?${makeRefs(child.childNodes, h1)}:${child}`;
+  })
+);
+
+class JSMetaRefStore {
+  readonly byMeta = new Map<JSMetaRef, number>();
+  readonly js: JS<readonly EventTarget[]>;
+
+  constructor(
+    nodes: JS<NodeList | readonly Node[]>,
+    activation: Activation,
+    refs: readonly JSable<EventTarget>[],
+  ) {
+    refs.forEach((r, i) =>
+      this.byMeta.set(
+        // @ts-ignore: TODO Make JSables specific to new sub-meta types
+        r[jsSymbol],
+        i,
+      )
+    );
+    this.js = makeRefs(
+      nodes,
+      makeConvenient(unsafe(JSON.stringify(activation)) as JSable<Activation>),
+    );
+  }
+}
+
+const domApi =
+  js.module<typeof import("./dom.ts")>(import.meta.resolve("./dom.ts")).api;
+const domStore = domApi.store;
+
+export const client = {
+  store: {
+    peek: domStore.peek,
+    set: domStore.set,
+    sub: domStore.sub,
+    [jsSymbol]: domStore[jsSymbol],
+  },
+  sub: domApi.sub,
+  [jsSymbol]: domApi[jsSymbol],
+};
+
+class JSMetaResource<T extends JSONable = JSONable> implements IJSMeta {
+  readonly hasResources = true;
+  readonly isntAssignable = true;
+
+  constructor(
+    public readonly uri: string,
+    private readonly fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
+  ) {}
+
+  async template(context: IJSMetaContext): Promise<(string | JSable)[]> {
+    context.resources ??= jsable(new JSMetaResources(context))();
+    return [await context.resources[jsSymbol].peek<T>(this.uri, this.fetch)];
+  }
+
+  [Symbol.for("Deno.customInspect")]() {
+    return `$(${this.uri})`;
+  }
+}
+
+class JSMetaResources implements IJSMeta {
+  readonly #store: Record<string, [number, JSONable]> = {};
+  #i = 0;
+  readonly #initialResources = jsable(
+    new JSMetaVar(
+      () => [
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(this.#store).map(([k, [, v]]) => [k, v]),
+          ),
+        ),
+      ],
+    ),
+  )();
+  readonly #resources = jsable(this)();
+  readonly #peek = js.fn((i: JS<number>) =>
+    client.store.peek(js`${this.#resources}[${i}]`)
   );
 
+  constructor(private readonly _context: IJSMetaContext) {}
+
+  template(): (string | JSable)[] {
+    return [
+      `(`,
+      client.store.set,
+      `(`,
+      this.#initialResources,
+      `),Object.keys(`,
+      this.#initialResources,
+      `))`,
+    ];
+  }
+
+  async peek<T extends JSONable>(
+    uri: string,
+    fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
+  ): Promise<JSable<T>> {
+    this.#store[uri] ??= [
+      this.#i++,
+      await (typeof fetch === "function"
+        ? (fetch as () => T | PromiseLike<T>)()
+        : fetch),
+    ];
+
+    return jsable( // Make it non-await-able
+      this._context.isServer
+        ? new JSMetaVar(
+          () => [this.#initialResources, `[${JSON.stringify(uri)}]`],
+        )
+        : this.#peek(this.#store[uri][0])[jsSymbol],
+    )();
+  }
+
+  indexOf(uri: string) {
+    return this.#store[uri][0];
+  }
+
+  [Symbol.for("Deno.customInspect")]() {
+    return `resources`;
+  }
+}
+
+class JSMetaVar implements IJSMeta {
+  constructor(
+    private readonly cb: (
+      context: IJSMetaContext,
+    ) => (string | JSable)[] | Promise<(string | JSable)[]>,
+  ) {}
+
+  template(
+    context: IJSMetaContext,
+  ): (string | JSable)[] | Promise<(string | JSable)[]> {
+    return this.cb(context);
+  }
+}
+
+class JSMetaURIs implements IJSMeta {
+  constructor(
+    private readonly uris:
+      | readonly string[]
+      | JSable<readonly string[]>
+      | readonly JSable<string>[],
+  ) {}
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    return Array.isArray(this.uris)
+      ? context.resources
+        ? [
+          "[",
+          ...this.uris.flatMap((uri: string | JSable<string>, i) => {
+            if (typeof uri === "string") {
+              const indexed = js<string>`${context.resources}[${
+                context.resources![jsSymbol].indexOf(uri)
+              }]`;
+              return i > 0 ? [",", indexed] : [indexed];
+            } else {
+              return i > 0 ? [",", uri] : [uri];
+            }
+          }),
+          "]",
+        ]
+        : []
+      : [this.uris as JSable];
+  }
+}
+
+export const indexedUris = (
+  uris:
+    | readonly string[]
+    | JSable<readonly string[]>
+    | readonly JSable<string>[],
+): JSable<string[]> => jsable(new JSMetaURIs(uris))();
+
+class JSMetaReassign implements IJSMeta {
+  constructor(
+    private readonly varMut: JSable,
+    private readonly expr: JSable,
+  ) {
+    if (expr === varMut) {
+      // Re-evaluate
+      this.expr = jsable(
+        new JSMetaVar((context) => expr[jsSymbol].template(context)),
+      )();
+    }
+  }
+
+  template(context: IJSMetaContext): (string | JSable)[] {
+    const varMeta = this.varMut[jsSymbol];
+    return context.declaredNames.has(varMeta) ||
+        varMeta instanceof JSMetaArgument
+      ? [this.varMut, "=", this.expr]
+      : [this.varMut, ",", this.expr];
+  }
+}
+
 export const mkRef = <T extends EventTarget>(): JS<T> =>
-  makeConvenient(
-    jsable({ kind: JSMetaKind.Ref, isntAssignable: true } as const)<T>(),
-  );
+  makeConvenient(jsable(new JSMetaRef())<T>());
 
 export const resource = <T extends Readonly<Record<string, JSONable>>>(
   uri: string,
   fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
-): JS<T> & JSableResource<T> => {
-  let value: null | [T | PromiseLike<T>] = null;
-  return makeConvenient(
-    jsable(
-      {
-        kind: JSMetaKind.Resource,
-        resource: {
-          uri,
-          get value() {
-            return (value ??= [typeof fetch === "function" ? fetch() : fetch])[
-              0
-            ];
-          },
-          set value(v: T | PromiseLike<T>) {
-            value = [v];
-          },
-        },
-        isntAssignable: true,
-      } as const,
-    )<T>(),
-  );
-};
+): JS<T> & { [jsSymbol]: JSMetaResource } =>
+  makeConvenient(jsable(new JSMetaResource(uri, fetch))<T>());
 
 export const resources = <
   T extends Readonly<Record<string, JSONable>>,
@@ -654,38 +1097,10 @@ export const resources = <
     ): Resources<T, U> => ({
       group,
       values: (values.map((v) =>
+        // @ts-ignore
         make(v)[jsSymbol].resource.value
       )) as unknown as readonly Resource<T>[],
     }),
   });
   return group;
-};
-
-export const sync = async <J extends JSable<any>>(
-  js: J,
-  store = new Map<string, Promise<JSONable>>(),
-): Promise<J> => {
-  const meta = js[jsSymbol];
-
-  if (meta.kind === JSMetaKind.Resource) {
-    const q = store.get(meta.resource.uri) ??
-      Promise.resolve(meta.resource.value);
-    store.set(meta.resource.uri, q);
-    (meta.resource as Writable<Resource<JSONable>>).value = await q;
-  } else if (meta.kind === JSMetaKind.Function) {
-    if (Array.isArray(meta.body)) {
-      await Promise.all(meta.body.map((r) => sync(r, store)));
-    } else {
-      await sync(meta.body, store);
-    }
-  } else if (meta.kind === JSMetaKind.Call) {
-    await Promise.all([
-      sync(meta.callable, store),
-      ...meta.values.map((v) => sync(v, store)),
-    ]);
-  } else if (meta.kind === JSMetaKind.Template) {
-    await Promise.all(meta.replacements.map((r) => sync(r, store)));
-  }
-
-  return js;
 };

@@ -1,4 +1,4 @@
-import { call, forEach, isFunction } from "./util.ts";
+import { call, entries, forEach, isFunction } from "./util.ts";
 
 type JSONLiteral = string | number | boolean | null;
 
@@ -32,12 +32,12 @@ export const store = {
   },
 
   set: (
-    ...resources: [
+    resources: Record<
       string,
       | JSONable
       | undefined
-      | ((prev: JSONable | undefined) => JSONable | undefined),
-    ][]
+      | ((prev: JSONable | undefined) => JSONable | undefined)
+    >,
   ): () => void => {
     let batch = new Set<ResourceListener>(),
       rollbacks: (() => void)[] = [],
@@ -58,7 +58,7 @@ export const store = {
       };
 
     forEach(
-      resources,
+      entries(resources),
       ([uri, v]) => setValue(uri, isFunction(v) ? v(store.peek(uri)) : v),
     );
     forEach(batch, call);

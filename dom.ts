@@ -1,5 +1,5 @@
 import { registerCleanup, trackChildren } from "./dom/lifecycle.ts";
-import { JSONable, store, StoreAPI } from "./dom/store.ts";
+import { store } from "./dom/store.ts";
 import { call, doc, forEach, isFunction } from "./dom/util.ts";
 
 /**
@@ -8,14 +8,14 @@ import { call, doc, forEach, isFunction } from "./dom/util.ts";
  */
 export type Activation = ([number] | [number, Activation])[];
 
-export type EffectAPI = {
-  readonly store: StoreAPI;
-  readonly sub: (
-    target: EventTarget,
-    cb: () => void | (() => void),
-    uris?: readonly string[],
-  ) => void;
-};
+// export type EffectAPI = {
+//   readonly store: StoreAPI;
+//   readonly sub: (
+//     target: EventTarget,
+//     cb: () => void | (() => void),
+//     uris?: readonly string[],
+//   ) => void;
+// };
 
 const sub = (
   target: EventTarget,
@@ -52,9 +52,6 @@ export const api = { store, sub };
 /**
  * Attach JS hooks produced by a jsx render
  */
-export const a = (
-  effects: ReadonlyArray<() => void>,
-  resources: readonly [string, JSONable][],
-): void => (
-  trackChildren(doc), store.set(...resources), forEach(effects, call)
+export const a = (effects: ReadonlyArray<() => void>): void => (
+  trackChildren(doc), forEach(effects, call)
 );
