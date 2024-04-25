@@ -270,9 +270,13 @@ const writeDOMTree = async (
   for (const { kind, node } of tree) {
     switch (kind) {
       case DOMNodeKind.Comment: {
-        write(`<!--`);
-        write(escapeComment(node));
-        write(`-->`);
+        if (node) {
+          write(`<!--`);
+          write(escapeComment(node));
+          write(`-->`);
+        } else {
+          write(`<!>`);
+        }
         break;
       }
 
