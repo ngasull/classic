@@ -70,18 +70,16 @@ const jsProxyHandler: ProxyHandler<{
       return expr[p as keyof JSable<unknown>];
     }
 
-    const accessedExpr = !isNaN(parseInt(p))
-      ? jsTpl(["", isOptional ? `?.[${p}]` : `[${p}]`], expr)
-      : safeRecordKeyRegExp.test(p as string)
-      ? jsTpl(["", isOptional ? `?.${p}` : `.${p}`], expr)
-      : jsTpl([
-        "",
-        isOptional ? `?.[${JSON.stringify(p)}]` : `[${JSON.stringify(p)}]`,
-      ], expr);
+    const isKeySafe = safeRecordKeyRegExp.test(p as string);
 
-    if (isntAssignable) {
-      accessedExpr[jsSymbol].isntAssignable = true;
-    }
+    const before = expr[jsSymbol].isAwaited ? "(" : "";
+
+    let after = expr[jsSymbol].isAwaited ? ")" : "";
+    if (isOptional || isKeySafe) after += isOptional ? "?." : ".";
+    after += isKeySafe ? p : `[${JSON.stringify(p)}]`;
+
+    const accessedExpr = jsTpl([before, after], expr);
+    if (isntAssignable) accessedExpr[jsSymbol].isntAssignable = true;
     if (p === "then") {
       if (expr[jsSymbol].isAwaited) return undefined;
       else accessedExpr[jsSymbol].thenable = expr[jsSymbol];
@@ -356,7 +354,7 @@ class JSMetaAwait extends JSMeta {
   }
 
   template(): (string | JSMeta)[] {
-    return ["(await ", this._expr, ")"];
+    return ["await ", this._expr];
   }
 
   [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions) {
