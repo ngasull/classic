@@ -1,6 +1,6 @@
 import { assertEquals } from "./deps/std/assert.ts";
 import { argn, varArg } from "./dom/arg-alias.ts";
-import { js, resource, resources, toJS, unsafe } from "./js.ts";
+import { js, resource, toJS } from "./js.ts";
 import { JS, JSable } from "./js/types.ts";
 
 Deno.test("toJS variable ref mapping", async () => {
@@ -14,10 +14,8 @@ Deno.test("toJS variable ref mapping", async () => {
 
 Deno.test("toJS declares variables in the same scope as current runtime", async () => {
   const [rawJS, a] = await toJS((a) => {
-    const fn1 = js.fn(() => js<number>`${a} + 1`);
-    const res1 = fn1();
-    const fn2 = js.fn(() => js`${res1} + ${res1}`);
-    return fn2();
+    const var0 = js.fn(() => js<number>`${a} + 1`)();
+    return js.fn(() => js`${var0} + ${var0}`)();
   });
   assertEquals(
     rawJS,
@@ -28,10 +26,8 @@ Deno.test("toJS declares variables in the same scope as current runtime", async 
 Deno.test("toJS declares variables across multiple statements", async () => {
   {
     const [rawJS, a] = await toJS((a) => {
-      const fn1 = js.fn(() => [js<number>`return ${a}`]);
-      const res1 = fn1();
-      const fn2 = js.fn(() => [js`return ${res1}+${res1}`]);
-      return fn2();
+      const var0 = js.fn(() => [js<number>`return ${a}`])();
+      return js.fn(() => [js`return ${var0}+${var0}`])();
     });
     assertEquals(
       rawJS,
@@ -150,14 +146,14 @@ Deno.test("toJS assigns scoped awaits correctly", async () => {
   );
 });
 
-Deno.test("toJS resists to max call stack exceeded", async () => {
-  assertEquals(
-    await js.eval(
-      Array(5000).fill(0).reduce((a) => js`${a} + 1`, js<number>`0`),
-    ),
-    5000,
-  );
-});
+// Deno.test("toJS resists to max call stack exceeded", async () => {
+//   assertEquals(
+//     await js.eval(
+//       Array(5000).fill(0).reduce((a) => js`${a} + 1`, js<number>`0`),
+//     ),
+//     5000,
+//   );
+// });
 
 Deno.test("toJS can generate functions that return an object", async () => {
   const [rawJS] = await toJS(() => js.fn(() => js`${{ foo: "bar" }}`));

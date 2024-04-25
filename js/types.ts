@@ -1,8 +1,3 @@
-export type Resource<T extends JSONable> = {
-  readonly uri: string;
-  readonly value: T | PromiseLike<T>;
-};
-
 export type JS<T> = _JS<T, []>;
 
 type _JS<T, Depth extends unknown[]> = JSable<T> & _JSProxy<T, Depth>;
@@ -64,22 +59,21 @@ declare global {
 
 type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 
-export type JSable<T = unknown> = { readonly [jsSymbol]: JSMeta<T> };
+export type JSable<T = unknown> =
+  & { readonly [jsSymbol]: JSMeta }
+  & JSableType<T, boolean>;
 
-export type JSMeta<T = unknown> =
-  & JSableType<T, boolean>
-  & {
-    scope?: JSMeta & { body: { [jsSymbol]: { fnBody: JSFnBody } } };
-    thenable?: JSable;
-    isAwaited?: boolean;
-    readonly hasResources?: boolean;
-    readonly isntAssignable?: boolean;
-    readonly isOptional?: boolean;
-
-    template(
-      context: unknown,
-    ): (string | JSable)[] | Promise<(string | JSable)[]>;
-  };
+export type JSMeta<Context = unknown> = {
+  scope: JSMeta<Context> | null;
+  template(
+    context: Context,
+  ): (string | JSMeta<Context>)[] | Promise<(string | JSMeta<Context>)[]>;
+  thenable?: JSMeta<Context>;
+  isAwaited?: boolean;
+  isntAssignable?: boolean;
+  readonly hasResources?: boolean;
+  readonly isOptional?: boolean;
+};
 
 declare const typeSymbol: unique symbol;
 
@@ -90,7 +84,6 @@ export type JSableType<T, R = false> = {
 
 export type Fn<Args extends readonly unknown[], T = void> = (
   ...args: { [I in keyof Args]: JS<Args[I]> }
-  // ...args: { [I in keyof Args]: JS<Args[I]> & JSableArgument<Args[I]> }
 ) => JSFnBody<T>;
 
 export type JSFnBody<T = unknown> = JSable<T> | JSStatements<T>;
@@ -124,7 +117,7 @@ export type Resources<
   U extends string,
 > = {
   readonly group: ResourceGroup<T, U>;
-  readonly values: readonly Resource<T>[];
+  readonly values: readonly JS<T>[];
 };
 
 export type JSONLiteral = string | number | boolean | null;
