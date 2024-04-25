@@ -170,7 +170,7 @@ const mkContext = (data: ContextData): JSXContextAPI => {
   return ctx;
 };
 
-const effectContext = createContext<Fn<[], void | (() => void)>[]>("effect");
+const effectContext = createContext<JSable<void>[]>("effect");
 
 export const bundleContext = createContext<{
   readonly result: BundleResult;
@@ -180,7 +180,7 @@ export const bundleContext = createContext<{
 const writeActivationScript = async (
   write: (chunk: string) => void,
   children: DOMNode[],
-  effects: ReadonlyArray<Fn<[], void | (() => void)>>,
+  effects: ReadonlyArray<JSable<void>>,
   { bundle, partial = false }: {
     bundle: JSXContextOf<typeof bundleContext>;
     partial?: boolean;
@@ -194,12 +194,12 @@ const writeActivationScript = async (
     });
 
     const [activationScript] = await toJS(
-      () => effects.map((effect) => js.fn(effect)()),
+      () => effects,
       {
         isServer: false,
         activation: [
           partial
-            ? js<[Node]>`[document.currentScript.previousSibling]`
+            ? js<[Node]>`[_$.previousSibling]`
             : js<NodeList>`document.childNodes`,
           activation,
           refs,
@@ -214,7 +214,12 @@ const writeActivationScript = async (
       },
     );
 
-    write(`<script type="module">`);
+    if (partial) {
+      write(`<script>{let _$=document.currentScript;(async()=>{`);
+    } else {
+      write(`<script type="module">`);
+    }
+
     write(escapeScriptContent(activationScript));
 
     if (bundle.watched && !partial) {
@@ -224,7 +229,7 @@ const writeActivationScript = async (
     }
 
     if (partial) {
-      write(`;document.currentScript.remove()`);
+      write(`});_$.remove()}`);
     }
 
     write("</script>");
@@ -407,7 +412,10 @@ const nodeToDOMTree = async (
         JSable<string | number | boolean | null>,
       ][] = [];
 
-      if (ref) (ref as unknown as JSXRef<Element>)(node.ref);
+      if (ref) {
+        const refHook = (ref as unknown as JSXRef<Element>)(node.ref);
+        if (isJSable<void>(refHook)) effects.unshift(refHook);
+      }
 
       const propEntries = Object.entries(props);
       let entry;
@@ -427,13 +435,15 @@ const nodeToDOMTree = async (
             const eventMatch = name.match(eventPropRegExp);
             if (eventMatch) {
               const eventType = eventMatch[1].toLowerCase();
-              effects.push(() => [
-                js`let c=${value}`,
-                node.ref.addEventListener(eventType, unsafe("c")),
-                js`return ${
-                  node.ref.removeEventListener(eventType, unsafe("c"))
-                }`,
-              ]);
+              effects.push(
+                js.fn(() => [
+                  js`let c=${value}`,
+                  node.ref.addEventListener(eventType, unsafe("c")),
+                  js`return ${
+                    node.ref.removeEventListener(eventType, unsafe("c"))
+                  }`,
+                ])(),
+              );
             } else if (isJSable<string | number | boolean | null>(value)) {
               await recordAttr(name, await js.eval(value));
               reactiveAttributes.push([name, value]);
@@ -448,12 +458,15 @@ const nodeToDOMTree = async (
         ...reactiveAttributes.flatMap(([name, expr]) => {
           const uris = jsResources(expr);
           return uris.length
-            ? () =>
-              client.sub(
-                node.ref,
-                js`let k=${name},v=${expr};!v&&v!==""?${node.ref}.removeAttribute(k):${node.ref}.setAttribute(k,v===true?"":String(v))`,
-                indexedUris(uris),
-              )
+            ? [
+              js.fn((): JSable<void> =>
+                client.sub(
+                  node.ref,
+                  js`let k=${name},v=${expr};!v&&v!==""?${node.ref}.removeAttribute(k):${node.ref}.setAttribute(k,v===true?"":String(v))`,
+                  indexedUris(uris),
+                )
+              )(),
+            ]
             : [];
         }),
       );
@@ -488,13 +501,15 @@ const nodeToDOMTree = async (
     case ElementKind.JS: {
       const uris = jsResources(node.element);
       if (uris.length) {
-        effects.push(() =>
-          subText(
-            node.ref,
-            () => node.element,
-            // js.comma(js.reassign(node.element, node.element), node.element),
-            indexedUris(uris),
-          )
+        effects.push(
+          js.fn(() =>
+            subText(
+              node.ref,
+              () => node.element,
+              // js.comma(js.reassign(node.element, node.element), node.element),
+              indexedUris(uris),
+            )
+          )(),
         );
       }
       return [{
@@ -551,13 +566,15 @@ const lazyComponentApi = {
       | readonly JSable<string>[],
   ) => {
     componentApiHandler.get(target, "context");
-    target.context(effectContext).push(() => {
-      const effectJs = js.fn(cb);
-      return client.sub(
-        target.target,
-        effectJs,
-        uris ? indexedUris(uris) : [],
-      );
-    });
+    target.context(effectContext).push(
+      js.fn(() => {
+        const effectJs = js.fn(cb);
+        return client.sub(
+          target.target,
+          effectJs,
+          uris ? indexedUris(uris) : [],
+        );
+      })(),
+    );
   },
 };

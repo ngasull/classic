@@ -247,5 +247,5 @@ Deno.test("await-ing a JS should not block", async () => {
   const res = await expr;
   assertEquals(typeof res, "function");
   assertEquals((res as any).then, undefined);
-  assertEquals((await toJS(() => [res]))[0], "(await a);");
+  assertEquals((await toJS(() => [res]))[0], "await a;");
 });

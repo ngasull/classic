@@ -6,9 +6,6 @@ import type {
 } from "classic-web/jsx/types.ts";
 
 import { dbContext } from "./db.ts";
-import { bundle } from "./bundle.ts";
-
-const router = bundle.add("classic-web/dom/router.ts");
 
 const RootLayout: JSXParentComponent = ({ children }, { effect }) => (
   <html>
@@ -16,19 +13,14 @@ const RootLayout: JSXParentComponent = ({ children }, { effect }) => (
       <title>Hello world</title>
       <meta charset="utf-8" />
     </head>
-    <body
-      ref={(body) => {
-        // Client-side dynamic routing _à la_ Remix
-        effect(() => router.register(body));
-      }}
-    >
+    <body>
       {children}
     </body>
   </html>
 );
 
-const Index: JSXComponent = (_, ctx) => {
-  const db = ctx.get(dbContext);
+const Index: JSXComponent = (_, { context }) => {
+  const db = context(dbContext);
   return (
     <>
       <h1>Welcome</h1>

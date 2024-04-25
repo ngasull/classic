@@ -860,9 +860,9 @@ class JSMetaModuleStore extends JSMeta {
 
   template(_: JSMetaContext): (string | JSMeta)[] {
     return [
-      `await Promise.all(${
+      `(await Promise.all(${
         JSON.stringify(Object.keys(this.#urls).map(this.resolve))
-      }.map(u=>import(u)))`,
+      }.map(u=>import(u))))`,
     ];
   }
 

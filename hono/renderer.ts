@@ -30,8 +30,6 @@ declare module "../deps/hono.ts" {
   }
 }
 
-const effect = (a: never): never => {};
-
 export const honoContext = createContext("hono");
 
 const domRouterSymbol = Symbol("domRouter");
@@ -66,7 +64,7 @@ export const jsxRenderer = <
       if (c.req.query("_layout") != null && !Layout) return c.notFound();
 
       content = jsx("div", {
-        ref: (target) => effect(() => domRouter.subSegment(target, c.req.path)),
+        ref: (target) => domRouter.subSegment(target, c.req.path),
         children: content,
       });
 
@@ -77,7 +75,7 @@ export const jsxRenderer = <
               Layout!,
               c.req.param() as any,
               jsx("progress", {
-                ref: (target) => effect(() => domRouter.subSegment(target)),
+                ref: (target) => domRouter.subSegment(target),
               }),
             )
             : c.req.query("_index") == null && ComposedLayout
@@ -130,13 +128,12 @@ async (c, next) => {
           "div",
           {
             ref: (target) =>
-              effect(() =>
-                domRouter.subSegment(
-                  target,
-                  c.req.path.split("/")
-                    .slice(0, routePath.replace(/\/\*?$/, "").split("/").length)
-                    .join("/"),
-                )
+              domRouter.subSegment(
+                target,
+                c.req.path.split("/").slice(
+                  0,
+                  routePath.replace(/\/\*?$/, "").split("/").length,
+                ).join("/"),
               ),
           },
           jsx(

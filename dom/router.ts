@@ -230,7 +230,7 @@ const subRoot = () => {
   };
 };
 
-export const subSegment = (target: ChildNode, path?: string) => {
+export const subSegment = (target: ChildNode, path?: string): () => void => {
   if (!segments.size) subRoot();
 
   if (path) segments.set(target, { p: path });
