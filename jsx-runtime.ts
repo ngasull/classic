@@ -5,10 +5,13 @@ import {
   DOMLiteral,
   ElementKind,
   IntrinsicElement,
+  JSX,
   JSXChildren,
   JSXComponent,
   JSXElement,
 } from "./jsx/types.ts";
+
+export type { JSX };
 
 const jsx = ((
   tag: keyof JSX.IntrinsicElements | JSXComponent<Record<string, unknown>>,

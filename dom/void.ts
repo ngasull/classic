@@ -1,18 +1,20 @@
-export type VoidElement = keyof typeof voidElements;
+export type VoidElement = typeof voidList[number];
 
-export const voidElements = {
-  area: true,
-  base: true,
-  br: true,
-  col: true,
-  embed: true,
-  hr: true,
-  img: true,
-  input: true,
-  link: true,
-  meta: true,
-  param: true,
-  source: true,
-  track: true,
-  wbr: true,
-};
+const voidList = [
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+] as const;
+
+export const voidElements = new Set<string>(voidList);

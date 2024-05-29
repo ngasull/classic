@@ -1,30 +1,30 @@
 import type { Fn, JS, JSable } from "../js/types.ts";
 import type { JSXInternal } from "./dom.d.ts";
 
-declare global {
-  namespace JSX {
-    type IntrinsicElements = {
-      [K in keyof JSXInternal.IntrinsicElements]:
-        & {
-          [P in keyof JSXInternal.IntrinsicElements[K]]?: JSOr<
-            JSXInternal.IntrinsicElements[K][P]
-          >;
-        }
-        & {
-          readonly children?: JSXChildren;
-          readonly ref?: JSXRef<
-            JSXInternal.IntrinsicElements[K] extends
-              JSXInternal.HTMLAttributes<infer E> ? E
-              : JSXInternal.IntrinsicElements[K] extends
-                JSXInternal.SVGAttributes<infer E> ? E
-              : never
-          >;
-        };
-    };
+declare namespace JSX {
+  type IntrinsicElements = {
+    [K in keyof JSXInternal.IntrinsicElements]:
+      & {
+        [P in keyof JSXInternal.IntrinsicElements[K]]?: JSOr<
+          JSXInternal.IntrinsicElements[K][P]
+        >;
+      }
+      & {
+        readonly children?: JSXChildren;
+        readonly ref?: JSXRef<
+          JSXInternal.IntrinsicElements[K] extends
+            JSXInternal.HTMLAttributes<infer E> ? E
+            : JSXInternal.IntrinsicElements[K] extends
+              JSXInternal.SVGAttributes<infer E> ? E
+            : never
+        >;
+      };
+  };
 
-    type Element = JSXElement | PromiseLike<JSXElement>;
-  }
+  type Element = JSXElement | PromiseLike<JSXElement>;
 }
+
+export type { JSX };
 
 export type JSXElement =
   | {

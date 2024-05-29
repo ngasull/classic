@@ -1,5 +1,6 @@
 import type { Activation } from "../dom.ts";
 import { voidElements } from "../dom/void.ts";
+import { hyphenize } from "../element/util.ts";
 import { client, indexedUris } from "../js.ts";
 import { js, jsResources, mkRef, toJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
@@ -67,10 +68,7 @@ export const renderToString = async (
             (chunk) => acc.push(chunk),
             tree,
             effects,
-            {
-              bundle,
-              partial,
-            },
+            { bundle, partial },
           );
         } catch (e) {
           console.log(e);
@@ -312,7 +310,7 @@ const writeDOMTree = async (
 
         write(">");
 
-        if (!(node.tag in voidElements)) {
+        if (!voidElements.has(node.tag)) {
           if (node.tag === "script") {
             for (const c of node.children) {
               if (c.kind === DOMNodeKind.Text) {
@@ -420,7 +418,8 @@ const nodeToDOMTree = async (
       const propEntries = Object.entries(props);
       let entry;
       while ((entry = propEntries.shift())) {
-        const [name, value] = entry;
+        const [prop, value] = entry;
+        const name = hyphenize(prop);
         await (async function recordAttr(
           name: string,
           value:
