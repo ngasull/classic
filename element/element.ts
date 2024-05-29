@@ -7,6 +7,13 @@ const $changedCallbacks: unique symbol = $() as never;
 const $disconnectCallbacks: unique symbol = $() as never;
 const $setProp: unique symbol = $() as never;
 
+declare global {
+  namespace Classic {
+    // deno-lint-ignore no-empty-interface
+    interface Events {}
+  }
+}
+
 type ClassOf<T> = { new (): T; readonly prototype: T };
 
 export type CustomElement<T, Props> = ClassOf<T> & {
@@ -224,26 +231,24 @@ const nativePropTypes = new Map<PropType, (attr: string | null) => any>([
   ),
 ]);
 
-// const on = <T extends EventTarget, K extends string>(
-//   target: T,
-//   event: K,
-//   cb: (
-//     this: T,
-//     e: T extends Window
-//       ? K extends keyof WindowEventMap ? WindowEventMap[K] : Event
-//       : K extends keyof HTMLElementEventMap ? HTMLElementEventMap[K]
-//       : Event,
-//   ) => void,
-//   options?: boolean | AddEventListenerOptions | undefined,
-// ): () => void => {
-//   target.addEventListener(event, cb as EventListener, options);
-//   return () =>
-//     target.removeEventListener(
-//       event,
-//       cb as EventListener,
-//       options as boolean | EventListenerOptions | undefined,
-//     );
-// };
+export const customEvent = <T extends keyof Classic.Events>(
+  type: T,
+  detail: Classic.Events[T],
+): CustomEvent<Classic.Events[T]> => new CustomEvent(type, { detail });
+
+export const on = <T extends EventTarget, K extends string>(
+  target: T,
+  event: K,
+  cb: (
+    this: T,
+    e: T extends Window
+      ? K extends keyof WindowEventMap ? WindowEventMap[K] : Event
+      : K extends keyof HTMLElementEventMap ? HTMLElementEventMap[K]
+      : K extends keyof Classic.Events ? CustomEvent<Classic.Events[K]>
+      : Event,
+  ) => void,
+  options?: boolean | AddEventListenerOptions | undefined,
+): void => target.addEventListener(event, cb as EventListener, options);
 
 export const declarativeFirstStyle = (): void => {
   let tagStyles: Record<string, CSSStyleSheet[] | undefined> = {},

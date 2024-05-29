@@ -1,7 +1,9 @@
 export {
   css,
+  customEvent,
   define,
   element,
+  on,
   onChange,
   onDisconnect,
   onPropChange,

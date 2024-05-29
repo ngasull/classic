@@ -2,6 +2,7 @@ import {
   CustomElement,
   element as elementDOM,
   hyphenize,
+  on,
   PropType,
   PropTypesProps,
   TypedShadow,
@@ -84,7 +85,7 @@ export const render = (
         if (k === "ref") {
           ref = v;
         } else if ((eventMatch = k.toLowerCase().match(eventRegExp))) {
-          el.addEventListener(eventMatch[1], v, !!eventMatch[2]);
+          on(el, eventMatch[1], v, !!eventMatch[2]);
         } else if ((k = propRemap[k] ?? k) in el) {
           // @ts-ignore dynamically set
           el[k] = v;
