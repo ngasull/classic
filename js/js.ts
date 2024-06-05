@@ -1,6 +1,6 @@
-import type { Activation } from "./dom.ts";
-import { varArg } from "./dom/arg-alias.ts";
-import { argn } from "./dom/arg-alias.ts";
+import type { Activation } from "../dom.ts";
+import { varArg } from "../dom/arg-alias.ts";
+import { argn } from "../dom/arg-alias.ts";
 import type {
   Fn,
   ImplicitlyJSable,
@@ -13,8 +13,8 @@ import type {
   ParamKeys,
   ResourceGroup,
   Resources,
-} from "./js/types.ts";
-import { isJSable, jsSymbol } from "./js/types.ts";
+} from "./types.ts";
+import { isJSable, jsSymbol } from "./types.ts";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -700,7 +700,7 @@ class JSMetaFunction extends JSMeta {
   }
 
   private _hasResources?: boolean;
-  // @ts-ignore Do not care JSMeta defiinition
+  // @ts-ignore Do not care JSMeta definition
   get hasResources() {
     return this._hasResources ??= this.body.hasResources;
   }
@@ -926,8 +926,39 @@ class JSMetaRefStore {
   }
 }
 
+const isFunction = js.fn((v: JS<unknown>) =>
+  js<boolean>`typeof ${v}==="function"`
+);
+
+const subStore = js.fn((
+  target: JS<EventTarget>,
+  cb: JS<() => void | (() => void)>,
+  uris: JS<readonly string[] | undefined>,
+) => {
+  const cleanup = cb();
+  const unsubStore = uris && store.sub(uris, () => [
+    js`${isFunction(cleanup)}&&${cleanup}()`,
+    js.reassign(cleanup, js`${cb}()`),
+  ]);
+
+  return [
+    cleanup,
+    js`return ${
+      js.fn(() =>
+        registerCleanup(
+          target,
+          () => [
+            js`${unsubStore}?.()`,
+            js`${isFunction(cleanup)}&&${cleanup}()`,
+          ],
+        )
+      )
+    }`,
+  ];
+});
+
 const domApi =
-  js.module<typeof import("./dom.ts")>(import.meta.resolve("./dom.ts")).api;
+  js.module<typeof import("../dom.ts")>(import.meta.resolve("../dom.ts")).api;
 const domStore = domApi.store;
 
 export const client = {

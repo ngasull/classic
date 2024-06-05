@@ -1,3 +1,16 @@
+// deno-lint-ignore-file prefer-const
+
+import {
+  defineProperties,
+  entries,
+  getOwnPropertyDescriptors,
+  hyphenize,
+  isArray,
+  isString,
+  keys,
+  mapOrDo,
+} from "./util.ts";
+
 const $ = Symbol;
 const $extends: unique symbol = $() as never;
 const $propsStore: unique symbol = $() as never;
@@ -36,21 +49,32 @@ export type TypedShadow<
     };
   };
 
-export const define = (
-  name: `${string}-${string}`,
-  customElement: CustomElement<any, any>,
-): void =>
+export type ElementProps<T> = T extends CustomElement<infer Base, infer Props>
+  ? Partial<Props> & { readonly ref?: (el: Base) => void }
+  : never;
+
+export type Children = Child | readonly Child[];
+
+export type Child = Element | string | null | undefined;
+
+export const define = <
+  N extends `${string}-${string}`,
+  E extends CustomElement<HTMLElement, unknown>,
+>(
+  name: N,
+  customElement: E,
+): Record<N, ElementProps<E>> =>
   customElements.define(
     name,
     customElement,
     { extends: customElement[$extends] },
-  );
+  )!;
 
 export const element = <
   PropTypes extends Record<string, PropType>,
   Form extends boolean | undefined,
   Def extends (
-    root: TypedShadow<PropTypesProps<PropTypes>, Form>,
+    dom: (children: Children) => TypedShadow<PropTypesProps<PropTypes>, Form>,
     props: PropTypesProps<PropTypes>,
     isDeclarative: boolean,
   ) => any,
@@ -59,7 +83,11 @@ export const element = <
     readonly props?: PropTypes;
     readonly extends?: string;
     readonly form?: Form;
-    readonly style?: string;
+    readonly style?:
+      | string
+      | CSSRules
+      | CSSStyleSheet
+      | (string | CSSRules | CSSStyleSheet)[];
   },
   render: Def,
 ): CustomElement<
@@ -72,8 +100,9 @@ export const element = <
     (extendsTag
       ? document.createElement(extendsTag).constructor
       : HTMLElement) as typeof HTMLElement;
-  let styleSheet: CSSStyleSheet | null = null;
+  let styleSheet: CSSStyleSheet[] | null = null;
   let attrToProp = new Map<string, keyof Props>();
+  let listenAttrChanges: 0 | 1 = 1;
 
   class ElementClass extends ParentClass {
     [$propsStore]: Partial<Props> = {};
@@ -100,21 +129,25 @@ export const element = <
     connectedCallback() {
       let root = this.shadowRoot as TypedShadow<Props, Form> | null;
       let isDeclarative = !!root;
+      root ??= this.attachShadow({ mode: "open" }) as TypedShadow<
+        Props,
+        Form
+      >;
       let api = render(
-        root ??= this.attachShadow({ mode: "open" }) as TypedShadow<
-          Props,
-          Form
-        >,
+        (children: Children) => (renderChildren(root!, children), root!),
         this[$props],
         isDeclarative,
       );
 
       if (api) {
-        Object.defineProperties(this, Object.getOwnPropertyDescriptors(api));
+        defineProperties(this, getOwnPropertyDescriptors(api));
       }
 
       if (style) {
-        root.adoptedStyleSheets.push(styleSheet ??= toStyleSheet(style));
+        root.adoptedStyleSheets = styleSheet ??= mapOrDo(
+          style,
+          buildStyleSheet,
+        );
       }
     }
 
@@ -127,11 +160,13 @@ export const element = <
       _prev: string | null,
       next: string | null,
     ) {
-      let prop = attrToProp.get(name)!;
-      this[$setProp](
-        prop,
-        nativePropTypes.get(propTypes[prop])!(next),
-      );
+      if (listenAttrChanges) {
+        let prop = attrToProp.get(name)!;
+        this[$setProp](
+          prop,
+          nativePropTypes.get(propTypes[prop])!(next),
+        );
+      }
     }
 
     [$setProp]<K extends keyof Props>(k: K, v: Props[K]) {
@@ -142,20 +177,32 @@ export const element = <
   }
 
   let proto = ElementClass.prototype;
-  for (const prop of Object.keys(propTypes)) {
-    attrToProp.set(hyphenize(prop), prop);
+  let properties: PropertyDescriptorMap & {
+    [p: string]: ThisType<ElementClass>;
+  } = {};
+
+  for (let prop of keys(propTypes)) {
+    let attr = hyphenize(prop);
+    attrToProp.set(attr, prop);
     if (!(prop in proto)) {
-      Object.defineProperty(proto, prop, {
+      properties[prop] = {
         get() {
           return this[$props][prop];
         },
         set(value) {
+          listenAttrChanges = 0;
+          if (value == null || value === false) this.removeAttribute(attr);
+          else {
+            setAttr(this, attr, value);
+          }
+          listenAttrChanges = 1;
           this[$setProp](prop, value);
         },
-      });
+      };
     }
   }
 
+  defineProperties(proto, properties);
   ElementClass.observedAttributes = [...attrToProp.keys()];
 
   return ElementClass as unknown as CustomElement<
@@ -191,12 +238,6 @@ export const onDisconnect = (root: TypedShadow, cb: () => void): void => {
 export const useInternals = (
   root: TypedShadow<Record<string, PropPrimitive>, true>,
 ): ElementInternals => root.host[$internals];
-
-const toStyleSheet = (css: string) => {
-  const styleSheet = new CSSStyleSheet();
-  styleSheet.replace(css);
-  return styleSheet;
-};
 
 export type PropTypesProps<PropTypes extends Record<string, PropType>> = {
   [K in keyof PropTypes]: PropTypePrimitive<PropTypes[K]>;
@@ -259,25 +300,61 @@ export const declarativeFirstStyle = (): void => {
     if (shadowRoot) {
       shadowRoot.adoptedStyleSheets = tagStyles[el.tagName] ??= [
         ...(shadowRoot.styleSheets ?? []),
-      ].map((s) => toStyleSheet((s.ownerNode as Element).innerHTML));
+      ].map((s) => buildStyleSheet((s.ownerNode as Element).innerHTML));
     }
   }
 };
 
-export const css = (tpl: TemplateStringsArray): string => tpl[0];
+export const renderChildren = (el: ParentNode, children: Children) => {
+  let r = (children: Children): unknown =>
+    children &&
+    mapOrDo<Child, void>(
+      children,
+      (c: Child) => c && (isArray(c) ? r(c) : el.append(c)),
+    );
+  r(children);
+};
 
-const camelRegExp = /[A-Z]/g;
-
-export const hyphenize = (camel: string): string =>
-  camel.replace(
-    camelRegExp,
-    (l: string) => "-" + l.toLowerCase(),
+export const setAttr = (el: Element, k: string, v: PropPrimitive) =>
+  (el as Element).setAttribute(
+    k,
+    v instanceof Date ? v.toISOString() : String(v),
   );
 
-// const hyphensRegExp = /-(.)/g;
+export const css = (tpl: TemplateStringsArray): string => tpl[0];
 
-// const camelize = (hyphened: string) =>
-//   hyphened.toLowerCase().replace(
-//     hyphensRegExp,
-//     (_, l: string) => l.toUpperCase(),
-//   );
+export type CSSRules = Record<string, CSSDeclaration | string>;
+
+type CSSDeclaration = { [k: string]: string | number | CSSDeclaration };
+
+const buildStyleSheet = (
+  rules: string | CSSRules | CSSStyleSheet,
+): CSSStyleSheet => {
+  if (rules instanceof CSSStyleSheet) return rules;
+
+  let styleSheet = new CSSStyleSheet();
+  if (isString(rules)) {
+    styleSheet.replace(rules);
+  } else {
+    entries(rules).forEach(([selector, declaration], i) =>
+      styleSheet.insertRule(
+        isString(declaration)
+          ? selector + declaration
+          : toRule(selector, declaration),
+        i,
+      )
+    );
+  }
+  return styleSheet;
+};
+
+const toRule = (selector: string, declaration: CSSDeclaration): string =>
+  `${selector}{${
+    entries(declaration)
+      .map(([property, value]) =>
+        typeof value === "object"
+          ? toRule(property, value)
+          : `${hyphenize(property)}:${value};`
+      )
+      .join("")
+  }}`;

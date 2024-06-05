@@ -2,15 +2,16 @@
   "name": "classic",
   "exports": {
     "./element": "./element/mod.ts",
-    "./element/jsx": "./element/jsx/mod.ts",
     "./element/jsx-runtime": "./element/jsx/jsx-runtime.ts",
+    "./element/serve": "./element/serve.ts",
     "./server": "./server/mod.ts",
     "./server/jsx-runtime": "./server/jsx-runtime.ts"
   },
   "imports": {
     "classic/element": "./element/mod.ts",
-    "classic/element/jsx": "./element/jsx/mod.ts",
-    "classic/element/jsx-runtime": "./element/jsx/jsx-runtime.ts",
+    "classic/element/jsx-runtime": "./element/jsx-runtime.ts",
+    "classic/element/serve": "./element/serve.ts",
+    "classic/js": "./js/mod.ts",
     "classic/server": "./server/mod.ts",
     "classic/server/jsx-runtime": "./server/jsx-runtime.ts"
   },

@@ -1,9 +1,16 @@
 import type { Activation } from "../dom.ts";
-import { voidElements } from "../dom/void.ts";
 import { hyphenize } from "../element/util.ts";
-import { client, indexedUris } from "../js.ts";
-import { js, jsResources, mkRef, toJS, unsafe } from "../js.ts";
 import type { BundleResult } from "../js/bundle.ts";
+import {
+  client,
+  indexedUris,
+  inline,
+  js,
+  jsResources,
+  mkRef,
+  toJS,
+  unsafe,
+} from "../js/js.ts";
 import { Fn, isJSable, JS, JSable } from "../js/types.ts";
 import {
   contextSymbol,
@@ -11,7 +18,6 @@ import {
   DOMNode,
   DOMNodeKind,
   ElementKind,
-  JSXComponentAPI,
   JSXContext,
   JSXContextAPI,
   JSXContextOf,
@@ -19,6 +25,7 @@ import {
   JSXInitContext,
   JSXRef,
 } from "./types.ts";
+import { voidElements } from "./void.ts";
 
 const id = <T>(v: T) => v;
 
@@ -61,20 +68,18 @@ export const renderToString = async (
   await writeDOMTree(
     tree,
     (chunk) => acc.push(chunk),
-    bundle
-      ? (async (partial) => {
-        try {
-          return writeActivationScript(
-            (chunk) => acc.push(chunk),
-            tree,
-            effects,
-            { bundle, partial },
-          );
-        } catch (e) {
-          console.log(e);
-        }
-      })
-      : null,
+    async (partial) => {
+      try {
+        return await writeActivationScript(
+          (chunk) => acc.push(chunk),
+          tree,
+          effects,
+          { bundle, partial },
+        );
+      } catch (e) {
+        console.log(e);
+      }
+    },
   );
   return acc.join("");
 };
@@ -103,18 +108,16 @@ export const renderToStream = (
         await writeDOMTree(
           tree,
           write,
-          bundle
-            ? (async (partial) => {
-              try {
-                return writeActivationScript(write, tree, effects, {
-                  bundle,
-                  partial,
-                });
-              } catch (e) {
-                console.log(e);
-              }
-            })
-            : null,
+          async (partial) => {
+            try {
+              return await writeActivationScript(write, tree, effects, {
+                bundle,
+                partial,
+              });
+            } catch (e) {
+              console.log(e);
+            }
+          },
         );
 
         controller.close();
@@ -124,8 +127,7 @@ export const renderToStream = (
 
 type ContextData = Map<symbol, unknown>;
 
-export type InferContext<C extends JSXContext<any>> = C extends
-  JSXContext<infer T> ? T : never;
+export type InferContext<C> = C extends JSXContext<infer T> ? T : never;
 
 export const createContext = <T>(name?: string): JSXContext<T> => {
   const context = (value: T) => [context[contextSymbol], value] as const;
@@ -168,6 +170,7 @@ const mkContext = (data: ContextData): JSXContextAPI => {
   return ctx;
 };
 
+const targetContext = createContext<JSable<EventTarget>>("target");
 const effectContext = createContext<JSable<void>[]>("effect");
 
 export const bundleContext = createContext<{
@@ -180,7 +183,7 @@ const writeActivationScript = async (
   children: DOMNode[],
   effects: ReadonlyArray<JSable<void>>,
   { bundle, partial = false }: {
-    bundle: JSXContextOf<typeof bundleContext>;
+    bundle?: JSXContextOf<typeof bundleContext> | null;
     partial?: boolean;
   },
 ): Promise<void> => {
@@ -203,6 +206,11 @@ const writeActivationScript = async (
           refs,
         ],
         resolve: (url) => {
+          if (!bundle) {
+            throw Error(
+              `Can't resolve external module without bundling (resolving ${url})`,
+            );
+          }
           const publicPath = bundle.result.publicPath(url);
           if (!publicPath) {
             throw Error(`Module expected to be bundled: ${url}`);
@@ -220,7 +228,7 @@ const writeActivationScript = async (
 
     write(escapeScriptContent(activationScript));
 
-    if (bundle.watched && !partial) {
+    if (bundle?.watched && !partial) {
       write(
         `;new EventSource("/hmr").addEventListener("change",()=>location.reload())`,
       );
@@ -379,14 +387,9 @@ const nodeToDOMTree = async (
       const { Component, props } = node.element;
       const subCtxData = subContext(ctxData);
       const ctx = mkContext(subCtxData);
-      const apiTarget: Partial<JSXComponentAPI> = { context: ctx };
-      const api = new Proxy<JSXComponentAPI>(
-        apiTarget as JSXComponentAPI,
-        componentApiHandler,
-      );
-      const child = await Component(props, api);
+      const child = await Component(props, ctx);
       if (child) {
-        apiTarget.target = child.ref;
+        ctx.set(targetContext, child.ref);
         return nodeToDOMTree(child, subCtxData);
       } else {
         return [];
@@ -412,7 +415,9 @@ const nodeToDOMTree = async (
 
       if (ref) {
         const refHook = (ref as unknown as JSXRef<Element>)(node.ref);
-        if (isJSable<void>(refHook)) effects.unshift(refHook);
+        if (refHook !== node.ref && isJSable<void>(refHook)) {
+          effects.unshift(refHook);
+        }
       }
 
       const propEntries = Object.entries(props);
@@ -431,17 +436,10 @@ const nodeToDOMTree = async (
             | JSable<string | number | boolean | null>,
         ) {
           if (value != null) {
-            const eventMatch = name.match(eventPropRegExp);
+            const eventMatch = prop.match(eventPropRegExp);
             if (eventMatch) {
-              const eventType = eventMatch[1].toLowerCase();
               effects.push(
-                js.fn(() => [
-                  js`let c=${value}`,
-                  node.ref.addEventListener(eventType, unsafe("c")),
-                  js`return ${
-                    node.ref.removeEventListener(eventType, unsafe("c"))
-                  }`,
-                ])(),
+                onEvent(node.ref, eventMatch[1].toLowerCase(), value),
               );
             } else if (isJSable<string | number | boolean | null>(value)) {
               await recordAttr(name, await js.eval(value));
@@ -453,22 +451,12 @@ const nodeToDOMTree = async (
         })(name, value);
       }
 
-      effects.push(
-        ...reactiveAttributes.flatMap(([name, expr]) => {
-          const uris = jsResources(expr);
-          return uris.length
-            ? [
-              js.fn((): JSable<void> =>
-                client.sub(
-                  node.ref,
-                  js`let k=${name},v=${expr};!v&&v!==""?${node.ref}.removeAttribute(k):${node.ref}.setAttribute(k,v===true?"":String(v))`,
-                  indexedUris(uris),
-                )
-              )(),
-            ]
-            : [];
-        }),
-      );
+      for (const [name, expr] of reactiveAttributes) {
+        const uris = jsResources(expr);
+        if (uris.length) {
+          effects.push(subAttribute(uris, node.ref, name, () => inline(expr)));
+        }
+      }
 
       const children = await Promise
         .all(
@@ -504,7 +492,7 @@ const nodeToDOMTree = async (
           js.fn(() =>
             subText(
               node.ref,
-              () => node.element,
+              () => inline(node.element),
               // js.comma(js.reassign(node.element, node.element), node.element),
               indexedUris(uris),
             )
@@ -538,6 +526,34 @@ const nodeToDOMTree = async (
   throw Error(`Can't handle JSX node ${JSON.stringify(node)}`);
 };
 
+const onEvent = js.fn((
+  target: JS<EventTarget>,
+  type: JS<string>,
+  cb: JS<(e: Event) => void>,
+) => [
+  js`let c=${cb}`,
+  target.addEventListener(type, unsafe("c")),
+  js`return ()=>${target.removeEventListener(type, unsafe("c"))}`,
+]);
+
+const subAttribute = js.fn((
+  uris: JS<string[]>,
+  target: JS<Element>,
+  k: JS<string>,
+  expr: JS<() => unknown>,
+): JS<void> =>
+  client.sub(
+    target,
+    () => {
+      const v = expr();
+      return js`!${v}&&${v}!==""?${target.removeAttribute(k)}:${
+        target.setAttribute(k, js`${v}===true?"":String(${v})`)
+      }`;
+    },
+    indexedUris(uris),
+  )
+);
+
 const subText = js.fn((
   node: JS<Text>,
   value: JS<() => DOMLiteral>,
@@ -548,32 +564,22 @@ const subText = js.fn((
   >`${client.sub}(${node},_=>${node}.textContent=${value}(),${uris})`
 );
 
-const componentApiHandler = {
-  get: (target: any, k) =>
-    target[k] ??= lazyComponentApi[k as keyof typeof lazyComponentApi]?.(
-      target,
-    ),
-} satisfies ProxyHandler<JSXComponentAPI>;
-
-const lazyComponentApi = {
-  effect: (target: JSXComponentAPI) =>
-  (
-    cb: Fn<[], void | (() => void)>,
-    uris?:
-      | readonly string[]
-      | JSable<readonly string[]>
-      | readonly JSable<string>[],
-  ) => {
-    componentApiHandler.get(target, "context");
-    target.context(effectContext).push(
-      js.fn(() => {
-        const effectJs = js.fn(cb);
-        return client.sub(
-          target.target,
-          effectJs,
-          uris ? indexedUris(uris) : [],
-        );
-      })(),
-    );
-  },
+export const addEffect = (
+  ctx: JSXContextAPI,
+  cb: Fn<[], void | (() => void)>,
+  uris?:
+    | readonly string[]
+    | JSable<readonly string[]>
+    | readonly JSable<string>[],
+): void => {
+  ctx(effectContext).push(
+    js.fn(() => {
+      const effectJs = js.fn(cb);
+      return client.sub(
+        ctx(targetContext),
+        effectJs,
+        uris ? indexedUris(uris) : [],
+      );
+    })(),
+  );
 };

@@ -2,7 +2,7 @@
 
 // Modified from source: https://github.com/preactjs/preact/blob/main/src/jsx.d.ts
 
-import { JS } from "../js/types.ts";
+import { JS } from "classic/js";
 
 type Defaultize<Props, Defaults> =
   // Distribute over unions

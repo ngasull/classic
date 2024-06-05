@@ -1,25 +1,34 @@
-import type { Fn, JS, JSable } from "../js/types.ts";
+import type { JS, JSable } from "classic/js";
 import type { JSXInternal } from "./dom.d.ts";
 
+declare global {
+  namespace Classic {
+    // deno-lint-ignore no-empty-interface
+    interface Elements {}
+  }
+}
+
 declare namespace JSX {
-  type IntrinsicElements = {
-    [K in keyof JSXInternal.IntrinsicElements]:
-      & {
-        [P in keyof JSXInternal.IntrinsicElements[K]]?: JSOr<
-          JSXInternal.IntrinsicElements[K][P]
-        >;
-      }
-      & {
-        readonly children?: JSXChildren;
-        readonly ref?: JSXRef<
-          JSXInternal.IntrinsicElements[K] extends
-            JSXInternal.HTMLAttributes<infer E> ? E
-            : JSXInternal.IntrinsicElements[K] extends
-              JSXInternal.SVGAttributes<infer E> ? E
-            : never
-        >;
-      };
-  };
+  type IntrinsicElements =
+    & {
+      [K in keyof JSXInternal.IntrinsicElements]:
+        & {
+          [P in keyof JSXInternal.IntrinsicElements[K]]?: JSOr<
+            JSXInternal.IntrinsicElements[K][P]
+          >;
+        }
+        & {
+          readonly children?: JSXChildren;
+          readonly ref?: JSXRef<
+            JSXInternal.IntrinsicElements[K] extends
+              JSXInternal.HTMLAttributes<infer E> ? E
+              : JSXInternal.IntrinsicElements[K] extends
+                JSXInternal.SVGAttributes<infer E> ? E
+              : never
+          >;
+        };
+    }
+    & Classic.Elements;
 
   type Element = JSXElement | PromiseLike<JSXElement>;
 }
@@ -122,22 +131,13 @@ export type JSXRef<T extends EventTarget> = (target: JS<T>) => unknown;
 
 export type JSXComponent<O extends Record<string, unknown> = {}> = (
   props: O,
-  api: JSXComponentAPI,
+  api: JSXContextAPI,
 ) => JSX.Element | null;
 
 export type JSXParentComponent<O extends Record<string, unknown> = {}> =
   JSXComponent<
     Omit<O, "children"> & { readonly children?: JSXChildren }
   >;
-
-export type JSXComponentAPI = {
-  target: JSable<EventTarget>;
-  readonly context: JSXContextAPI;
-  readonly effect: (
-    cb: Fn<[], void | (() => void)>,
-    uris?: string[],
-  ) => void;
-};
 
 export type JSXInitContext<T> = readonly [symbol, T];
 

@@ -1,12 +1,10 @@
-import type { MiddlewareHandler } from "./deps/hono.ts";
-import { jsxRenderer } from "./hono/renderer.ts";
-import { Bundle, BundleResult } from "./js/bundle.ts";
-import { jsx } from "./jsx-runtime.ts";
+import type { MiddlewareHandler } from "../../deps/hono.ts";
+import { Bundle } from "../../js/bundle.ts";
+import { jsxBundleRenderer } from "./renderer.ts";
+import { jsx } from "../jsx-runtime.ts";
 
-export const jsxMachine = (
-  bundle: Bundle | BundleResult,
-): MiddlewareHandler => {
-  const useJsx = jsxRenderer(bundle);
+export const jsxMachine = (bundle: Bundle): MiddlewareHandler => {
+  const useJsx = jsxBundleRenderer(bundle);
   return async (c, next) => {
     const servedRes = bundle instanceof Bundle && bundle.watched &&
       await bundle.watch()(c.req.raw);

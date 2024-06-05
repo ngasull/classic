@@ -6,7 +6,7 @@ import {
   fromFileUrl as posixFromFileUrl,
   resolve as resolvePosix,
 } from "../deps/std/path/posix.ts";
-import { js } from "../js.ts";
+import { js } from "./js.ts";
 import type { JS } from "./types.ts";
 
 const liveBundles = new Set<Bundle>();
@@ -56,9 +56,7 @@ export class Bundle<
     );
     const outdir = "public/m";
     const options = {
-      entryPoints: [...this.#importedModules].map((spec) =>
-        import.meta.resolve(spec)
-      ),
+      entryPoints: [...this.#importedModules],
       entryNames: "[name]-[hash]",
       bundle: true,
       splitting: true,
@@ -79,7 +77,7 @@ export class Bundle<
               (
                 result: esbuild.BuildResult<{ metafile: true; write: false }>,
               ) => {
-                if (this.#currentBuild === resolver) {
+                if (!result.errors.length && this.#currentBuild === resolver) {
                   const cwdURL = toFileUrl(Deno.cwd()) + "/";
                   const absOutdirPosixLength =
                     (resolvePosix(outdir) + "/").length;
@@ -134,6 +132,12 @@ export class Bundle<
   add<P extends keyof Imports>(module: P): JS<Imports[P]>;
   add<T>(module: string): JS<T>;
   add<T>(module: string): JS<T> {
+    if (!/^\w+:/.test(module)) {
+      throw Error(
+        `"${module}" isn't an URL specifier. \`import.meta.resolve\` can be used`,
+      );
+    }
+
     this.#importedModules.add(module);
 
     if (this.#ctx) {
@@ -149,7 +153,7 @@ export class Bundle<
       }
     }
 
-    return js.module(import.meta.resolve(module));
+    return js.module(module);
   }
 
   async load(opts: {

@@ -4,24 +4,27 @@ import type {
   Input,
   MiddlewareHandler,
   ParamKeys,
-} from "../deps/hono.ts";
-import type { Bundle } from "../js/bundle.ts";
-import type { JS } from "../js/types.ts";
+} from "../../deps/hono.ts";
+import type { Bundle } from "../../js/bundle.ts";
+import type { ClassicBundle } from "classic/element/serve";
+import type { JS } from "classic/js";
+import { classicBundleContext } from "../component.ts";
 import { jsx } from "../jsx-runtime.ts";
-import { bundleContext, createContext, renderToStream } from "../jsx/render.ts";
+import { bundleContext, createContext, renderToStream } from "../render.ts";
 import {
+  JSX,
   JSXChildren,
   JSXComponent,
   JSXInitContext,
   JSXParentComponent,
-} from "../jsx/types.ts";
+} from "../types.ts";
 
-declare module "../deps/hono.ts" {
+declare module "../../deps/hono.ts" {
   interface ContextRenderer {
     (content: JSX.Element): Response | Promise<Response>;
   }
   interface ContextVariableMap {
-    readonly [domRouterSymbol]: JS<typeof import("../dom/router.ts")>;
+    readonly [domRouterSymbol]: JS<typeof import("../../dom/router.ts")>;
     readonly [composedLayoutSymbol]?: JSXParentComponent<
       Record<string, unknown>
     >;
@@ -37,12 +40,12 @@ const composedLayoutSymbol = Symbol("composedLayout");
 const layoutSymbol = Symbol("layout");
 const jsxContextSymbol = Symbol("jsxContext");
 
-export const jsxRenderer = <
+export const jsxBundleRenderer = <
   E extends Env & { Variables: ContextVariableMap },
   P extends string,
   I extends Input,
 >(bundle: Bundle): MiddlewareHandler<E, P, I> => {
-  const domRouter = bundle.add<typeof import("../dom/router.ts")>(
+  const domRouter = bundle.add<typeof import("../../dom/router.ts")>(
     import.meta.resolve("../dom/router.ts"),
   );
   const bundleContextValue = bundle.result.then((result) => ({
@@ -93,13 +96,54 @@ export const jsxRenderer = <
   };
 };
 
+export const classicElements = (bundle: ClassicBundle): MiddlewareHandler =>
+  jsxContext(classicBundleContext(bundle));
+
+export const classicRouter = <
+  E extends Env & { Variables: ContextVariableMap },
+  P extends string,
+  I extends Input,
+>(): MiddlewareHandler<E, P, I> =>
+(c, next) => {
+  c.setRenderer((content: JSX.Element) => {
+    const Layout = c.get(layoutSymbol);
+    const ComposedLayout = c.get(composedLayoutSymbol);
+
+    if (c.req.query("_layout") != null && !Layout) return c.notFound();
+
+    content = jsx("router-content", {
+      path: c.req.path,
+      children: content,
+    });
+
+    return c.body(
+      renderToStream(
+        c.req.query("_layout") != null
+          ? jsx(
+            Layout!,
+            c.req.param() as any,
+            jsx("router-slot"),
+          )
+          : c.req.query("_index") == null && ComposedLayout
+          ? jsx(ComposedLayout, null, content)
+          : content,
+        { context: c.get(jsxContextSymbol) },
+      ),
+      { headers: { "Content-Type": "text/html; charset=UTF-8" } },
+    );
+  });
+
+  return jsxContext(honoContext(c))(c, next);
+};
+
 export const jsxContext =
   (...context: JSXInitContext<unknown>[]): MiddlewareHandler =>
   async (
     c,
     next,
   ) => {
-    const inits = c.get(jsxContextSymbol)!;
+    let inits = c.get(jsxContextSymbol);
+    if (!inits) c.set(jsxContextSymbol, inits = []);
     inits.push(...context);
     await next();
     inits.splice(inits.length - context.length, context.length);
@@ -161,7 +205,7 @@ export const route = <K extends string, I extends Input>(
   FakePath<Union2Tuple<K>>,
   I
 > =>
-(c) => Promise.resolve(c.render(jsx(Index, c.req.param() as any)));
+(c) => c.render(jsx(Index, c.req.param() as any)) as Promise<Response>;
 
 type FakePath<P> = P extends
   [infer H extends string, ...infer T extends string[]] ? `/:${H}${FakePath<T>}`
