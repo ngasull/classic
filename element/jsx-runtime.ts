@@ -26,7 +26,6 @@ type NativeElement = Element;
 
 declare namespace JSX {
   type IntrinsicElements = JSXInternal.IntrinsicElements & Classic.Elements;
-  // type Element = JSXElementType | GetConfig<typeof $type>;
   type Element = NativeElement;
 }
 

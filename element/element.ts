@@ -79,17 +79,17 @@ export const element = <
     isDeclarative: boolean,
   ) => any,
 >(
-  { props: propTypes = {} as PropTypes, extends: extendsTag, form, style }: {
+  { props: propTypes = {} as PropTypes, extends: extendsTag, form, js, css }: {
     readonly props?: PropTypes;
     readonly extends?: string;
     readonly form?: Form;
-    readonly style?:
+    readonly css?:
       | string
       | CSSRules
       | CSSStyleSheet
       | (string | CSSRules | CSSStyleSheet)[];
+    readonly js?: Def;
   },
-  render: Def,
 ): CustomElement<
   HTMLElement & (ReturnType<Def> extends void ? unknown : ReturnType<Def>),
   PropTypesProps<PropTypes>
@@ -109,8 +109,8 @@ export const element = <
     [$props]: Props = new Proxy(propTypes, {
       get: (target, prop: keyof Props & string) =>
         prop in this[$propsStore]
-          ? this[$propsStore]
-          : this[$propsStore] = nativePropTypes.get(target[prop])!(
+          ? this[$propsStore][prop]
+          : this[$propsStore][prop] = nativePropTypes.get(target[prop])!(
             this.getAttribute(hyphenize(prop)),
           ),
     }) as never;
@@ -133,7 +133,7 @@ export const element = <
         Props,
         Form
       >;
-      let api = render(
+      let api = js?.(
         (children: Children) => (renderChildren(root!, children), root!),
         this[$props],
         isDeclarative,
@@ -143,9 +143,9 @@ export const element = <
         defineProperties(this, getOwnPropertyDescriptors(api));
       }
 
-      if (style) {
+      if (css) {
         root.adoptedStyleSheets = styleSheet ??= mapOrDo(
-          style,
+          css,
           buildStyleSheet,
         );
       }
@@ -272,7 +272,16 @@ const nativePropTypes = new Map<PropType, (attr: string | null) => any>([
   ),
 ]);
 
-export const customEvent = <T extends keyof Classic.Events>(
+export const customEvent: {
+  <T extends keyof Classic.Events>(
+    type: Classic.Events[T] extends void | undefined ? T : never,
+    detail?: Classic.Events[T],
+  ): CustomEvent<Classic.Events[T]>;
+  <T extends keyof Classic.Events>(
+    type: T,
+    detail: Classic.Events[T],
+  ): CustomEvent<Classic.Events[T]>;
+} = <T extends keyof Classic.Events>(
   type: T,
   detail: Classic.Events[T],
 ): CustomEvent<Classic.Events[T]> => new CustomEvent(type, { detail });

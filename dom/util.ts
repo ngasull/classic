@@ -7,8 +7,6 @@ export const head = doc.head;
 export const textHtml = "text/html";
 
 export const routeLoadEvent = "route-load";
-export const routeFormEvent = "route-form";
-export const submit = "submit";
 
 // FP
 
