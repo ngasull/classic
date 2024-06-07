@@ -8,8 +8,6 @@ export type ClassicBundle = {
   css: Promise<Uint8Array | undefined>;
 };
 
-const semi = new Uint8Array([";".charCodeAt(0)]);
-
 export const bundle = async (
   entryPoints: string[],
   { denoJsonPath, transformCss }: {
@@ -19,6 +17,7 @@ export const bundle = async (
 ): Promise<{ readonly js: Uint8Array; readonly css?: Uint8Array }> => {
   const result = await esbuild.build({
     entryPoints,
+    outdir: ".",
     bundle: true,
     minify: true,
     sourcemap: false,
@@ -53,22 +52,23 @@ export const bundle = async (
         : []),
     ],
   });
+  await esbuild.stop();
 
   const byExt = result.outputFiles.reduce((byExt, file) => {
     const [, ext] = file.path.match(extensionRegExp)!;
-    byExt[ext] ??= { length: -1, files: [] };
-    byExt[ext].files.push(file);
-    byExt[ext].length += file.contents.length + 1;
+    byExt[ext] ??= { length: 0, files: [] };
+    byExt[ext].files.push(file.contents);
+    byExt[ext].length += file.contents.length;
     return byExt;
-  }, {} as Record<string, { length: number; files: esbuild.OutputFile[] }>);
+  }, {} as Record<string, { length: number; files: Uint8Array[] }>);
 
   return Object.fromEntries(
     Object.entries(byExt).map(([ext, { length, files }]) => {
       const contents = new Uint8Array(length);
-      for (let i = 0; i < files.length;) {
-        contents.set(files[i].contents, i);
-        i += files[i].contents.length;
-        if (ext === "js" && i < length) contents.set(semi, i++);
+      let i = 0;
+      for (const bytes of files) {
+        contents.set(bytes, i);
+        i += bytes.length;
       }
       return [ext, contents];
     }),
@@ -99,6 +99,7 @@ export const serveDev = async (
     sourcemap: true,
     write: false,
     bundle: true,
+    splitting: true,
     format: "esm",
     charset: "utf8",
     jsx: "automatic",

@@ -52,7 +52,7 @@ export const escapeScriptContent = (node: DOMLiteral) =>
   String(node).replaceAll("</script", "</scr\\ipt");
 
 export const renderToString = async (
-  root: JSXElement,
+  root: JSXElement | PromiseLike<JSXElement>,
   { context }: { context?: JSXInitContext<unknown>[] } = {},
 ) => {
   const acc: string[] = [];
@@ -85,7 +85,7 @@ export const renderToString = async (
 };
 
 export const renderToStream = (
-  root: JSXElement,
+  root: JSXElement | PromiseLike<JSXElement>,
   { context }: { context?: JSXInitContext<unknown>[] },
 ) =>
   new ReadableStream<Uint8Array>({
@@ -366,9 +366,11 @@ const writeDOMTree = async (
 };
 
 const nodeToDOMTree = async (
-  node: JSXElement,
+  nodeLike: JSXElement | PromiseLike<JSXElement>,
   ctxData: ContextData,
 ): Promise<DOMNode[]> => {
+  const node = "then" in nodeLike ? await nodeLike : nodeLike;
+
   const effects = ctxData.get(
     effectContext[contextSymbol],
   ) as InferContext<typeof effectContext>;

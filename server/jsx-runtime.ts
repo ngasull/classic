@@ -15,7 +15,7 @@ export type { JSX };
 
 const jsx = ((
   tag: keyof JSX.IntrinsicElements | JSXComponent<Record<string, unknown>>,
-  props: Record<string, unknown> | null | undefined,
+  props?: Record<string, unknown> | null | undefined,
   ...children: JSXChildren[]
 ): JSX.Element => {
   props ??= {};
@@ -46,13 +46,13 @@ const jsx = ((
 }) as {
   <Tag extends Exclude<keyof JSX.IntrinsicElements, VoidElement>>(
     tag: Tag,
-    props: JSX.IntrinsicElements[Tag] | null | undefined,
+    props?: JSX.IntrinsicElements[Tag] | null | undefined,
     ...children: JSXChildren[]
   ): JSXElement;
 
   <Tag extends VoidElement>(
     tag: Tag,
-    props: JSX.IntrinsicElements[Tag] | null | undefined,
+    props?: JSX.IntrinsicElements[Tag] | null | undefined,
   ): JSXElement;
 
   <

@@ -5,12 +5,11 @@ import type {
   MiddlewareHandler,
   ParamKeys,
 } from "../../deps/hono.ts";
-import type { Bundle } from "../../js/bundle.ts";
 import type { ClassicBundle } from "classic/element/serve";
 import type { JS } from "classic/js";
 import { classicBundleContext } from "../component.ts";
 import { jsx } from "../jsx-runtime.ts";
-import { bundleContext, createContext, renderToStream } from "../render.ts";
+import { createContext, renderToStream } from "../render.ts";
 import {
   JSX,
   JSXChildren,
@@ -40,62 +39,6 @@ const composedLayoutSymbol = Symbol("composedLayout");
 const layoutSymbol = Symbol("layout");
 const jsxContextSymbol = Symbol("jsxContext");
 
-export const jsxBundleRenderer = <
-  E extends Env & { Variables: ContextVariableMap },
-  P extends string,
-  I extends Input,
->(bundle: Bundle): MiddlewareHandler<E, P, I> => {
-  const domRouter = bundle.add<typeof import("../../dom/router.ts")>(
-    import.meta.resolve("../dom/router.ts"),
-  );
-  const bundleContextValue = bundle.result.then((result) => ({
-    result,
-    watched: bundle.watched,
-  }));
-
-  return async (c, next) => {
-    c.set(domRouterSymbol, domRouter);
-    c.set(jsxContextSymbol, [
-      honoContext(c),
-      bundleContext(await bundleContextValue),
-    ]);
-
-    c.setRenderer((content: JSX.Element) => {
-      const Layout = c.get(layoutSymbol);
-      const ComposedLayout = c.get(composedLayoutSymbol);
-
-      if (c.req.query("_layout") != null && !Layout) return c.notFound();
-
-      content = jsx("div", {
-        ref: (target) => domRouter.subSegment(target, c.req.path),
-        children: content,
-      });
-
-      return c.body(
-        renderToStream(
-          c.req.query("_layout") != null
-            ? jsx(
-              Layout!,
-              c.req.param() as any,
-              jsx("progress", {
-                ref: (target) => domRouter.subSegment(target),
-              }),
-            )
-            : c.req.query("_index") == null && ComposedLayout
-            ? jsx(ComposedLayout, null, content)
-            : content,
-          { context: c.get(jsxContextSymbol) },
-        ),
-        { headers: { "Content-Type": "text/html; charset=UTF-8" } },
-      );
-    });
-
-    await next();
-
-    c.set(jsxContextSymbol, undefined);
-  };
-};
-
 export const classicElements = (bundle: ClassicBundle): MiddlewareHandler =>
   jsxContext(classicBundleContext(bundle));
 
@@ -111,25 +54,31 @@ export const classicRouter = <
 
     if (c.req.query("_layout") != null && !Layout) return c.notFound();
 
-    content = jsx("router-content", {
+    content = jsx("cc-route", {
       path: c.req.path,
       children: content,
     });
 
+    const layoutEl = c.req.query("_layout") != null &&
+      jsx(
+        Layout!,
+        c.req.param() as any,
+        jsx("cc-route", { children: jsx("progress") }),
+      );
+
+    const fullPageEl = !layoutEl &&
+      c.req.query("_index") == null &&
+      ComposedLayout &&
+      jsx(ComposedLayout, { children: content });
+
+    const headers: HeadersInit = { "Content-Type": "text/html; charset=UTF-8" };
+    if (!fullPageEl) headers.Partial = "1";
+
     return c.body(
-      renderToStream(
-        c.req.query("_layout") != null
-          ? jsx(
-            Layout!,
-            c.req.param() as any,
-            jsx("router-slot"),
-          )
-          : c.req.query("_index") == null && ComposedLayout
-          ? jsx(ComposedLayout, null, content)
-          : content,
-        { context: c.get(jsxContextSymbol) },
-      ),
-      { headers: { "Content-Type": "text/html; charset=UTF-8" } },
+      renderToStream(layoutEl || fullPageEl || content, {
+        context: c.get(jsxContextSymbol),
+      }),
+      { headers },
     );
   });
 
@@ -160,7 +109,6 @@ async (c, next) => {
   const { routePath } = c.req;
   const params = c.req.param() as any;
 
-  const domRouter = c.get(domRouterSymbol);
   const ParentLayout = c.get(layoutSymbol);
   const ParentComposed = c.get(composedLayoutSymbol);
   const ComposedLayout = ParentComposed && Layout
@@ -169,16 +117,12 @@ async (c, next) => {
         ParentComposed,
         null,
         jsx(
-          "div",
+          "cc-route",
           {
-            ref: (target) =>
-              domRouter.subSegment(
-                target,
-                c.req.path.split("/").slice(
-                  0,
-                  routePath.replace(/\/\*?$/, "").split("/").length,
-                ).join("/"),
-              ),
+            path: c.req.path.split("/").slice(
+              0,
+              routePath.replace(/\/\*?$/, "").split("/").length,
+            ).join("/"),
           },
           jsx(
             Layout as JSXParentComponent<Record<string, string>>,
