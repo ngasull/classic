@@ -4,9 +4,7 @@ export {
   define,
   element,
   on,
-  onChange,
   onDisconnect,
-  onPropChange,
   useInternals,
 } from "./element.ts";
 export { ref } from "./jsx-runtime.ts";

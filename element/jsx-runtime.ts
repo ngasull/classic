@@ -1,8 +1,14 @@
-import { Children, on, renderChildren, setAttr } from "./element.ts";
+import { $, Children, doc, on, renderChildren, setAttr } from "./element.ts";
 import { JSXInternal } from "./jsx-dom.d.ts";
-import { entries, hyphenize } from "./util.ts";
+import { callOrReturn, Signal, track } from "./signal.ts";
+import {
+  entries,
+  getOwnPropertyDescriptors,
+  hyphenize,
+  mapOrDo,
+} from "./util.ts";
 
-export const $type = Symbol();
+export const $type = $();
 
 export type JSXElementType = {
   [$type]: "" | keyof JSX.IntrinsicElements;
@@ -24,8 +30,14 @@ declare global {
 
 type NativeElement = Element;
 
+type Tags = JSXInternal.IntrinsicElements & Classic.Elements;
+
 declare namespace JSX {
-  type IntrinsicElements = JSXInternal.IntrinsicElements & Classic.Elements;
+  type IntrinsicElements = {
+    [T in keyof Tags]: {
+      [K in keyof Tags[T]]: Tags[T][K] | Signal<Tags[T][K]>;
+    };
+  };
   type Element = NativeElement;
 }
 
@@ -37,11 +49,15 @@ export type GetConfig<K extends string | symbol> = Classic.Config extends
 
 export const jsx = <T extends keyof JSX.IntrinsicElements>(
   type: T,
-  { children, ...props }: IntrinsicElementProps<T> & {
+  { children, xmlns: _, ...props }: IntrinsicElementProps<T> & {
     readonly children?: Children;
+    readonly xmlns?: never;
   } = {} as IntrinsicElementProps<T> & { readonly children?: Children },
-): Element => {
-  let el = document.createElement(type);
+): ParentNode => {
+  if (!type) return mapOrDo(children, (c) => c) as never;
+
+  let el = ns ? doc.createElementNS(ns, type) : doc.createElement(type);
+  let descriptors = getOwnPropertyDescriptors(el);
   let ref: ((v: ParentNode) => void) | null = null;
   let eventMatch: RegExpMatchArray | null;
 
@@ -56,28 +72,55 @@ export const jsx = <T extends keyof JSX.IntrinsicElements>(
           v as unknown as (e: Event) => void,
           !!eventMatch[2],
         );
-      } else if ((k = propRemap[k] ?? k) in el) {
-        // @ts-ignore dynamically set
-        el[k] = v;
       } else {
-        setAttr(el as Element, hyphenize(k), v);
+        k = k === "class" ? "className" : k;
+        track(() =>
+          descriptors[k]?.writable
+            // @ts-ignore dynamically set
+            ? el[k] = callOrReturn(v)
+            : setAttr(el as Element, hyphenize(k), callOrReturn(v))
+        );
       }
     }
   }
+
   ref?.(el);
   renderChildren(el, children);
   return el;
 };
 
-export const Fragment = (
-  { children }: { key?: string; children?: Children },
-): Children => children;
+export { jsx as jsxs };
+
+export const Fragment = "";
+// (
+//   { children }: { key?: string; children?: Children },
+// ): Node => {
+//   let f = new DocumentFragment(),
+//     c = isFunction(children) ? children : () => children;
+//   track(() =>
+//     f.replaceChildren(...mapOrDo(c(), (c) => (isFunction(c) ? c() : c) ?? ""))
+//   );
+//   return f;
+// };
 
 export const ref = <T>(initial?: T): { (el: T): T; (): T } => {
   let stored: T = initial!;
   return (el?: T) => el ? stored = el : stored;
 };
 
-const propRemap: Record<string, string | undefined> = { class: "className" };
+export const xmlns = <T>(xmlns: string, cb: () => T): T => {
+  let prevNS = ns;
+  try {
+    ns = xmlns;
+    return cb();
+  } finally {
+    ns = prevNS;
+  }
+};
+
+export const svgns = <T>(cb: () => T): T =>
+  xmlns("http://www.w3.org/2000/svg", cb);
 
 const eventRegExp = /^on(.+?)(capture)?$/;
+
+let ns = "";
