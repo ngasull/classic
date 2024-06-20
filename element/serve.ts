@@ -1,6 +1,6 @@
 import * as esbuild from "../deps/esbuild.ts";
 import { exists } from "../deps/std/fs.ts";
-import { relative, resolve } from "../deps/std/path.ts";
+import { fromFileUrl, relative, resolve } from "../deps/std/path.ts";
 
 export type ClassicBundle = {
   // **Not** readonly (dev mode)
@@ -16,7 +16,21 @@ export const bundle = async (
   } = {},
 ): Promise<{ readonly js: Uint8Array; readonly css?: Uint8Array }> => {
   const result = await esbuild.build({
-    entryPoints,
+    stdin: {
+      contents: entryPoints
+        .map((p) =>
+          `import ${
+            JSON.stringify(
+              p.match(/^\.\.?\//)
+                ? resolve(p)
+                : fromFileUrl(import.meta.resolve(p)),
+            )
+          };`
+        )
+        .join("\n"),
+      loader: "js",
+      resolveDir: ".",
+    },
     outdir: ".",
     bundle: true,
     minify: true,
@@ -27,6 +41,23 @@ export const bundle = async (
     jsx: "automatic",
     jsxImportSource: "classic/element",
     plugins: [
+      {
+        name: "accept-stdin",
+        setup(build) {
+          build.onResolve(
+            { filter: /^/ },
+            (args) =>
+              args.importer === "<stdin>"
+                ? {
+                  namespace: args.path.endsWith(".css")
+                    ? "css-intercept"
+                    : "file",
+                  path: args.path,
+                }
+                : undefined,
+          );
+        },
+      },
       ...await resolvePlugins(denoJsonPath),
       ...(transformCss
         ? [
