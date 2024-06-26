@@ -1,38 +1,39 @@
 import { isFunction } from "./util.ts";
 
-export type Signal<T> = ReadonlySignal<T> & ((v: T) => T);
-
-type ReadonlySignal<T> = (() => T) & {
+export type Signal<T> = (() => T) & ((v: T) => T) & {
   readonly [$cbs]: Set<() => void>;
 };
 
 const $cbs = Symbol();
 const tracked: (() => void)[] = [];
 
-export const track = (cb: () => void) => {
+const track = <T>(cb: () => T): T => {
   tracked.unshift(cb);
   try {
-    cb();
+    return cb();
   } finally {
     tracked.shift();
   }
 };
 
-export const onChange = <T extends Signal<unknown>[]>(
-  signals: T,
-  listener: (
-    ...vs: { [I in keyof T]: T[I] extends Signal<infer T> ? T : never }
-  ) => void,
+export const on = <T>(
+  s: () => T,
+  listener: (v: T, prev: T) => void,
 ): void => {
-  let cb = () => listener(...signals.map((s) => s()) as never);
-  signals.forEach((s) => s[$cbs].add(cb));
+  let isInit = 0, prev: T;
+  track(() => {
+    let v = s(); // Eagerly initialize tracking
+    isInit ? listener(v, prev) : isInit = 1;
+    prev = v;
+  });
 };
 
-export const callOrReturn = <T>(
-  v: T,
-): T extends (...args: unknown[]) => infer T ? T : T => isFunction(v) ? v() : v;
+type ReturnTypeOr<T> = T extends () => infer T ? T : T;
 
-export const signal = <T>(init: () => T): Signal<T> => {
+export const callOrReturn = <T>(v: T): ReturnTypeOr<T> =>
+  isFunction(v) ? v() : v;
+
+export const signal = <T>(init: T | (() => T)): Signal<T> => {
   let isInit = 0, v: T;
   let s = (...args: [] | [T]) => {
     if (args.length) {
@@ -45,8 +46,8 @@ export const signal = <T>(init: () => T): Signal<T> => {
     } else if (tracked[0]) {
       s[$cbs].add(tracked[0]);
     }
-    return isInit ? v : (isInit = 1, v = init());
+    return isInit ? v : (isInit = 1, v = callOrReturn(init) as T);
   };
   s[$cbs] = new Set<() => void>();
-  return s;
+  return s as never;
 };

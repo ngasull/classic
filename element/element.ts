@@ -1,6 +1,6 @@
 // deno-lint-ignore-file prefer-const
 
-import { callOrReturn, onChange, Signal, signal, track } from "./signal.ts";
+import { callOrReturn, on, Signal, signal } from "./signal.ts";
 import {
   defineProperties,
   entries,
@@ -15,10 +15,11 @@ import {
 export const doc = document;
 export const $ = Symbol;
 
-const $extends: unique symbol = $() as never;
-const $props: unique symbol = $() as never;
-const $internals: unique symbol = $() as never;
 const $disconnectCallbacks: unique symbol = $() as never;
+const $extends: unique symbol = $() as never;
+const $internals: unique symbol = $() as never;
+const $props: unique symbol = $() as never;
+const $tag: unique symbol = $() as never;
 
 declare global {
   namespace Classic {
@@ -29,10 +30,15 @@ declare global {
 
 type ClassOf<T> = { new (): T; readonly prototype: T };
 
-export type CustomElement<T, Props> = ClassOf<T> & {
-  readonly [$props]: Props;
-  readonly [$extends]: string | undefined;
-};
+type CustomTag = `${string}-${string}`;
+
+export type CustomElement<Tag extends CustomTag | undefined, T, Props> =
+  & ClassOf<T>
+  & {
+    [$tag]?: Tag;
+    readonly [$props]: Props;
+    readonly [$extends]: string | undefined;
+  };
 
 export type TypedShadow<
   Form extends boolean | undefined = boolean | undefined,
@@ -45,8 +51,13 @@ export type TypedShadow<
     };
   };
 
-export type ElementProps<T> = T extends CustomElement<infer Base, infer Props>
+export type ElementProps<T> = T extends
+  CustomElement<CustomTag, infer Base, infer Props>
   ? Partial<Props> & { readonly ref?: (el: Base) => void }
+  : never;
+
+export type Tagged<T> = T extends CustomElement<infer Tag, any, any>
+  ? Tag extends CustomTag ? Record<Tag, T> : never
   : never;
 
 export type Children = Child | readonly Child[];
@@ -60,17 +71,18 @@ export type Child =
   | Signal<Node | string | number | null | undefined>;
 
 export const define = <
-  N extends `${string}-${string}`,
-  E extends CustomElement<HTMLElement, unknown>,
+  N extends CustomTag,
+  E extends CustomElement<any, HTMLElement, unknown>,
 >(
   name: N,
   customElement: E,
-): Record<N, ElementProps<E>> =>
-  customElements.define(
-    name,
-    customElement,
-    { extends: customElement[$extends] },
-  )!;
+): E extends CustomElement<any, infer Extends, infer Props>
+  ? CustomElement<N, Extends, Props>
+  : never => (customElement[$tag] = name,
+    customElements.define(name, customElement, {
+      extends: customElement[$extends],
+    }),
+    customElement as never);
 
 type Reactive<Props> = { [K in keyof Props]: Signal<Props[K]> };
 
@@ -97,6 +109,7 @@ export const element = <
     readonly js?: Def;
   },
 ): CustomElement<
+  undefined,
   HTMLElement & (ReturnType<Def> extends void ? unknown : ReturnType<Def>),
   PropTypesProps<PropTypes>
 > => {
@@ -116,7 +129,7 @@ export const element = <
         let s = signal(() =>
           nativePropTypes.get(type)!(this.getAttribute(hyphenize(prop)))
         );
-        onChange([s], (value) => {
+        on(s, (value) => {
           if (value == null || value === false) {
             this.removeAttribute(propToAttr[prop]);
           } else {
@@ -198,6 +211,7 @@ export const element = <
   ElementClass.observedAttributes = keys(attrToProp);
 
   return ElementClass as unknown as CustomElement<
+    undefined,
     HTMLElement & (ReturnType<Def> extends void ? unknown : ReturnType<Def>),
     PropTypesProps<PropTypes>
   >;
@@ -261,7 +275,7 @@ export const customEvent: {
   detail: Classic.Events[T],
 ): CustomEvent<Classic.Events[T]> => new CustomEvent(type, { detail });
 
-export const on = <T extends EventTarget, K extends string>(
+export const listen = <T extends EventTarget, K extends string>(
   target: T,
   event: K,
   cb: (
@@ -294,16 +308,17 @@ export const renderChildren = (el: ParentNode, children: Children) =>
     ...mapOrDo(
       callOrReturn(children),
       (c) => {
-        let current: Node = null!;
-        track(() => {
-          let prev = current;
-          current = (callOrReturn(c) ?? "") as Node;
-          current = current instanceof Node
-            ? current
-            : document.createTextNode(current as string);
-          if (prev) el.replaceChild(current, prev);
-        });
-        return current;
+        let node: Node;
+        on(
+          () => {
+            node = (callOrReturn(c) ?? "") as Node;
+            return node = node instanceof Node
+              ? node
+              : document.createTextNode(node as string);
+          },
+          (current, prev) => el.replaceChild(current, prev),
+        );
+        return node!;
       },
     ),
   );
@@ -342,7 +357,7 @@ const buildStyleSheet = (
 };
 
 const toRule = (selector: string, declaration: CSSDeclaration): string =>
-  `${selector}{${
+  `${selector || ":host"}{${
     entries(declaration)
       .map(([property, value]) =>
         typeof value === "object"

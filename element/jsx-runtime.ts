@@ -1,6 +1,14 @@
-import { $, Children, doc, on, renderChildren, setAttr } from "./element.ts";
+import { PropPrimitive } from "./element.ts";
+import {
+  $,
+  Children,
+  doc,
+  listen,
+  renderChildren,
+  setAttr,
+} from "./element.ts";
 import { JSXInternal } from "./jsx-dom.d.ts";
-import { callOrReturn, Signal, track } from "./signal.ts";
+import { callOrReturn, on, Signal } from "./signal.ts";
 import {
   entries,
   getOwnPropertyDescriptors,
@@ -66,7 +74,7 @@ export const jsx = <T extends keyof JSX.IntrinsicElements>(
       if (k === "ref") {
         ref = v as unknown as typeof ref;
       } else if ((eventMatch = k.toLowerCase().match(eventRegExp))) {
-        on(
+        listen(
           el,
           eventMatch[1],
           v as unknown as (e: Event) => void,
@@ -74,11 +82,13 @@ export const jsx = <T extends keyof JSX.IntrinsicElements>(
         );
       } else {
         k = k === "class" ? "className" : k;
-        track(() =>
-          descriptors[k]?.writable
-            // @ts-ignore dynamically set
-            ? el[k] = callOrReturn(v)
-            : setAttr(el as Element, hyphenize(k), callOrReturn(v))
+        on(
+          () => callOrReturn(v),
+          (v) =>
+            descriptors[k]?.writable
+              // @ts-ignore dynamically set
+              ? el[k] = v
+              : setAttr(el as Element, hyphenize(k), v as PropPrimitive),
         );
       }
     }
