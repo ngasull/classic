@@ -13,7 +13,9 @@
     "classic/element/serve": "./element/serve.ts",
     "classic/js": "./js/mod.ts",
     "classic/server": "./server/mod.ts",
-    "classic/server/jsx-runtime": "./server/jsx-runtime.ts"
+    "classic/server/jsx-runtime": "./server/jsx-runtime.ts",
+    "hono": "jsr:@hono/hono@4.4.8",
+    "hono/types": "jsr:@hono/hono@4.4.8/types"
   },
   "tasks": {
     "npm": "deno run -A script/build_npm.ts",

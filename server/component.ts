@@ -1,4 +1,4 @@
-import { ClassicBundle } from "classic/element/serve";
+import { ClassicBundle } from "../element/serve.ts";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import { createContext } from "./render.ts";
 import { JSXComponent } from "./types.ts";

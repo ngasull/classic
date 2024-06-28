@@ -2,7 +2,6 @@ export {
   css,
   customEvent,
   define,
-  element,
   listen,
   onDisconnect,
   useInternals,
@@ -13,7 +12,6 @@ export type {
   CustomElement,
   ElementProps,
   PropTypesProps,
-  Tagged,
   TypedShadow,
 } from "./element.ts";
 
@@ -21,4 +19,6 @@ export { on, signal } from "./signal.ts";
 
 export type { Signal } from "./signal.ts";
 
-export { ref } from "./jsx-runtime.ts";
+export { ref, svgns } from "./jsx-runtime.ts";
+
+export type { Tagged } from "./jsx-runtime.ts";

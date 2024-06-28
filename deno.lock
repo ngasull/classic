@@ -2,8 +2,12 @@
   "version": "3",
   "packages": {
     "specifiers": {
+      "jsr:@hono/hono": "jsr:@hono/hono@4.4.8",
       "npm:@rollup/plugin-typescript": "npm:@rollup/plugin-typescript@11.1.5_rollup@4.9.0_typescript@5.3.3",
       "npm:rollup": "npm:rollup@4.9.0"
+    },
+    "jsr": {
+      "@hono/hono@4.4.8": {}
     },
     "npm": {
       "@rollup/plugin-typescript@11.1.5_rollup@4.9.0_typescript@5.3.3": {

@@ -1,4 +1,4 @@
-import { PropPrimitive } from "./element.ts";
+import { CustomElement, PropPrimitive } from "./element.ts";
 import {
   $,
   Children,
@@ -8,7 +8,7 @@ import {
   setAttr,
 } from "./element.ts";
 import { JSXInternal } from "./jsx-dom.d.ts";
-import { callOrReturn, on, Signal } from "./signal.ts";
+import { callOrReturn, on } from "./signal.ts";
 import {
   entries,
   getOwnPropertyDescriptors,
@@ -16,12 +16,19 @@ import {
   mapOrDo,
 } from "./util.ts";
 
-export const $type = $();
+export const $type: unique symbol = $() as never;
 
 export type JSXElementType = {
   [$type]: "" | keyof JSX.IntrinsicElements;
   readonly children?: Children;
 };
+
+export type Tagged<T> = T extends
+  CustomElement<infer Tag extends `${string}-${string}`, any, infer Props>
+  ? Record<Tag, Props & { [$type]: T }>
+  : never;
+
+export type DOMClass<T> = T extends { [$type]: infer C } ? C : never;
 
 export type IntrinsicElementProps<T> = T extends "" ? Record<never, never>
   : T extends keyof JSX.IntrinsicElements ? JSX.IntrinsicElements[T]
@@ -41,11 +48,7 @@ type NativeElement = Element;
 type Tags = JSXInternal.IntrinsicElements & Classic.Elements;
 
 declare namespace JSX {
-  type IntrinsicElements = {
-    [T in keyof Tags]: {
-      [K in keyof Tags[T]]: Tags[T][K] | Signal<Tags[T][K]>;
-    };
-  };
+  interface IntrinsicElements extends Tags {}
   type Element = NativeElement;
 }
 
@@ -61,7 +64,7 @@ export const jsx = <T extends keyof JSX.IntrinsicElements>(
     readonly children?: Children;
     readonly xmlns?: never;
   } = {} as IntrinsicElementProps<T> & { readonly children?: Children },
-): ParentNode => {
+): ChildNode => {
   if (!type) return mapOrDo(children, (c) => c) as never;
 
   let el = ns ? doc.createElementNS(ns, type) : doc.createElement(type);

@@ -1,12 +1,7 @@
-import type {
-  ContextVariableMap,
-  Env,
-  Input,
-  MiddlewareHandler,
-  ParamKeys,
-} from "../../deps/hono.ts";
-import type { ClassicBundle } from "classic/element/serve";
 import type { JS } from "classic/js";
+import { Context, Hono } from "hono";
+import type { Env, MiddlewareHandler, Schema } from "hono/types";
+import type { ClassicBundle } from "../../element/serve.ts";
 import { classicBundleContext } from "../component.ts";
 import { jsx } from "../jsx-runtime.ts";
 import { createContext, renderToStream } from "../render.ts";
@@ -18,7 +13,9 @@ import {
   JSXParentComponent,
 } from "../types.ts";
 
-declare module "../../deps/hono.ts" {
+import "../../router/cc-route.ts";
+
+declare module "hono" {
   interface ContextRenderer {
     (content: JSX.Element): Response | Promise<Response>;
   }
@@ -42,49 +39,6 @@ const jsxContextSymbol = Symbol("jsxContext");
 export const classicElements = (bundle: ClassicBundle): MiddlewareHandler =>
   jsxContext(classicBundleContext(bundle));
 
-export const classicRouter = <
-  E extends Env & { Variables: ContextVariableMap },
-  P extends string,
-  I extends Input,
->(): MiddlewareHandler<E, P, I> =>
-(c, next) => {
-  c.setRenderer((content: JSX.Element) => {
-    const Layout = c.get(layoutSymbol);
-    const ComposedLayout = c.get(composedLayoutSymbol);
-
-    if (c.req.query("_layout") != null && !Layout) return c.notFound();
-
-    content = jsx("cc-route", {
-      path: c.req.path,
-      children: content,
-    });
-
-    const layoutEl = c.req.query("_layout") != null &&
-      jsx(
-        Layout!,
-        c.req.param() as any,
-        jsx("cc-route", { children: jsx("progress") }),
-      );
-
-    const fullPageEl = !layoutEl &&
-      c.req.query("_index") == null &&
-      ComposedLayout &&
-      jsx(ComposedLayout, { children: content });
-
-    const headers: HeadersInit = { "Content-Type": "text/html; charset=UTF-8" };
-    if (!fullPageEl) headers.Partial = "1";
-
-    return c.body(
-      renderToStream(layoutEl || fullPageEl || content, {
-        context: c.get(jsxContextSymbol),
-      }),
-      { headers },
-    );
-  });
-
-  return jsxContext(honoContext(c))(c, next);
-};
-
 export const jsxContext =
   (...context: JSXInitContext<unknown>[]): MiddlewareHandler =>
   async (
@@ -98,58 +52,84 @@ export const jsxContext =
     inits.splice(inits.length - context.length, context.length);
   };
 
-export const layout = <
-  E extends Env & { Variables: ContextVariableMap },
-  P extends string,
-  I extends Input,
->(
-  Layout: JSXParentComponent<Record<ParamKeys<P>, string>>,
-): MiddlewareHandler<E, P, I> =>
-async (c, next) => {
-  const { routePath } = c.req;
-  const params = c.req.param() as any;
+export const route = <E extends Env, S extends Schema, P extends string>(
+  { layout: Layout, part: Part }: {
+    layout?: JSXParentComponent<Record<P, string>>;
+    part?: JSXComponent<Record<P, string>>;
+  },
+): Hono<E, S, P> => {
+  const app = new Hono<E, S, P>();
+  let routePathMemo: string | null = null;
+  const routePath = (c: Context<E, P>): string =>
+    routePathMemo ??= c.req.routePath.split("/").slice(0, -1).join("/");
 
-  const ParentLayout = c.get(layoutSymbol);
-  const ParentComposed = c.get(composedLayoutSymbol);
-  const ComposedLayout = ParentComposed && Layout
-    ? (({ children }: { children?: JSXChildren }) =>
-      jsx(
-        ParentComposed,
-        null,
-        jsx(
-          "cc-route",
-          {
-            path: c.req.path.split("/").slice(
-              0,
-              routePath.replace(/\/\*?$/, "").split("/").length,
-            ).join("/"),
-          },
-          jsx(
-            Layout as JSXParentComponent<Record<string, string>>,
-            params,
-            children,
-          ),
+  if (Layout) {
+    app.get(
+      `*`,
+      (c, next) => {
+        if (!c.req.path.match(/\.(?:part|layout)$/)) {
+          const ParentComposed = c.getLayout() as typeof Layout | null;
+          const Composed = ParentComposed && Layout
+            ? (({ children }: { children?: JSXChildren }) =>
+              jsx(ParentComposed, {
+                children: jsx(
+                  "cc-route",
+                  {
+                    path: routePath(c),
+                    children: jsx(Layout, { ...c.req.param(), children }),
+                  },
+                ),
+              }))
+            : ParentComposed ?? Layout;
+          if (Composed) c.setLayout(Composed);
+        }
+
+        return next();
+      },
+    );
+
+    app.get(`.layout`, (c) =>
+      c.body(
+        renderToStream(
+          jsx("cc-route", {
+            path: routePath(c),
+            children: jsx(Layout, {
+              children: jsx("cc-route", { children: jsx("progress") }),
+            }),
+          }),
+          { context: c.get(jsxContextSymbol) },
         ),
-      ))
-    : ParentComposed ?? Layout;
+        { headers: { "Content-Type": "text/html; charset=UTF-8" } },
+      ));
+  }
 
-  c.set(composedLayoutSymbol, ComposedLayout as JSXParentComponent);
-  c.set(layoutSymbol, Layout as JSXParentComponent);
+  if (Part) {
+    const route = (c: Context<E, P>) =>
+      jsx("cc-route", {
+        path: routePath(c),
+        children: jsx(Part, c.req.param() as never),
+      });
 
-  await next();
+    app.get("/", (c) => {
+      const Composed = c.getLayout()!;
+      return c.body(
+        renderToStream(
+          jsx(Composed, { children: route(c) }),
+          { context: c.get(jsxContextSymbol) },
+        ),
+        { headers: { "Content-Type": "text/html; charset=UTF-8" } },
+      );
+    });
 
-  c.set(layoutSymbol, ParentLayout);
-  c.set(composedLayoutSymbol, ParentComposed);
+    app.get(`.part`, (c) =>
+      c.body(
+        renderToStream(route(c), { context: c.get(jsxContextSymbol) }),
+        { headers: { "Content-Type": "text/html; charset=UTF-8" } },
+      ));
+  }
+
+  return app;
 };
-
-export const route = <K extends string, I extends Input>(
-  Index: JSXComponent<Record<K, string>>,
-): MiddlewareHandler<
-  Env & { Variables: ContextVariableMap },
-  FakePath<Union2Tuple<K>>,
-  I
-> =>
-(c) => c.render(jsx(Index, c.req.param() as any)) as Promise<Response>;
 
 type FakePath<P> = P extends
   [infer H extends string, ...infer T extends string[]] ? `/:${H}${FakePath<T>}`

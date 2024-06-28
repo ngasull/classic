@@ -1,5 +1,6 @@
 import type { JS, JSable } from "classic/js";
 import type { JSXInternal } from "./dom.d.ts";
+import type { DOMClass } from "../element/jsx-runtime.ts";
 
 declare global {
   namespace Classic {
@@ -8,17 +9,20 @@ declare global {
   }
 }
 
+type ServerHTML<T> =
+  & { [P in keyof T]?: JSOr<T[P]> }
+  & {
+    readonly children?: JSXChildren;
+  };
+
 declare namespace JSX {
   type IntrinsicElements =
     & {
       [K in keyof JSXInternal.IntrinsicElements]:
+        & ServerHTML<
+          JSXInternal.IntrinsicElements[K]
+        >
         & {
-          [P in keyof JSXInternal.IntrinsicElements[K]]?: JSOr<
-            JSXInternal.IntrinsicElements[K][P]
-          >;
-        }
-        & {
-          readonly children?: JSXChildren;
           readonly ref?: JSXRef<
             JSXInternal.IntrinsicElements[K] extends
               JSXInternal.HTMLAttributes<infer E> ? E
@@ -28,8 +32,11 @@ declare namespace JSX {
           >;
         };
     }
-    & Classic.Elements;
-
+    & {
+      [K in keyof Classic.Elements]: ServerHTML<Classic.Elements[K]> & {
+        readonly ref?: DOMClass<Classic.Elements[K]> & EventTarget;
+      };
+    };
   type Element = JSXElement | PromiseLike<JSXElement>;
 }
 
@@ -135,9 +142,7 @@ export type JSXComponent<O extends Record<string, unknown> = {}> = (
 ) => JSX.Element | null;
 
 export type JSXParentComponent<O extends Record<string, unknown> = {}> =
-  JSXComponent<
-    Omit<O, "children"> & { readonly children?: JSXChildren }
-  >;
+  JSXComponent<O & { readonly children?: JSXChildren }>;
 
 export type JSXInitContext<T> = readonly [symbol, T];
 

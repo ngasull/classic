@@ -60,7 +60,7 @@ const jsx = ((
     Props extends ComponentProps<Cpt>,
   >(
     component: Cpt,
-    props: NullableProps<
+    props?: NullableProps<
       Omit<Props, "children"> & Partial<Pick<Props, "children">>
     >,
     ...children: Props extends { readonly children: infer T }
@@ -72,7 +72,7 @@ const jsx = ((
 
   <Cpt extends JSXComponent<Record<any, any>>>(
     component: Cpt,
-    props: NullableProps<ComponentProps<Cpt>>,
+    props?: NullableProps<ComponentProps<Cpt>>,
   ): JSXElement;
 };
 

@@ -53,9 +53,12 @@ export const escapeScriptContent = (node: DOMLiteral) =>
 
 export const renderToString = async (
   root: JSXElement | PromiseLike<JSXElement>,
-  { context }: { context?: JSXInitContext<unknown>[] } = {},
+  { context, doctype = true }: {
+    context?: JSXInitContext<unknown>[];
+    doctype?: boolean;
+  } = {},
 ) => {
-  const acc: string[] = [];
+  const acc: string[] = doctype ? ["<!DOCTYPE html>"] : [];
   const ctxData = subContext(undefined, context);
   ctxData.set(effectContext[contextSymbol], []);
 
@@ -86,7 +89,10 @@ export const renderToString = async (
 
 export const renderToStream = (
   root: JSXElement | PromiseLike<JSXElement>,
-  { context }: { context?: JSXInitContext<unknown>[] },
+  { context, doctype }: {
+    context?: JSXInitContext<unknown>[];
+    doctype?: boolean;
+  },
 ) =>
   new ReadableStream<Uint8Array>({
     start(controller) {
@@ -104,6 +110,8 @@ export const renderToStream = (
         const effects = ctxData.get(
           effectContext[contextSymbol],
         ) as InferContext<typeof effectContext>;
+
+        if (doctype) write("<!DOCTYPE html>");
 
         await writeDOMTree(
           tree,
@@ -221,7 +229,7 @@ const writeActivationScript = async (
     );
 
     if (partial) {
-      write(`<script>{let _$=document.currentScript;(async()=>{`);
+      write(`<script>{const _=document.currentScript;(async()=>{`);
     } else {
       write(`<script type="module">`);
     }
@@ -235,7 +243,7 @@ const writeActivationScript = async (
     }
 
     if (partial) {
-      write(`});_$.remove()}`);
+      write(`});_.remove()}`);
     }
 
     write("</script>");

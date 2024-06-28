@@ -1,4 +1,4 @@
-import { define, element, onDisconnect } from "classic/element";
+import { define, onDisconnect, Tagged } from "classic/element";
 import { jsx } from "classic/element/jsx-runtime";
 import {
   adoptNode,
@@ -20,36 +20,7 @@ import {
   win,
 } from "../dom/util.ts";
 
-const Route = element({
-  props: { path: String },
-  css: { ":host": { display: "contents" } },
-  js(dom, { path }) {
-    const root = dom(jsx("slot"));
-    const host = root.host;
-
-    if (!unsubRoot) subRoot();
-
-    if (path) segments.set(host, { p: path });
-
-    // Notify closest parent that this target is the slot
-    let parent: Node | null = host,
-      parentSegment: Segment | null | undefined;
-    do {
-      parent = parent.parentNode;
-      parentSegment = parent && segments.get(parent);
-    } while (parent && !parentSegment);
-    if (parentSegment) parentSegment.s = host;
-
-    onDisconnect(root, () => {
-      if (path != null) segments.delete(host);
-      if (segments.size > 1 && parent) delete segments.get(parent)!.s;
-    });
-  },
-});
-
 const suspenseDelay = 500;
-const routeIndexParam = "_index";
-const routeLayoutParam = "_layout";
 
 type Segment = { p: string; s?: ChildNode };
 const segments = new Map<EventTarget, Segment>();
@@ -90,32 +61,24 @@ const handleLocationChange = async () => {
     obsolete = findObsolete(pathname);
 
   // Fallback to regular navigation if page defines no route
-  if (!obsolete) return location.replace(pathname + search);
+  if (!obsolete) return location.replace(href);
 
   let [missingPartials, slot] = obsolete,
     curSlot = slot as ChildNode | null | undefined,
-    searchParams = new URLSearchParams(search),
     resEls: Promise<Document>[],
     el: Document,
     raceRes: unknown,
     url: string;
 
-  searchParams.append(routeIndexParam, "");
-
   raceRes = await Promise.race([
     new Promise<void>((resolve) => setTimeout(resolve, suspenseDelay)),
     Promise.all(
       resEls = missingPartials.map((path, i, q: any) => (
-        url = `${path}?${
-          i == missingPartials.length - 1 ? searchParams : routeLayoutParam
-        }`,
+        url = (path == "/" ? "" : path) +
+          (i == missingPartials.length - 1 ? "/.part" : "/.layout"),
           routeRequests[url] ??= q = fetch(url)
             .then((res) =>
-              res.redirected
-                ? Promise.reject(navigate(res.url))
-                : !res.headers.has("Partial")
-                ? Promise.reject(location.href = href)
-                : res.text()
+              res.redirected ? Promise.reject(navigate(res.url)) : res.text()
             )
             .then((html) =>
               q == routeRequests[url] ? parseHtml(html) : Promise.reject()
@@ -227,11 +190,36 @@ const subRoot = () => {
   };
 };
 
-const d = define("cc-route", Route);
+const Route = define("cc-route", {
+  props: { path: String },
+  css: { ":host": { display: "contents" } },
+  js(dom, props) {
+    const path = props.path();
+    const root = dom(jsx("slot"));
+    const host = root.host;
 
-type D = typeof d;
+    if (!unsubRoot) subRoot();
+
+    if (path) segments.set(host, { p: path });
+
+    // Notify closest parent that this target is the slot
+    let parent: Node | null = host,
+      parentSegment: Segment | null | undefined;
+    do {
+      parent = parent.parentNode;
+      parentSegment = parent && segments.get(parent);
+    } while (parent && !parentSegment);
+    if (parentSegment) parentSegment.s = host;
+
+    onDisconnect(root, () => {
+      if (path != null) segments.delete(host);
+      if (segments.size > 1 && parent) delete segments.get(parent)!.s;
+    });
+  },
+});
+
 declare global {
   namespace Classic {
-    interface Elements extends D {}
+    interface Elements extends Tagged<typeof Route> {}
   }
 }

@@ -12,14 +12,12 @@ import {
   mapOrDo,
 } from "./util.ts";
 
-export const doc = document;
-export const $ = Symbol;
+export const { document: doc, Symbol: $ } = globalThis;
 
 const $disconnectCallbacks: unique symbol = $() as never;
-const $extends: unique symbol = $() as never;
 const $internals: unique symbol = $() as never;
 const $props: unique symbol = $() as never;
-const $tag: unique symbol = $() as never;
+declare const $tag: unique symbol;
 
 declare global {
   namespace Classic {
@@ -37,7 +35,6 @@ export type CustomElement<Tag extends CustomTag | undefined, T, Props> =
   & {
     [$tag]?: Tag;
     readonly [$props]: Props;
-    readonly [$extends]: string | undefined;
   };
 
 export type TypedShadow<
@@ -56,10 +53,6 @@ export type ElementProps<T> = T extends
   ? Partial<Props> & { readonly ref?: (el: Base) => void }
   : never;
 
-export type Tagged<T> = T extends CustomElement<infer Tag, any, any>
-  ? Tag extends CustomTag ? Record<Tag, T> : never
-  : never;
-
 export type Children = Child | readonly Child[];
 
 export type Child =
@@ -70,25 +63,12 @@ export type Child =
   | undefined
   | Signal<Node | string | number | null | undefined>;
 
-export const define = <
-  N extends CustomTag,
-  E extends CustomElement<any, HTMLElement, unknown>,
->(
-  name: N,
-  customElement: E,
-): E extends CustomElement<any, infer Extends, infer Props>
-  ? CustomElement<N, Extends, Props>
-  : never => (customElement[$tag] = name,
-    customElements.define(name, customElement, {
-      extends: customElement[$extends],
-    }),
-    customElement as never);
-
 type Reactive<Props> = { [K in keyof Props]: Signal<Props[K]> };
 
 type ReactiveReadonly<Props> = { [K in keyof Props]: () => Props[K] };
 
-export const element = <
+export const define = <
+  N extends CustomTag,
   PropTypes extends Record<string, PropType>,
   Form extends boolean | undefined,
   Def extends (
@@ -97,6 +77,7 @@ export const element = <
     isDeclarative: boolean,
   ) => any,
 >(
+  name: N,
   { props: propTypes = {} as PropTypes, extends: extendsTag, form, js, css }: {
     readonly props?: PropTypes;
     readonly extends?: string;
@@ -109,11 +90,16 @@ export const element = <
     readonly js?: Def;
   },
 ): CustomElement<
-  undefined,
+  N,
   HTMLElement & (ReturnType<Def> extends void ? unknown : ReturnType<Def>),
   PropTypesProps<PropTypes>
 > => {
   type Props = PropTypesProps<PropTypes>;
+
+  if (!doc) {
+    // @ts-ignore stub switch for universal compiling
+    return;
+  }
 
   let ParentClass =
     (extendsTag
@@ -144,7 +130,6 @@ export const element = <
       : never;
     [$disconnectCallbacks]: Array<() => void> = [];
 
-    static readonly [$extends] = extendsTag;
     static observedAttributes: string[];
     static readonly formAssociated = !!form;
 
@@ -209,6 +194,8 @@ export const element = <
 
   defineProperties(proto, properties);
   ElementClass.observedAttributes = keys(attrToProp);
+
+  customElements.define(name, ElementClass, { extends: extendsTag });
 
   return ElementClass as unknown as CustomElement<
     undefined,

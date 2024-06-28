@@ -1,1 +1,1 @@
-export { classicElements, jsxContext, layout, route } from "./renderer.ts";
+export { classicElements, jsxContext, route } from "./renderer.ts";
