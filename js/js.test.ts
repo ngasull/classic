@@ -1,7 +1,6 @@
-import { assertEquals } from "./deps/std/assert.ts";
-import { argn, varArg } from "./dom/arg-alias.ts";
-import { js, resource, toJS } from "./js.ts";
-import { JS, JSable } from "./js/types.ts";
+import { assertEquals } from "jsr:@std/assert";
+import { argn, js, resource, toJS, varArg } from "./js.ts";
+import type { JS, JSable } from "./types.ts";
 
 Deno.test("toJS variable ref mapping", async () => {
   const a = js<{ a: 1 }>`{a:1}`.a;
@@ -246,6 +245,7 @@ Deno.test("await-ing a JS should not block", async () => {
   const expr = js`a`;
   const res = await expr;
   assertEquals(typeof res, "function");
+  // deno-lint-ignore no-explicit-any
   assertEquals((res as any).then, undefined);
   assertEquals((await toJS(() => [res]))[0], "await a;");
 });

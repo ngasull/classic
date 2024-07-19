@@ -1,59 +1,62 @@
-// deno-lint-ignore-file prefer-const
-
-import { callOrReturn, on, Signal, signal } from "./signal.ts";
+import { callOrReturn, onChange, signal } from "./signal.ts";
 import {
+  $,
+  deepMap,
   defineProperties,
+  doc,
   entries,
   fromEntries,
   getOwnPropertyDescriptors,
   hyphenize,
   isString,
   keys,
-  mapOrDo,
-} from "./util.ts";
-
-export const { document: doc, Symbol: $ } = globalThis;
+  length,
+  NULL,
+  querySelectorAll,
+  UNDEFINED,
+} from "@classic/util";
 
 const $disconnectCallbacks: unique symbol = $() as never;
 const $internals: unique symbol = $() as never;
 const $props: unique symbol = $() as never;
+const $propsSet: unique symbol = $() as never;
 declare const $tag: unique symbol;
 
-declare global {
-  namespace Classic {
-    // deno-lint-ignore no-empty-interface
-    interface Events {}
-  }
+declare namespace Classic {
+  interface Elements {}
 }
+
+export type { Classic };
 
 type ClassOf<T> = { new (): T; readonly prototype: T };
 
 type CustomTag = `${string}-${string}`;
 
-export type CustomElement<Tag extends CustomTag | undefined, T, Props> =
-  & ClassOf<T>
+export type CustomElement<
+  Tag extends CustomTag | undefined,
+  Props,
+  T = unknown,
+> =
+  & ClassOf<HTMLElement & Props & T>
   & {
     [$tag]?: Tag;
     readonly [$props]: Props;
   };
 
-export type TypedShadow<
-  Form extends boolean | undefined = boolean | undefined,
-> =
-  & ShadowRoot
+export type TypedHost<Public, Form extends boolean | undefined> =
+  & Public
+  & HTMLElement
   & {
-    readonly host: {
-      readonly [$internals]: Form extends true ? ElementInternals : never;
-      readonly [$disconnectCallbacks]: Array<() => void>;
-    };
+    readonly [$internals]: Form extends true ? ElementInternals : never;
+    readonly [$disconnectCallbacks]: Array<() => void>;
   };
 
 export type ElementProps<T> = T extends
-  CustomElement<CustomTag, infer Base, infer Props>
-  ? Partial<Props> & { readonly ref?: (el: Base) => void }
+  CustomElement<CustomTag, infer Props, infer Base>
+  ? Partial<Props> & { readonly ref?: (el: HTMLElement & Base) => void }
   : never;
 
-export type Children = Child | readonly Child[];
+export type Children = Child | readonly Children[];
 
 export type Child =
   | Node
@@ -61,21 +64,27 @@ export type Child =
   | number
   | null
   | undefined
-  | Signal<Node | string | number | null | undefined>;
+  | (() => Node | string | number | null | undefined);
 
-type Reactive<Props> = { [K in keyof Props]: Signal<Props[K]> };
+type SignalsSet<Props> = { [K in keyof Props]: (v: Props[K]) => void };
 
-type ReactiveReadonly<Props> = { [K in keyof Props]: () => Props[K] };
+type Reactive<Props> = { [K in keyof Props]: () => Props[K] };
 
 export const define = <
   N extends CustomTag,
   PropTypes extends Record<string, PropType>,
   Form extends boolean | undefined,
   Def extends (
-    dom: (children: Children) => TypedShadow<Form>,
-    props: ReactiveReadonly<PropTypesProps<PropTypes>>,
-    isDeclarative: boolean,
-  ) => any,
+    dom: {
+      (): TypedHost<Props, Form>;
+      (children: Children | ShadowRoot):
+        & TypedHost<Props, Form>
+        & { readonly shadowRoot: ShadowRoot };
+    },
+    props: Reactive<Props>,
+  ) => unknown,
+  Props extends PropTypesProps<PropTypes>,
+  Api extends ReturnType<Def>,
 >(
   name: N,
   { props: propTypes = {} as PropTypes, extends: extendsTag, form, js, css }: {
@@ -88,14 +97,10 @@ export const define = <
       | CSSStyleSheet
       | (string | CSSRules | CSSStyleSheet)[];
     readonly js?: Def;
+    /** Makes `js` run after DOMContentLoaded, ensuring declarative shadow DOM has natively executed */
+    // readonly declarative?: Declarative;
   },
-): CustomElement<
-  N,
-  HTMLElement & (ReturnType<Def> extends void ? unknown : ReturnType<Def>),
-  PropTypesProps<PropTypes>
-> => {
-  type Props = PropTypesProps<PropTypes>;
-
+): CustomElement<N, Props, Api> => {
   if (!doc) {
     // @ts-ignore stub switch for universal compiling
     return;
@@ -105,24 +110,19 @@ export const define = <
     (extendsTag
       ? doc.createElement(extendsTag).constructor
       : HTMLElement) as typeof HTMLElement;
-  let styleSheet: CSSStyleSheet[] | null = null;
+  let definedStyleSheets: CSSStyleSheet[] | null = NULL;
   let attrToProp: Record<string, keyof Props> = {};
   let propToAttr = {} as Record<keyof Props, string>;
 
   class ElementClass extends ParentClass {
+    [$propsSet]: SignalsSet<Props> = {} as never;
     [$props]: Reactive<Props> = fromEntries(
       entries(propTypes).map(([prop, type]) => {
-        let s = signal(() =>
+        let [get, set] = signal(() =>
           nativePropTypes.get(type)!(this.getAttribute(hyphenize(prop)))
         );
-        on(s, (value) => {
-          if (value == null || value === false) {
-            this.removeAttribute(propToAttr[prop]);
-          } else {
-            setAttr(this, propToAttr[prop], value);
-          }
-        });
-        return [prop, s];
+        this[$propsSet][prop as keyof Props] = set;
+        return [prop, get];
       }),
     ) as never;
     [$internals] = (form && this.attachInternals()) as Form extends true
@@ -133,26 +133,34 @@ export const define = <
     static observedAttributes: string[];
     static readonly formAssociated = !!form;
 
-    connectedCallback() {
-      let root = this.shadowRoot as TypedShadow<Form> | null;
-      let isDeclarative = !!root;
-      root ??= this.attachShadow({ mode: "open" }) as TypedShadow<Form>;
+    connectedCallback(): void {
+      // deno-lint-ignore no-this-alias
+      let self = this;
+      let root = self.shadowRoot;
+
+      // if (declarative) {
+      // Attach declarative for dynamic updates and browsers that dont support it
+      // onDOMContentLoaded(() => root ??= attachDeclarative(self));
+      // }
+
       let api = js?.(
-        (children: Children) => (renderChildren(root!, children), root!),
-        new Proxy(this[$props], readonlyPropsHandler) as ReactiveReadonly<
-          Props
-        >,
-        isDeclarative,
+        ((...args: [] | [Children | ShadowRoot]) => (
+          length(args) &&
+          renderChildren(root ??= attachShadow(self), args[0] as Children),
+            self as unknown as TypedHost<Props, Form>
+        )) as Parameters<NonNullable<typeof js>>[0],
+        self[$props],
       );
 
+      if (!js && css) root ??= attachShadow(self);
+
       if (api) {
-        defineProperties(this, getOwnPropertyDescriptors(api));
+        defineProperties(self, getOwnPropertyDescriptors(api));
       }
 
       if (css) {
-        root.adoptedStyleSheets = styleSheet ??= mapOrDo(
-          css,
-          buildStyleSheet,
+        adoptedStyleSheets(root!).push(
+          ...definedStyleSheets ??= deepMap(css, buildStyleSheet),
         );
       }
     }
@@ -167,7 +175,7 @@ export const define = <
       next: string | null,
     ) {
       let prop = attrToProp[name];
-      this[$props][prop](nativePropTypes.get(propTypes[prop])!(next));
+      this[$propsSet][prop](nativePropTypes.get(propTypes[prop])!(next));
     }
   }
 
@@ -176,17 +184,17 @@ export const define = <
     [p: string]: ThisType<ElementClass>;
   } = {};
 
-  for (let prop of keys(propTypes)) {
+  for (let prop of keys(propTypes) as (keyof Props & string)[]) {
     let attr = hyphenize(prop);
     attrToProp[attr] = prop;
-    propToAttr[prop as keyof Props] = attr;
+    propToAttr[prop] = attr;
     if (!(prop in proto)) {
       properties[prop] = {
         get() {
           return this[$props][prop]();
         },
         set(value) {
-          this[$props][prop](value);
+          this[$propsSet][prop](value);
         },
       };
     }
@@ -197,23 +205,27 @@ export const define = <
 
   customElements.define(name, ElementClass, { extends: extendsTag });
 
-  return ElementClass as unknown as CustomElement<
-    undefined,
-    HTMLElement & (ReturnType<Def> extends void ? unknown : ReturnType<Def>),
-    PropTypesProps<PropTypes>
+  return ElementClass as unknown as CustomElement<N, Props, Api>;
+};
+
+export const onDisconnect = (
+  host: TypedHost<any, boolean>,
+  cb: () => void,
+): void => {
+  host[$disconnectCallbacks].push(cb);
+};
+
+export const useInternals = (host: TypedHost<any, true>): ElementInternals =>
+  host[$internals];
+
+type MakeUndefinedOptional<T> =
+  & { [K in keyof T as undefined extends T[K] ? K : never]?: T[K] }
+  & { [K in keyof T as undefined extends T[K] ? never : K]: T[K] };
+
+export type PropTypesProps<PropTypes extends Record<string, PropType>> =
+  MakeUndefinedOptional<
+    { [K in keyof PropTypes]: PropTypePrimitive<PropTypes[K]> }
   >;
-};
-
-export const onDisconnect = (root: TypedShadow, cb: () => void): void => {
-  root.host[$disconnectCallbacks].push(cb);
-};
-
-export const useInternals = (root: TypedShadow<true>): ElementInternals =>
-  root.host[$internals];
-
-export type PropTypesProps<PropTypes extends Record<string, PropType>> = {
-  [K in keyof PropTypes]: PropTypePrimitive<PropTypes[K]>;
-};
 
 export type PropPrimitive =
   | boolean
@@ -240,80 +252,50 @@ export type PropType =
 const nativePropTypes = new Map<PropType, (attr: string | null) => any>([
   [Boolean, (attr: string | null) => attr != null],
   ...[Number, BigInt, String, Date].map((decode: PropType) =>
-    [decode, (v: string | null) => v == null ? undefined : decode(v)] as const
+    [decode, (v: string | null) => v == NULL ? UNDEFINED : decode(v)] as const
   ),
 ]);
 
-const readonlyPropsHandler: ProxyHandler<Record<string, () => unknown>> = {
-  get: (target, p) => () => target[p as string](),
-};
-
-export const customEvent: {
-  <T extends keyof Classic.Events>(
-    type: Classic.Events[T] extends void | undefined ? T : never,
-    detail?: Classic.Events[T],
-  ): CustomEvent<Classic.Events[T]>;
-  <T extends keyof Classic.Events>(
-    type: T,
-    detail: Classic.Events[T],
-  ): CustomEvent<Classic.Events[T]>;
-} = <T extends keyof Classic.Events>(
-  type: T,
-  detail: Classic.Events[T],
-): CustomEvent<Classic.Events[T]> => new CustomEvent(type, { detail });
-
-export const listen = <T extends EventTarget, K extends string>(
-  target: T,
-  event: K,
-  cb: (
-    this: T,
-    e: T extends Window
-      ? K extends keyof WindowEventMap ? WindowEventMap[K] : Event
-      : K extends keyof HTMLElementEventMap ? HTMLElementEventMap[K]
-      : K extends keyof Classic.Events ? CustomEvent<Classic.Events[K]>
-      : Event,
-  ) => void,
-  options?: boolean | AddEventListenerOptions | undefined,
-): void => target.addEventListener(event, cb as EventListener, options);
+export const adoptedStyleSheets = (shadow: ShadowRoot): CSSStyleSheet[] =>
+  shadow.adoptedStyleSheets;
 
 export const declarativeFirstStyle = (): void => {
   let tagStyles: Record<string, CSSStyleSheet[] | undefined> = {},
     el,
     shadowRoot;
-  for (el of doc.querySelectorAll(":not(:defined)")) {
+  for (el of querySelectorAll(":not(:defined)")) {
     shadowRoot = el.shadowRoot;
     if (shadowRoot) {
-      shadowRoot.adoptedStyleSheets = tagStyles[el.tagName] ??= [
-        ...(shadowRoot.styleSheets ?? []),
-      ].map((s) => buildStyleSheet((s.ownerNode as Element).innerHTML));
+      adoptedStyleSheets(shadowRoot).push(
+        ...tagStyles[el.tagName] ??= [
+          ...(shadowRoot.styleSheets ?? []),
+        ].map(cloneStyleSheet),
+      );
     }
   }
 };
 
+export const cloneStyleSheet = (styleSheet: CSSStyleSheet): CSSStyleSheet => {
+  let cssRules: string[] = [], r;
+  for (r of styleSheet.cssRules) cssRules.push(r.cssText);
+  return buildStyleSheet(cssRules.join(""));
+};
+
 export const renderChildren = (el: ParentNode, children: Children) =>
   el.replaceChildren(
-    ...mapOrDo(
-      callOrReturn(children),
-      (c) => {
-        let node: Node;
-        on(
-          () => {
-            node = (callOrReturn(c) ?? "") as Node;
-            return node = node instanceof Node
-              ? node
-              : document.createTextNode(node as string);
-          },
-          (current, prev) => el.replaceChild(current, prev),
-        );
-        return node!;
-      },
-    ),
-  );
-
-export const setAttr = (el: Element, k: string, v: PropPrimitive) =>
-  (el as Element).setAttribute(
-    k,
-    v instanceof Date ? v.toISOString() : String(v),
+    ...deepMap(children, (c) => {
+      let node: Node;
+      onChange(
+        () => {
+          node = (callOrReturn(c) ?? "") as Node;
+          return node = node instanceof Node
+            ? node
+            : doc.createTextNode(node as string);
+        },
+        (current, prev) => el.replaceChild(current, prev),
+      );
+      return node!;
+    }),
   );
 
 export const css = (tpl: TemplateStringsArray): string => tpl[0];
@@ -322,12 +304,14 @@ export type CSSRules = Record<string, CSSDeclaration | string>;
 
 type CSSDeclaration = { [k: string]: string | number | CSSDeclaration };
 
-const buildStyleSheet = (
+export const buildStyleSheet = (
   rules: string | CSSRules | CSSStyleSheet,
 ): CSSStyleSheet => {
-  if (rules instanceof CSSStyleSheet) return rules;
+  let Clazz = CSSStyleSheet, styleSheet;
 
-  let styleSheet = new CSSStyleSheet();
+  if (rules instanceof Clazz) return rules;
+
+  styleSheet = new Clazz();
   if (isString(rules)) {
     styleSheet.replace(rules);
   } else {
@@ -353,3 +337,14 @@ const toRule = (selector: string, declaration: CSSDeclaration): string =>
       )
       .join("")
   }}`;
+
+const attachShadow = (host: HTMLElement) => host.attachShadow({ mode: "open" });
+
+// const attachDeclarative = (
+//   host: HTMLElement,
+//   template = querySelector<HTMLTemplateElement>(
+//     "template[shadowrootmode=open]",
+//     host,
+//   ),
+//   shadow = host.attachShadow({ mode: "open" }),
+// ) => (template && (shadow.append(template.content), remove(template)), shadow);

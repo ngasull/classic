@@ -1,0 +1,16 @@
+{
+  "name": "@classic/util",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./util.ts",
+    "./js": "./../dist/@classic/util.js.ts"
+  },
+  "compilerOptions": {
+    "lib": [
+      "deno.ns",
+      "DOM",
+      "DOM.Iterable",
+      "ES2021"
+    ]
+  }
+}

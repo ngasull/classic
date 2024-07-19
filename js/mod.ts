@@ -1,2 +1,15 @@
-export { client, inline, js, jsResources, mkRef, toJS, unsafe } from "./js.ts";
-export type { JS, JSable } from "./types.ts";
+export {
+  client,
+  globalServedJSContext,
+  indexedUris,
+  inline,
+  js,
+  jsPublicPath,
+  jsResources,
+  mkRef,
+  ServedJSContext,
+  toJS,
+  unsafe,
+} from "./js.ts";
+export { isJSable } from "./types.ts";
+export type { Fn, JS, JSable, JSOverrides, RefTree } from "./types.ts";

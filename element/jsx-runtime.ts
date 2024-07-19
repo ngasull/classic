@@ -1,47 +1,21 @@
-import { CustomElement, PropPrimitive } from "./element.ts";
-import {
-  $,
-  Children,
-  doc,
-  listen,
-  renderChildren,
-  setAttr,
-} from "./element.ts";
-import { JSXInternal } from "./jsx-dom.d.ts";
-import { callOrReturn, on } from "./signal.ts";
-import {
-  entries,
-  getOwnPropertyDescriptors,
-  hyphenize,
-  mapOrDo,
-} from "./util.ts";
+import { deepMap, doc, entries, listen, NULL } from "@classic/util";
+import type { Classic, CustomElement } from "./element.ts";
+import { type Children, renderChildren } from "./element.ts";
+import type { JSXInternal } from "./jsx-dom.d.ts";
+import { callOrReturn, track } from "./signal.ts";
 
-export const $type: unique symbol = $() as never;
-
-export type JSXElementType = {
-  [$type]: "" | keyof JSX.IntrinsicElements;
-  readonly children?: Children;
-};
+declare const $type: unique symbol;
 
 export type Tagged<T> = T extends
-  CustomElement<infer Tag extends `${string}-${string}`, any, infer Props>
-  ? Record<Tag, Props & { [$type]: T }>
+  CustomElement<infer Tag extends `${string}-${string}`, infer Props, any>
+  ? Record<Tag, Props & { [$type]?: T }>
   : never;
 
-export type DOMClass<T> = T extends { [$type]: infer C } ? C : never;
+export type DOMClass<T> = T extends { [$type]?: infer C } ? C : never;
 
 export type IntrinsicElementProps<T> = T extends "" ? Record<never, never>
   : T extends keyof JSX.IntrinsicElements ? JSX.IntrinsicElements[T]
   : never;
-
-declare global {
-  namespace Classic {
-    // deno-lint-ignore no-empty-interface
-    interface Config {}
-    // deno-lint-ignore no-empty-interface
-    interface Elements {}
-  }
-}
 
 type NativeElement = Element;
 
@@ -54,44 +28,45 @@ declare namespace JSX {
 
 export type { JSX };
 
-export type GetConfig<K extends string | symbol> = Classic.Config extends
-  Record<K, infer X> ? X
-  : never;
-
 export const jsx = <T extends keyof JSX.IntrinsicElements>(
   type: T,
   { children, xmlns: _, ...props }: IntrinsicElementProps<T> & {
     readonly children?: Children;
     readonly xmlns?: never;
-  } = {} as IntrinsicElementProps<T> & { readonly children?: Children },
+  } = {} as IntrinsicElementProps<T> & {
+    readonly children?: Children;
+    readonly xmlns?: never;
+  },
 ): ChildNode => {
-  if (!type) return mapOrDo(children, (c) => c) as never;
+  if (!type) return deepMap(children, (c) => c) as never;
 
   let el = ns ? doc.createElementNS(ns, type) : doc.createElement(type);
-  let descriptors = getOwnPropertyDescriptors(el);
-  let ref: ((v: ParentNode) => void) | null = null;
+  let ref: ((v: ParentNode) => void) | null = NULL;
   let eventMatch: RegExpMatchArray | null;
 
-  for (let [k, v] of entries(props)) {
+  for (
+    let [k, v] of entries(
+      // @ts-ignore TS going mad on this uncastable argument
+      props,
+    )
+  ) {
     if (v != null) {
-      if (k === "ref") {
-        ref = v as unknown as typeof ref;
+      if (k == "ref") {
+        ref = v as (v: ParentNode) => void;
       } else if ((eventMatch = k.toLowerCase().match(eventRegExp))) {
         listen(
           el,
           eventMatch[1],
-          v as unknown as (e: Event) => void,
+          v as (e: Event) => void,
           !!eventMatch[2],
         );
       } else {
         k = k === "class" ? "className" : k;
-        on(
-          () => callOrReturn(v),
-          (v) =>
-            descriptors[k]?.writable
-              // @ts-ignore dynamically set
-              ? el[k] = v
-              : setAttr(el as Element, hyphenize(k), v as PropPrimitive),
+        track(() =>
+          ns
+            ? el.setAttribute(k, String(callOrReturn(v)))
+            // @ts-ignore dynamically set
+            : el[k] = callOrReturn(v)
         );
       }
     }
@@ -105,16 +80,6 @@ export const jsx = <T extends keyof JSX.IntrinsicElements>(
 export { jsx as jsxs };
 
 export const Fragment = "";
-// (
-//   { children }: { key?: string; children?: Children },
-// ): Node => {
-//   let f = new DocumentFragment(),
-//     c = isFunction(children) ? children : () => children;
-//   track(() =>
-//     f.replaceChildren(...mapOrDo(c(), (c) => (isFunction(c) ? c() : c) ?? ""))
-//   );
-//   return f;
-// };
 
 export const ref = <T>(initial?: T): { (el: T): T; (): T } => {
   let stored: T = initial!;

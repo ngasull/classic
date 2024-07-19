@@ -1,0 +1,16 @@
+{
+  "name": "@classic/js",
+  "version": "0.1.7",
+  "exports": {
+    ".": "./mod.ts",
+    "./build": "./build.ts"
+  },
+  "compilerOptions": {
+    "lib": [
+      "deno.ns",
+      "DOM",
+      "DOM.Iterable",
+      "ES2021"
+    ]
+  }
+}

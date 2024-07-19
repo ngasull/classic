@@ -1,5 +1,3 @@
-/// <reference lib="dom" />
-
 // Modified from source: https://github.com/preactjs/preact/blob/main/src/jsx.d.ts
 
 type Defaultize<Props, Defaults> =

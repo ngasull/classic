@@ -1,15 +1,9 @@
-import { ClassicBundle } from "../element/serve.ts";
 import { Fragment, jsx } from "./jsx-runtime.ts";
-import { createContext } from "./render.ts";
-import { JSXComponent } from "./types.ts";
+import type { ClassicBundle } from "./serve-element.ts";
+import type { JSXComponent } from "./types.ts";
 
-export const classicBundleContext = createContext<ClassicBundle>(
-  "classicBundle",
-);
-
-export const Bundle: JSXComponent = async (_, ctx) => {
-  const classicBundle = ctx(classicBundleContext);
-  const [js, css] = await Promise.all([classicBundle.js, classicBundle.css]);
+export const Bundle: JSXComponent<ClassicBundle> = async (bundle) => {
+  const [js, css] = await Promise.all([bundle.js, bundle.css]);
   const decoder = new TextDecoder();
   return Fragment({
     children: [

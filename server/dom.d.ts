@@ -1,8 +1,6 @@
-/// <reference lib="dom" />
-
 // Modified from source: https://github.com/preactjs/preact/blob/main/src/jsx.d.ts
 
-import { JS } from "classic/js";
+import type { JS } from "@classic/js";
 
 type Defaultize<Props, Defaults> =
   // Distribute over unions
@@ -2556,6 +2554,7 @@ export namespace JSXInternal {
     tbody: HTMLAttributes<HTMLTableSectionElement>;
     td: HTMLAttributes<HTMLTableCellElement>;
     textarea: HTMLAttributes<HTMLTextAreaElement>;
+    template: HTMLAttributes<HTMLTemplateElement>;
     tfoot: HTMLAttributes<HTMLTableSectionElement>;
     th: HTMLAttributes<HTMLTableCellElement>;
     thead: HTMLAttributes<HTMLTableSectionElement>;

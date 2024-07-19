@@ -1,6 +1,10 @@
-import * as esbuild from "../deps/esbuild.ts";
-import { exists } from "../deps/std/fs.ts";
-import { fromFileUrl, relative, resolve } from "../deps/std/path.ts";
+import {
+  denoLoaderPlugin,
+  denoResolverPlugin,
+} from "@luca/esbuild-deno-loader";
+import { exists } from "@std/fs";
+import { fromFileUrl, relative, resolve } from "@std/path";
+import * as esbuild from "esbuild";
 
 export type ClassicBundle = {
   // **Not** readonly (dev mode)
@@ -39,7 +43,7 @@ export const bundle = async (
     format: "iife",
     charset: "utf8",
     jsx: "automatic",
-    jsxImportSource: "classic/element",
+    jsxImportSource: "@classic/element",
     plugins: [
       {
         name: "accept-stdin",
@@ -106,6 +110,12 @@ export const bundle = async (
   ) as { readonly js: Uint8Array; readonly css?: Uint8Array };
 };
 
+export type DevServer = Readonly<{
+  stop: () => Promise<void>;
+  bundle: ClassicBundle;
+  hmr: string;
+}>;
+
 export const serveDev = async (
   entryPoints: string[],
   { denoJsonPath, host = "localhost", port }: {
@@ -113,11 +123,7 @@ export const serveDev = async (
     host?: string;
     port?: number;
   } = {},
-): Promise<{
-  stop: () => Promise<void>;
-  bundle: ClassicBundle;
-  hmr: string;
-}> => {
+): Promise<DevServer> => {
   type Result = esbuild.BuildResult<typeof opts>;
   let last: Result | null = null;
   let next = Promise.withResolvers<Result>();
@@ -130,11 +136,11 @@ export const serveDev = async (
     sourcemap: true,
     write: false,
     bundle: true,
-    splitting: true,
-    format: "esm",
+    // splitting: true,
+    // format: "esm",
     charset: "utf8",
     jsx: "automatic",
-    jsxImportSource: "classic/element",
+    jsxImportSource: "@classic/element",
     plugins: [
       ...await resolvePlugins(denoJsonPath),
       {
@@ -194,7 +200,8 @@ ${
                   ext === "js" &&
                   result.metafile.outputs[relativePath]?.entryPoint
                 ) {
-                  return `import("http://${server.host}:${server.port}/${relativePath}");`;
+                  return outFile.text + ";";
+                  // return `import("http://${server.host}:${server.port}/${relativePath}");`;
                 } else {
                   return [];
                 }
@@ -219,7 +226,7 @@ const resolvePlugins = async (
         (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
     );
     return [
-      esbuild.denoResolverPlugin({ configPath }),
+      denoResolverPlugin({ configPath }),
       {
         name: "deno-loader-css-interceptor",
         setup(build) {
@@ -245,7 +252,7 @@ const resolvePlugins = async (
           );
         },
       } satisfies esbuild.Plugin,
-      esbuild.denoLoaderPlugin({ configPath }),
+      denoLoaderPlugin({ configPath }),
     ];
   } else {
     return [];

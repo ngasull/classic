@@ -1,41 +1,35 @@
-import { reverseForOf } from "./util.ts";
 import {
   call,
-  customEvent,
   dispatchPrevented,
+  eventType,
   forEach,
+  listen,
+  reverseForOf,
   stopPropagation,
-  subEvent,
-} from "./util.ts";
+} from "@classic/util";
 
-const trackEvent = "lf-t";
-const untrackEvent = "lf-u";
+const trackEvent = eventType<() => void>({ type: "lf-t" });
+const untrackEvent = eventType({ type: "lf-u" });
 
 // Registers a lifecycle-tracking Node
 export const trackChildren = (node: Node) => {
   let nodes = new Map<EventTarget, Set<() => void>>(),
-    trackUnsub = subEvent(node, trackEvent, (e) => {
+    trackUnsub = listen(node, trackEvent, (e) => {
       let t = e.target!,
         cs = nodes.get(t);
       if (t != node) {
         stopPropagation(e);
         if (!cs) nodes.set(t, cs = new Set());
-        cs.add((e as CustomEvent<() => void>).detail);
+        cs.add(e.detail);
       }
     }),
-    untrackUnsub = subEvent(node, untrackEvent, (e) => {
+    untrackUnsub = listen(node, untrackEvent, (e) => {
       let t = e.target!,
         cleanups = nodes.get(t);
       if (t != node) {
         stopPropagation(e);
         forEach(cleanups, call);
-
-        if (
-          cleanups?.delete((e as CustomEvent<() => void>).detail) &&
-          cleanups.size < 1
-        ) {
-          nodes.delete(t);
-        }
+        nodes.delete(t);
       }
     }),
     cleanup = () => {
@@ -51,8 +45,8 @@ export const trackChildren = (node: Node) => {
 
 // Tells the closest lifecycle-tracking parent to attach a cleanup to a Node
 export const registerCleanup = (node: EventTarget, cleanup: () => void) => {
-  dispatchPrevented(node, customEvent(trackEvent, cleanup));
+  dispatchPrevented(node, trackEvent(cleanup));
 };
 
 export const cleanup = (node: EventTarget) =>
-  dispatchPrevented(node, customEvent(untrackEvent));
+  dispatchPrevented(node, untrackEvent());

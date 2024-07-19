@@ -1,7 +1,5 @@
-import type { Activation } from "../dom.ts";
-import { varArg } from "../dom/arg-alias.ts";
-import { argn } from "../dom/arg-alias.ts";
 import type {
+  Activation,
   Fn,
   ImplicitlyJSable,
   JS,
@@ -10,11 +8,17 @@ import type {
   JSFnBody,
   JSMeta as IJSMeta,
   JSONable,
+  JSReturn,
   ParamKeys,
+  RefTree,
   ResourceGroup,
   Resources,
 } from "./types.ts";
 import { isJSable, jsSymbol } from "./types.ts";
+
+// https://graphemica.com/categories/letter-number/page/2
+export const argn = (n: number) => `𐏒${n}`;
+export const varArg = "𐏑";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -22,6 +26,7 @@ class JSMeta implements IJSMeta<JSMetaContext> {
   thenable?: JSMeta;
   isAwaited?: boolean;
   isntAssignable?: boolean;
+  mustDeclare?: boolean;
   readonly hasResources?: boolean;
   readonly isOptional?: boolean;
   readonly scope: JSMeta | null;
@@ -362,33 +367,20 @@ class JSMetaAwait extends JSMeta {
   }
 }
 
-export const toJS = async <A extends readonly unknown[]>(f: Fn<A, unknown>, {
-  activation,
-  resolve,
-  isServer,
-}: {
-  resolve?: (url: string) => string;
-  activation?: [
-    JS<NodeList | readonly Node[]>,
-    Activation,
-    readonly JSable<EventTarget>[],
-  ];
-  isServer?: boolean;
-} = {}): Promise<[string, ...{ -readonly [I in keyof A]: string }]> => {
+export const toJS = async <A extends readonly unknown[]>(
+  f: Fn<A, unknown>,
+  { refs }: { refs?: true | [string, RefTree] } = {},
+): Promise<[string, ...{ -readonly [I in keyof A]: string }]> => {
   const globalFn = new JSMetaFunction(f as Fn<readonly never[], unknown>, {
     scoped: false,
   });
   const globalBody = globalFn.body;
 
   let lastVarId = -1;
-  const context: JSMetaContext = mkMetaContext({ isServer, resolve });
+  const context: JSMetaContext = mkMetaContext(!refs);
 
-  if (activation) {
-    context.refs = new JSMetaRefStore(
-      activation[0],
-      activation[1],
-      activation[2],
-    );
+  if (refs && refs !== true) {
+    context.refs = new JSMetaRefStore(...refs);
   }
 
   const scopeToRefs = new Map<JSMeta | null, Set<JSMeta>>();
@@ -441,6 +433,7 @@ export const toJS = async <A extends readonly unknown[]>(f: Fn<A, unknown>, {
   const declaredRefs = new Set<JSMeta>();
   const shouldDeclare = (meta: JSMeta): boolean => {
     let used = false;
+    if (meta.mustDeclare) return true;
     if (meta.isntAssignable) return false;
 
     for (
@@ -521,12 +514,7 @@ export const toJS = async <A extends readonly unknown[]>(f: Fn<A, unknown>, {
   ];
 };
 
-const mkMetaContext = (
-  { resolve = (url) => import.meta.resolve(url), isServer = true }: {
-    resolve?: (uri: string) => string;
-    isServer?: boolean;
-  } = {},
-): JSMetaContext => ({
+const mkMetaContext = (isServer = true): JSMetaContext => ({
   isServer,
   argn: -1,
   args: new Map(),
@@ -534,7 +522,7 @@ const mkMetaContext = (
   declaredNames: new Map(),
   implicitRefs: new Map(),
   asyncScopes: new Set(),
-  modules: new JSMetaModuleStore(resolve),
+  modules: new JSMetaModuleStore(isServer),
 });
 
 const metaToJS = async (
@@ -593,7 +581,7 @@ const jsUtils = {
   },
 
   eval: async <T>(expr: JSable<T>): Promise<T> => {
-    const [rawJS] = await toJS(() => expr, { isServer: true });
+    const [rawJS] = await toJS(() => expr);
     const jsBody = `return(async()=>{${rawJS}})()`;
     try {
       return new Function("document", "window", jsBody)();
@@ -613,8 +601,14 @@ const jsUtils = {
       ? JS<(...args: Args) => T> & { [jsSymbol]: JSMetaFunction }
       : never,
 
-  module: <M>(path: string): JS<M> =>
-    makeConvenient(jsable(new JSMetaModule(path))<M>()),
+  module: <M>(
+    name: `${string}/${string}`,
+    path: string,
+    opts?: {
+      readonly contexts?: readonly ServedJSContext[];
+      readonly imports?: readonly JS<unknown>[];
+    },
+  ): JS<M> => makeConvenient(jsable(new JSMetaModule(name, path, opts))<M>()),
 
   optional: <T>(expr: JSable<T>): JS<NonNullable<T>> => {
     const p = js<NonNullable<T>>`${expr}`;
@@ -626,6 +620,11 @@ const jsUtils = {
     makeConvenient(
       jsable(new JSMetaReassign(varMut[jsSymbol], expr[jsSymbol]))<T>(),
     ),
+
+  return: <T extends ImplicitlyJSable>(
+    expr: T,
+  ): T extends JSable<infer T> ? JS<T> & JSReturn : T =>
+    js`return ${expr as JSable}` as never,
 
   string: (
     tpl: ReadonlyArray<string>,
@@ -701,7 +700,7 @@ class JSMetaFunction extends JSMeta {
 
   private _hasResources?: boolean;
   // @ts-ignore Do not care JSMeta definition
-  get hasResources() {
+  get hasResources(): boolean {
     return this._hasResources ??= this.body.hasResources;
   }
 
@@ -730,7 +729,7 @@ class JSMetaFunction extends JSMeta {
     return [...args, "=>", this.body];
   }
 
-  [Symbol.for("Deno.customInspect")]({ ...opts }: Deno.InspectOptions) {
+  [Symbol.for("Deno.customInspect")]({ ...opts }: Deno.InspectOptions): string {
     opts.depth ??= 4;
     return `function(${
       this.args.map((a) => Deno.inspect(a, opts)).join(", ")
@@ -739,13 +738,15 @@ class JSMetaFunction extends JSMeta {
 }
 
 class JSMetaFunctionBody extends JSMeta {
-  readonly hasResources?: boolean;
+  public readonly fnBody: Writable<JSFnBody>;
+  readonly hasResources: boolean;
 
-  constructor(public readonly fnBody: JSFnBody) {
+  constructor(fnBody: JSFnBody) {
     super();
+    this.fnBody = fnBody as Writable<JSFnBody>;
     this.hasResources = Array.isArray(this.fnBody)
       ? this.fnBody.some((s) => s[jsSymbol].hasResources)
-      : this.fnBody[jsSymbol].hasResources;
+      : !!this.fnBody[jsSymbol].hasResources;
   }
 
   isExpression(context: JSMetaContext): boolean {
@@ -800,7 +801,7 @@ class JSMetaFunctionBody extends JSMeta {
     return parts;
   }
 
-  [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions) {
+  [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions): string {
     return Array.isArray(this.fnBody)
       ? this.fnBody.length
         ? `{${
@@ -828,53 +829,126 @@ class JSMetaArgument extends JSMeta {
     return [newName];
   }
 
-  [Symbol.for("Deno.customInspect")]() {
+  [Symbol.for("Deno.customInspect")](): string {
     return this.name ? this.name : "?";
   }
 }
 
+export const jsPublicPath = "/.js";
+
+const jsPublicBase = jsPublicPath + "/";
+
+const extensionRegExp = /\.([^/.]+)$/;
+
+const contentTypes: Record<string, string | undefined> = {
+  css: "text/css; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  json: "application/json; charset=utf-8",
+  map: "application/json; charset=utf-8",
+};
+
+export class ServedJSContext {
+  #declared: Map<string, string> = new Map();
+  #pathResolution: Map<string, string> | null = null;
+
+  register(name: string, url: string): void {
+    this.#declared.set(name, url);
+    this.#pathResolution = null;
+  }
+
+  async fetch(req: Request): Promise<Response | void> {
+    const path = new URL(req.url).pathname;
+
+    if (!path.startsWith(jsPublicBase)) return;
+
+    this.#pathResolution ??= new Map(
+      [...this.#declared.entries()].flatMap(([name, path]) => [
+        [`${jsPublicBase}${name}.js`, path],
+        [`${jsPublicBase}${name}.js.map`, path + ".map"],
+      ]),
+    );
+
+    const resolved = this.#pathResolution.get(path);
+    const ext = resolved?.match(extensionRegExp)?.[1];
+    const contentType = ext && contentTypes[ext];
+
+    return resolved
+      ? new Response((await fetch(resolved)).body, {
+        headers: contentType ? { "Content-Type": contentType } : undefined,
+      })
+      : new Response("Module not found", { status: 404 });
+  }
+}
+
+export const globalServedJSContext: ServedJSContext = new ServedJSContext();
+
+const defaultContexts = [globalServedJSContext];
+const defaultModuleOpts = { contexts: defaultContexts };
+
 class JSMetaModule extends JSMeta {
-  constructor(private url: string) {
+  constructor(
+    private name: string,
+    private url: string,
+    { contexts = defaultContexts, imports = [] }: {
+      readonly contexts?: readonly ServedJSContext[];
+      readonly imports?: readonly JS<unknown>[];
+    } = defaultModuleOpts,
+  ) {
     super();
+    for (const context of contexts) {
+      context.register(name, url);
+
+      for (const i of imports) {
+        const importMeta = i[jsSymbol] as JSMetaModule;
+        context.register(importMeta.name, importMeta.url);
+      }
+    }
   }
 
   template(context: JSMetaContext): (string | JSMeta)[] {
-    return [context.modules, `[${context.modules.index(this.url)}]`];
+    return [context.modules, `[${context.modules.index(this.name, this.url)}]`];
   }
 
-  [Symbol.for("Deno.customInspect")]() {
-    return `import(${this.url})`;
+  [Symbol.for("Deno.customInspect")](): string {
+    return `import(${this.name}: ${this.url})`;
   }
 }
 
 class JSMetaModuleStore extends JSMeta {
-  isAwaited = true;
-  readonly #urls: Record<string, number> = {};
+  readonly mustDeclare = true;
+  readonly isAwaited: boolean = true;
+  #urls: Record<string, [number, string]> = {};
   #i = 0;
 
-  constructor(private readonly resolve: (url: string) => string) {
+  constructor(private readonly isServer: boolean) {
     super();
   }
 
   template(_: JSMetaContext): (string | JSMeta)[] {
     return [
       `(await Promise.all(${
-        JSON.stringify(Object.keys(this.#urls).map(this.resolve))
+        JSON.stringify(
+          Object.values(this.#urls).map(([, uri]) => uri),
+        )
       }.map(u=>import(u))))`,
     ];
   }
 
-  index(url: string) {
-    return this.#urls[url] ??= this.#i++;
+  index(name: string, url: string): number {
+    this.#urls[url] ??= [
+      this.#i++,
+      this.isServer ? import.meta.resolve(url) : `${jsPublicBase}${name}.js`,
+    ];
+    return this.#urls[url][0];
   }
 
-  [Symbol.for("Deno.customInspect")]() {
+  [Symbol.for("Deno.customInspect")](): string {
     return `modules`;
   }
 }
 
 class JSMetaRef extends JSMeta {
-  readonly isntAssignable = true;
+  readonly isntAssignable: boolean = true;
 
   constructor() {
     super();
@@ -882,86 +956,95 @@ class JSMetaRef extends JSMeta {
 
   template(context: JSMetaContext): (string | JSMeta)[] {
     if (!context.refs) throw Error(`Must provide activation when using refs`);
-    return [context.refs.js[jsSymbol], `[${context.refs.byMeta.get(this)}]`];
+    return [context.refs, "[", context.refs.get(this).toString(), "]"];
   }
 
-  [Symbol.for("Deno.customInspect")]() {
+  [Symbol.for("Deno.customInspect")](): string {
     return `ref`;
   }
 }
 
-const makeRefs = js.fn((
-  nodes: JS<NodeList | readonly Node[]>,
-  activation: JS<Activation>,
-): JSable<readonly EventTarget[]> =>
-  // @ts-ignore TODO Support `flatMap`
-  activation.flatMap(([childIndex, h1]) => {
-    const child = js<ChildNode>`${nodes}[${childIndex}]`;
-    return js`${h1}?${
-      makeRefs(child.childNodes, h1 as JS<Activation>)
-    }:${child}`;
-  })
-);
-
-class JSMetaRefStore {
-  readonly byMeta = new Map<JSMetaRef, number>();
-  readonly js: JS<readonly EventTarget[]>;
+class JSMetaRefStore extends JSMeta {
+  readonly mustDeclare = true;
+  #metas: Set<JSMeta> = new Set();
+  #referenced: Map<JSMeta, number> = new Map();
+  #firstPass: boolean = true;
 
   constructor(
-    nodes: JS<NodeList | readonly Node[]>,
-    activation: Activation,
-    refs: readonly JSable<EventTarget>[],
+    private readonly currentScript: string,
+    private readonly refs: RefTree,
   ) {
-    refs.forEach((r, i) =>
-      this.byMeta.set(
-        // @ts-ignore: TODO Make JSables specific to new sub-meta types
-        r[jsSymbol],
-        i,
-      )
-    );
-    this.js = makeRefs(
-      nodes,
-      makeConvenient(unsafe(JSON.stringify(activation)) as JSable<Activation>),
-    );
+    super();
+
+    const iterRefs = (refs: RefTree) =>
+      refs.forEach(([r, children]) => {
+        this.#metas.add(r[jsSymbol]);
+        if (children) iterRefs(children);
+      });
+    iterRefs(refs);
+  }
+
+  template(_context: JSMetaContext): (string | JSMeta)[] {
+    if (this.#firstPass) {
+      this.#firstPass = false;
+      return [];
+    } else {
+      // On second pass, every used ref is accessed: compute activation
+      return [
+        client.refs[jsSymbol],
+        "(",
+        this.currentScript,
+        ",",
+        this.refs.length.toString(),
+        ",",
+        JSON.stringify(this.#activateReferenced(this.refs)),
+        ")",
+      ];
+    }
+  }
+
+  get(ref: JSMetaRef): number {
+    if (!this.#metas.has(ref)) return -1;
+
+    const i = this.#referenced.get(ref);
+    if (i == null) {
+      this.#referenced.set(ref, -1);
+      return -1;
+    }
+    return i;
+  }
+
+  #lastRefIndex = -1;
+  #activateReferenced(refs: RefTree): Activation {
+    return refs.flatMap(([ref, children], i) => {
+      const activation: Activation = [];
+      const r = this.#referenced.get(ref[jsSymbol]);
+      const referencedChildren = children && this.#activateReferenced(children);
+
+      if (r) {
+        activation.push([i]);
+        this.#referenced.set(ref[jsSymbol], ++this.#lastRefIndex);
+      }
+
+      if (referencedChildren?.length) activation.push([i, referencedChildren]);
+
+      return activation;
+    });
   }
 }
 
-const isFunction = js.fn((v: JS<unknown>) =>
-  js<boolean>`typeof ${v}==="function"`
+type DomApi = typeof import("./dom.ts");
+
+const domApi: JS<DomApi> = js.module<typeof import("./dom.ts")>(
+  "@classic/dom",
+  import.meta.resolve("../dist/dom.js"),
+  // { imports: js. }
 );
-
-const subStore = js.fn((
-  target: JS<EventTarget>,
-  cb: JS<() => void | (() => void)>,
-  uris: JS<readonly string[] | undefined>,
-) => {
-  const cleanup = cb();
-  const unsubStore = uris && store.sub(uris, () => [
-    js`${isFunction(cleanup)}&&${cleanup}()`,
-    js.reassign(cleanup, js`${cb}()`),
-  ]);
-
-  return [
-    cleanup,
-    js`return ${
-      js.fn(() =>
-        registerCleanup(
-          target,
-          () => [
-            js`${unsubStore}?.()`,
-            js`${isFunction(cleanup)}&&${cleanup}()`,
-          ],
-        )
-      )
-    }`,
-  ];
-});
-
-const domApi =
-  js.module<typeof import("../dom.ts")>(import.meta.resolve("../dom.ts")).api;
 const domStore = domApi.store;
 
-export const client = {
+// Memoized version of the API, ensuring static JS references
+export const client: JS<DomApi> = {
+  refs: domApi.refs,
   store: {
     peek: domStore.peek,
     set: domStore.set,
@@ -970,12 +1053,12 @@ export const client = {
   },
   sub: domApi.sub,
   [jsSymbol]: domApi[jsSymbol],
-};
+} as JS<DomApi>;
 
 class JSMetaResource<T extends JSONable = JSONable> extends JSMeta {
-  readonly hasResources = true;
-  readonly isntAssignable = true;
-  readonly js = jsable(this)();
+  readonly hasResources: boolean = true;
+  readonly isntAssignable: boolean = true;
+  readonly js: JSable<T> = jsable(this)();
 
   constructor(
     public readonly uri: string,
@@ -989,7 +1072,7 @@ class JSMetaResource<T extends JSONable = JSONable> extends JSMeta {
     return [await context.resources.peek<T>(this.uri, this.fetch)];
   }
 
-  [Symbol.for("Deno.customInspect")]() {
+  [Symbol.for("Deno.customInspect")](): string {
     return `$(${this.uri})`;
   }
 }
@@ -1046,11 +1129,11 @@ class JSMetaResources extends JSMeta {
       : inline(this.#peek(this.#store[uri][0]))[jsSymbol];
   }
 
-  indexOf(uri: string) {
+  indexOf(uri: string): number {
     return this.#store[uri][0];
   }
 
-  [Symbol.for("Deno.customInspect")]() {
+  [Symbol.for("Deno.customInspect")](): string {
     return `resources`;
   }
 }
@@ -1075,7 +1158,7 @@ class JSMetaVar extends JSMeta {
     return this.cb(context);
   }
 
-  [Symbol.for("Deno.customInspect")]() {
+  [Symbol.for("Deno.customInspect")](): string {
     return "var";
   }
 }
@@ -1114,7 +1197,7 @@ class JSMetaURIs extends JSMeta {
       : [(this.uris as JSable)[jsSymbol]];
   }
 
-  [Symbol.for("Deno.customInspect")]() {
+  [Symbol.for("Deno.customInspect")](): string {
     return `$(${this.uris})`;
   }
 }

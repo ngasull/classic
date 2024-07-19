@@ -1,33 +1,41 @@
-import type { Activation } from "../dom.ts";
-import { hyphenize } from "../element/util.ts";
-import type { BundleResult } from "../js/bundle.ts";
 import {
   client,
+  type Fn,
   indexedUris,
   inline,
+  isJSable,
+  type JS,
   js,
+  type JSable,
   jsResources,
   mkRef,
+  type RefTree,
   toJS,
   unsafe,
-} from "../js/js.ts";
-import { Fn, isJSable, JS, JSable } from "../js/types.ts";
+} from "@classic/js";
 import {
   contextSymbol,
-  DOMLiteral,
-  DOMNode,
+  type DOMLiteral,
+  type DOMNode,
   DOMNodeKind,
   ElementKind,
-  JSXContext,
-  JSXContextAPI,
-  JSXContextOf,
-  JSXElement,
-  JSXInitContext,
-  JSXRef,
+  type JSX,
+  type JSXComponent,
+  type JSXContext,
+  type JSXContextAPI,
+  type JSXContextInit,
+  type JSXElement,
+  type JSXRef,
 } from "./types.ts";
 import { voidElements } from "./void.ts";
 
-const id = <T>(v: T) => v;
+const camelRegExp = /[A-Z]/g;
+
+const hyphenize = (camel: string) =>
+  camel.replace(
+    camelRegExp,
+    (l: string) => "-" + l.toLowerCase(),
+  );
 
 const eventPropRegExp = /^on([A-Z]\w+)$/;
 
@@ -51,371 +59,281 @@ const escapeComment = (comment: string) =>
 export const escapeScriptContent = (node: DOMLiteral) =>
   String(node).replaceAll("</script", "</scr\\ipt");
 
-export const renderToString = async (
+const encoder = new TextEncoder();
+
+export const render = (
   root: JSXElement | PromiseLike<JSXElement>,
-  { context, doctype = true }: {
-    context?: JSXInitContext<unknown>[];
+  opts: {
+    context?: JSXContextInit<unknown>[] | JSXContextAPI;
     doctype?: boolean;
   } = {},
-) => {
-  const acc: string[] = doctype ? ["<!DOCTYPE html>"] : [];
-  const ctxData = subContext(undefined, context);
-  ctxData.set(effectContext[contextSymbol], []);
-
-  const bundle = mkContext(ctxData).get(bundleContext);
-  const tree = await nodeToDOMTree(root, ctxData);
-  const effects = ctxData.get(
-    effectContext[contextSymbol],
-  ) as InferContext<typeof effectContext>;
-
-  await writeDOMTree(
-    tree,
-    (chunk) => acc.push(chunk),
-    async (partial) => {
-      try {
-        return await writeActivationScript(
-          (chunk) => acc.push(chunk),
-          tree,
-          effects,
-          { bundle, partial },
-        );
-      } catch (e) {
-        console.log(e);
-      }
-    },
-  );
-  return acc.join("");
-};
-
-export const renderToStream = (
-  root: JSXElement | PromiseLike<JSXElement>,
-  { context, doctype }: {
-    context?: JSXInitContext<unknown>[];
-    doctype?: boolean;
-  },
-) =>
+): ReadableStream<Uint8Array> =>
   new ReadableStream<Uint8Array>({
     start(controller) {
-      const encoder = new TextEncoder();
-      const write = (chunk: string) =>
-        controller.enqueue(encoder.encode(chunk));
+      const { context } = opts;
+      const ctx = initContext(context);
 
-      const ctxData = subContext(undefined, context);
-      ctxData.set(effectContext[contextSymbol], []);
+      if (!ctx.get($effects)) ctx.provide($effects, []);
+      const effects = ctx($effects);
 
-      const bundle = mkContext(ctxData).get(bundleContext);
+      const write = (chunk: Uint8Array) => controller.enqueue(chunk);
+      const tree = domNodes(root, ctx);
 
-      (async () => {
-        const tree = await nodeToDOMTree(root, ctxData);
-        const effects = ctxData.get(
-          effectContext[contextSymbol],
-        ) as InferContext<typeof effectContext>;
-
-        if (doctype) write("<!DOCTYPE html>");
-
-        await writeDOMTree(
-          tree,
-          write,
-          async (partial) => {
-            try {
-              return await writeActivationScript(write, tree, effects, {
-                bundle,
-                partial,
-              });
-            } catch (e) {
-              console.log(e);
-            }
-          },
-        );
-
-        controller.close();
-      })();
+      writeDOMTree(tree, { effects, write, ...opts }, true)
+        .finally(() => {
+          controller.close();
+        });
     },
   });
 
-type ContextData = Map<symbol, unknown>;
+// const init = await Promise.race([
+//   ctx($initResponse).promise,
+//   streamPromise!,
+// ]) ?? {};
+// if (init instanceof Response) return init;
+// init.headers ??= {};
+// (init.headers as Record<string, string>)["Content-Type"] =
+//   "text/html; charset=UTF-8";
 
-export type InferContext<C> = C extends JSXContext<infer T> ? T : never;
+// return new Response(stream, init);
 
 export const createContext = <T>(name?: string): JSXContext<T> => {
-  const context = (value: T) => [context[contextSymbol], value] as const;
-  context[contextSymbol] = Symbol(name);
-  return context;
+  const $ = Symbol(name);
+  const init = (value: T) => [$, value] as const;
+  return { init, [contextSymbol]: $ };
 };
 
-const subContext = (
-  parent?: ContextData,
-  added: JSXInitContext<unknown>[] = [],
-): ContextData => {
-  const sub = new Map(parent);
-  for (const [k, v] of added) {
-    sub.set(k, v);
+type JSXContextInternal = JSXContextAPI & {
+  [$contextData]: Map<symbol, unknown>;
+};
+
+export const initContext = (
+  init?: JSXContextInit<unknown>[] | JSXContextAPI,
+): JSXContextAPI => {
+  if (init && !Array.isArray(init)) {
+    const entries: JSXContextInit<unknown>[] = [
+      ...(init as JSXContextInternal)[$contextData].entries(),
+    ];
+    return initContext(entries);
   }
-  return sub;
-};
 
-const mkContext = (data: ContextData): JSXContextAPI => {
-  const ctx = <T>(context: JSXContext<T>) => {
-    if (!data.has(context[contextSymbol])) {
-      throw new Error(`Looking up unset context`);
+  const use = <T, Args extends any[]>(
+    context: JSXContext<T> | ((use: JSXContextAPI, ...args: Args) => T),
+    ...args: Args
+  ) => {
+    if (typeof context === "function") {
+      return context(ctx, ...args);
+    } else {
+      if (!use[$contextData].has(context[contextSymbol])) {
+        throw new Error(
+          `Looking up unset context ${
+            context[contextSymbol].description ?? ""
+          }`,
+        );
+      }
+      return use[$contextData].get(context[contextSymbol]) as T;
     }
-    return data.get(context[contextSymbol]) as T;
   };
 
-  ctx.get = <T>(context: JSXContext<T>) =>
-    data.get(context[contextSymbol]) as T;
-
-  ctx.set = <T>(context: JSXContext<T>, value: T) => {
-    data.set(context[contextSymbol], value);
-    return ctx;
-  };
-
-  ctx.delete = (context: JSXContext<never>) => {
-    data.delete(context[contextSymbol]);
-    return ctx;
-  };
+  use[$contextData] = new Map<symbol, unknown>(init);
+  const ctx = Object.assign(use, contextProto);
 
   return ctx;
 };
 
-const targetContext = createContext<JSable<EventTarget>>("target");
-const effectContext = createContext<JSable<void>[]>("effect");
+const $contextData = Symbol("data");
 
-export const bundleContext = createContext<{
-  readonly result: BundleResult;
-  readonly watched?: boolean;
-}>("bundle");
-
-const writeActivationScript = async (
-  write: (chunk: string) => void,
-  children: DOMNode[],
-  effects: ReadonlyArray<JSable<void>>,
-  { bundle, partial = false }: {
-    bundle?: JSXContextOf<typeof bundleContext> | null;
-    partial?: boolean;
+const contextProto = {
+  get<T>(context: JSXContext<T>) {
+    return this[$contextData].get(context[contextSymbol]) as T;
   },
-): Promise<void> => {
-  if (effects.length) {
-    const refs: JSable<EventTarget>[] = [];
-    const activation = domActivation(children, (expr: JSable<EventTarget>) => {
-      refs.push(expr);
-      return true;
-    });
 
+  provide<T>(context: JSXContext<T>, value: T) {
+    this[$contextData].set(context[contextSymbol], value);
+    return this;
+  },
+} satisfies ThisType<JSXContextInternal>;
+
+export const $effects = createContext<JSable<void>[]>("effect");
+
+const activate = async (
+  refs: RefTree,
+  opts: {
+    effects: JSable<void>[];
+    write: (chunk: Uint8Array) => void;
+  },
+): Promise<DOMNode | void> => {
+  const { effects } = opts;
+  if (effects.length) {
     const [activationScript] = await toJS(
       () => effects,
-      {
-        isServer: false,
-        activation: [
-          partial
-            ? js<[Node]>`[_$.previousSibling]`
-            : js<NodeList>`document.childNodes`,
-          activation,
-          refs,
-        ],
-        resolve: (url) => {
-          if (!bundle) {
-            throw Error(
-              `Can't resolve external module without bundling (resolving ${url})`,
-            );
-          }
-          const publicPath = bundle.result.publicPath(url);
-          if (!publicPath) {
-            throw Error(`Module expected to be bundled: ${url}`);
-          }
-          return publicPath;
-        },
-      },
+      { refs: refs.length ? ["$", refs] : true },
     );
 
-    if (partial) {
-      write(`<script>{const _=document.currentScript;(async()=>{`);
-    } else {
-      write(`<script type="module">`);
-    }
+    effects.splice(0, effects.length);
 
-    write(escapeScriptContent(activationScript));
-
-    if (bundle?.watched && !partial) {
-      write(
-        `;new EventSource("/hmr").addEventListener("change",()=>location.reload())`,
-      );
-    }
-
-    if (partial) {
-      write(`});_.remove()}`);
-    }
-
-    write("</script>");
+    await writeDOMTree([{
+      kind: DOMNodeKind.Tag,
+      tag: "script",
+      attributes: new Map(),
+      children: [{
+        kind: DOMNodeKind.Text,
+        text: refs.length
+          ? `{const $=document.currentScript;setTimeout(async()=>{${activationScript}})}`
+          : `(async()=>{${activationScript}})()`,
+        ref: mkRef(),
+      }],
+      ref: mkRef(),
+    }], opts);
   }
-};
-
-const domActivation = (
-  dom: readonly DOMNode[],
-  walkRef: (expr: JSable<EventTarget>) => boolean,
-  parent: readonly number[] = [],
-) => {
-  const activation: Activation = [];
-
-  for (let i = 0; i < dom.length; i++) {
-    const { kind, node, ref } = dom[i];
-
-    if (walkRef(ref)) activation.push([i]);
-
-    if (kind === DOMNodeKind.Tag) {
-      const childrenActivation = domActivation(
-        node.children,
-        walkRef,
-        [...parent, i],
-      );
-      if (childrenActivation.length > 0) {
-        activation.push([i, childrenActivation]);
-      }
-    }
-  }
-
-  return activation;
 };
 
 const writeDOMTree = async (
-  tree: readonly DOMNode[],
-  write: (chunk: string) => void,
-  writeRootActivation: ((partial?: boolean) => Promise<void>) | null,
-  root = true,
-) => {
-  const partialRoot = root && (tree.length !== 1 ||
-    tree[0].kind !== DOMNodeKind.Tag || tree[0].node.tag !== "html");
+  tree: Iterable<DOMNode> | AsyncIterable<DOMNode>,
+  opts: {
+    doctype?: boolean;
+    effects: JSable<void>[];
+    write: (chunk: Uint8Array) => void;
+  },
+  root?: boolean,
+): Promise<RefTree> => {
+  const { doctype, write } = opts;
+  const writeStr = (chunk: string) => write(encoder.encode(chunk));
+  const refs: RefTree = [];
 
-  for (const { kind, node } of tree) {
-    switch (kind) {
+  for await (const node of tree) {
+    let childRefs: RefTree | null = null;
+
+    switch (node.kind) {
       case DOMNodeKind.Comment: {
-        if (node) {
-          write(`<!--`);
-          write(escapeComment(node));
-          write(`-->`);
+        if (node.text) {
+          writeStr(`<!--`);
+          writeStr(escapeComment(node.text));
+          writeStr(`-->`);
         } else {
-          write(`<!>`);
+          writeStr(`<!>`);
         }
         break;
       }
 
       case DOMNodeKind.Tag: {
-        if (partialRoot && node.tag !== "script") {
-          write("<html><body>");
+        if (
+          root && (
+            doctype === true ||
+            (doctype == null && node.tag === "html")
+          )
+        ) {
+          writeStr("<!DOCTYPE html>");
         }
 
-        write("<");
-        write(escapeTag(node.tag));
+        writeStr("<");
+        writeStr(escapeTag(node.tag));
 
         for (const [name, value] of node.attributes) {
           if (value === false) continue;
           const valueStr = value === true ? "" : String(value);
-
-          write(" ");
-          write(escapeTag(name));
-          write("=");
           const escapedValue = escapeEscapes(valueStr).replaceAll("'", "&#39;");
-          if (!escapedValue || /[\s>"]/.test(escapedValue)) {
-            write("'");
-            write(escapedValue);
-            write("'");
-          } else {
-            write(escapedValue);
+
+          writeStr(" ");
+          writeStr(escapeTag(name));
+          if (escapedValue) {
+            writeStr("=");
+            if (/[\s>"]/.test(escapedValue)) {
+              writeStr("'");
+              writeStr(escapedValue);
+              writeStr("'");
+            } else {
+              writeStr(escapedValue);
+            }
           }
         }
 
-        write(">");
+        writeStr(">");
 
         if (!voidElements.has(node.tag)) {
           if (node.tag === "script") {
-            for (const c of node.children) {
+            for await (const c of node.children) {
               if (c.kind === DOMNodeKind.Text) {
-                write(escapeScriptContent(c.node.text));
+                writeStr(escapeScriptContent(c.text));
               } else {
                 console.warn(`<script> received non-text child: ${c}`);
               }
             }
           } else {
-            await writeDOMTree(
-              node.children,
-              write,
-              writeRootActivation,
-              false,
-            );
+            // Write any global initializing effect that may use document.body
+            if (node.tag === "body") await activate([], opts);
 
-            if (!partialRoot && node.tag === "head") {
-              await writeRootActivation?.();
-            }
+            childRefs = await writeDOMTree(node.children, opts);
+
+            if (node.tag === "body") await activate(childRefs, opts);
           }
 
-          write("</");
-          write(node.tag);
-          write(">");
+          writeStr("</");
+          writeStr(node.tag);
+          writeStr(">");
         }
 
-        if (partialRoot && node.tag !== "script") {
-          await writeRootActivation?.(true);
-          write("</body></html>");
-        }
         break;
       }
 
       case DOMNodeKind.Text: {
-        write(escapeTextNode(node.text));
+        writeStr(escapeTextNode(node.text));
         break;
       }
 
       case DOMNodeKind.HTMLNode: {
-        write(node.html);
+        const reader = node.html.getReader();
+        while (true) {
+          const res = await reader.read();
+          if (res.done) break;
+          write(res.value);
+        }
         break;
       }
     }
+
+    refs.push(childRefs?.length ? [node.ref, childRefs] : [node.ref]);
   }
+
+  if (root) await activate(refs, opts);
+
+  return refs;
 };
 
-const nodeToDOMTree = async (
-  nodeLike: JSXElement | PromiseLike<JSXElement>,
-  ctxData: ContextData,
-): Promise<DOMNode[]> => {
-  const node = "then" in nodeLike ? await nodeLike : nodeLike;
+const domNodes = async function* (
+  nodeLike: JSX.Element,
+  ctx: JSXContextAPI,
+): AsyncIterable<DOMNode> {
+  const node = nodeLike && "then" in nodeLike ? await nodeLike : nodeLike;
+  if (!node) return;
 
-  const effects = ctxData.get(
-    effectContext[contextSymbol],
-  ) as InferContext<typeof effectContext>;
+  const effects = ctx($effects);
 
   switch (node.kind) {
     case ElementKind.Fragment: {
-      return [
-        { kind: DOMNodeKind.Comment, node: "", ref: node.ref },
-        ...(await Promise
-          .all(node.element.map((e) => nodeToDOMTree(e, ctxData)))
-          .then((children) => children.flatMap(id))),
-      ];
+      for (const e of node.children) {
+        yield* domNodes(e, ctx);
+      }
+      return;
     }
 
     case ElementKind.Component: {
-      const { Component, props } = node.element;
-      const subCtxData = subContext(ctxData);
-      const ctx = mkContext(subCtxData);
-      const child = await Component(props, ctx);
-      if (child) {
-        ctx.set(targetContext, child.ref);
-        return nodeToDOMTree(child, subCtxData);
-      } else {
-        return [];
-      }
+      const { Component, props } = node;
+      const subCtx = initContext(ctx);
+      yield* domNodes(Component(props, subCtx), subCtx);
+      return;
     }
 
     case ElementKind.Comment: {
-      return [{
+      return yield {
         kind: DOMNodeKind.Comment,
-        node: node.element,
+        text: node.text,
         ref: node.ref,
-      }];
+      };
     }
 
     case ElementKind.Intrinsic: {
-      const { tag, props: { ref, ...props } } = node.element;
+      const { tag, props: { ref, ...props } } = node;
 
       const attributes = new Map<string, string | number | boolean>();
       const reactiveAttributes: [
@@ -468,73 +386,93 @@ const nodeToDOMTree = async (
         }
       }
 
-      const children = await Promise
-        .all(
-          node.element.children.map((child) => nodeToDOMTree(child, ctxData)),
-        )
-        .then((children) => children.flatMap(id));
+      // if (tag === "head") {
+      //   yield {
+      //     kind: DOMNodeKind.Tag,
+      //     tag: "script",
+      //     attributes: new Map([["type", "importmap"]]),
+      //     children: [{
+      //       kind: DOMNodeKind.Text,
+      //       text: `{"scopes":{"/.js/":{"/":"/.js/"}}}`,
+      //       ref: mkRef(),
+      //     }],
+      //     ref: node.ref,
+      //   };
+      // }
 
-      // Make sure we have no adjacent text nodes (would be parsed as only one)
-      for (let i = children.length - 1; i > 0; i--) {
-        if (
-          children[i].kind === DOMNodeKind.Text &&
-          children[i - 1].kind === DOMNodeKind.Text
-        ) {
-          children.splice(i, 0, {
-            kind: DOMNodeKind.Comment,
-            node: "",
-            ref: mkRef(),
-          });
-        }
-      }
-
-      return [{
+      return yield {
         kind: DOMNodeKind.Tag,
-        node: { tag, attributes, children },
+        tag,
+        attributes,
+        children: disambiguateText(node.children, ctx),
         ref: node.ref,
-      }];
+      };
     }
 
     case ElementKind.JS: {
-      const uris = jsResources(node.element);
+      const uris = jsResources(node.js);
       if (uris.length) {
         effects.push(
           js.fn(() =>
             subText(
               node.ref,
-              () => inline(node.element),
+              () => inline(node.js),
               // js.comma(js.reassign(node.element, node.element), node.element),
               indexedUris(uris),
             )
           )(),
         );
       }
-      return [{
+      return yield {
         kind: DOMNodeKind.Text,
-        node: { text: String(await js.eval(node.element) ?? "") },
+        text: String(await js.eval(node.js) ?? ""),
         ref: node.ref,
-      }];
+      };
     }
 
     case ElementKind.Text: {
-      return [{
+      return yield {
         kind: DOMNodeKind.Text,
-        node: { text: String(node.element.text) },
+        text: String(node.text),
         ref: node.ref,
-      }];
+      };
     }
 
     case ElementKind.HTMLNode: {
-      return [{
+      return yield {
         kind: DOMNodeKind.HTMLNode,
-        node: { html: node.element.html },
+        html: node.html,
         ref: node.ref,
-      }];
+      };
     }
   }
 
   throw Error(`Can't handle JSX node ${JSON.stringify(node)}`);
 };
+
+async function* disambiguateText(
+  children: readonly JSXElement[],
+  ctx: JSXContextAPI,
+): AsyncIterable<DOMNode> {
+  let prev: DOMNode | null = null;
+
+  for (const child of children) {
+    for await (const c of domNodes(child, ctx)) {
+      if (
+        prev && c.kind === DOMNodeKind.Text &&
+        prev.kind === DOMNodeKind.Text
+      ) {
+        yield {
+          kind: DOMNodeKind.Comment,
+          text: "",
+          ref: mkRef(),
+        };
+      }
+      yield c;
+      prev = c;
+    }
+  }
+}
 
 const onEvent = js.fn((
   target: JS<EventTarget>,
@@ -574,22 +512,44 @@ const subText = js.fn((
   >`${client.sub}(${node},_=>${node}.textContent=${value}(),${uris})`
 );
 
-export const addEffect = (
-  ctx: JSXContextAPI,
-  cb: Fn<[], void | (() => void)>,
+export const Effect: JSXComponent<{
+  js: Fn<[], void | (() => void)>;
   uris?:
     | readonly string[]
     | JSable<readonly string[]>
-    | readonly JSable<string>[],
-): void => {
-  ctx(effectContext).push(
+    | readonly JSable<string>[];
+}> = ({ js: cb, uris }, use) => {
+  const ref = mkRef<Comment>();
+  use($effects).push(
     js.fn(() => {
       const effectJs = js.fn(cb);
       return client.sub(
-        ctx(targetContext),
+        ref,
         effectJs,
         uris ? indexedUris(uris) : [],
       );
     })(),
   );
+  return {
+    kind: ElementKind.Comment,
+    text: "",
+    ref,
+  };
 };
+
+export const Html: JSXComponent<{
+  contents: string | Uint8Array | ReadableStream<Uint8Array>;
+}> = ({ contents }) => ({
+  kind: ElementKind.HTMLNode,
+  html: contents instanceof ReadableStream
+    ? contents
+    : new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          typeof contents === "string" ? encoder.encode(contents) : contents,
+        );
+        controller.close();
+      },
+    }),
+  ref: mkRef(),
+});

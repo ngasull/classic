@@ -1,3 +1,12 @@
+/**
+ * Tuple holding refs attached to a jsx tree render.
+ * First holds node index, second represents: children if present, otherwise (undefined) means next ref is associated.
+ */
+export type Activation = ([number] | [number, Activation])[];
+
+export type RefTree =
+  ([JSable<EventTarget>] | [JSable<EventTarget>, RefTree])[];
+
 export type JS<T> = _JS<T, []>;
 
 type _JS<T, Depth extends unknown[]> = JSable<T> & _JSProxy<T, Depth>;
@@ -49,13 +58,13 @@ type JSMapped = readonly unknown[] | Record<any, any>;
 type JSFunction = Function | Record<any, any>;
 type OnlyJSArg<T, Filter> = Exclude<T, Exclude<JSArgUnion, Filter>>;
 
-declare global {
-  namespace JSOverrides {
-    interface JS<T> {
-      // Promise: T extends Promise<infer G> ? JSPromise<G> : never;
-    }
+declare namespace JSOverrides {
+  interface JS<T> {
+    // Promise: T extends Promise<infer G> ? JSPromise<G> : never;
   }
 }
+
+export type { JSOverrides };
 
 type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 
@@ -88,10 +97,11 @@ export type Fn<Args extends readonly unknown[], T = void> = (
 
 export type JSFnBody<T = unknown> = JSable<T> | JSStatements<T>;
 
-export type JSStatements<T> = [
-  JSable | (JSable<T> & JSReturn),
-  ...readonly (JSable | (JSable<T> & JSReturn))[],
-];
+export type JSStatements<T> = readonly JSable[];
+// readonly [
+//   JSable | (JSable<T> & JSReturn),
+//   ...readonly (JSable | (JSable<T> & JSReturn))[],
+// ];
 
 export type JSStatementsReturn<S extends JSStatements<unknown>> = S extends
   readonly JSNoReturn[] ? JS<void> & JSNoReturn

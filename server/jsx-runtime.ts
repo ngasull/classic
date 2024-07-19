@@ -1,15 +1,14 @@
-import { mkRef } from "classic/js";
-import { isJSable } from "../js/types.ts";
-import {
+import { isJSable, mkRef } from "@classic/js";
+import type {
   DOMLiteral,
-  ElementKind,
-  IntrinsicElement,
+  IntrinsicElementProps,
   JSX,
   JSXChildren,
   JSXComponent,
   JSXElement,
 } from "./types.ts";
-import { VoidElement } from "./void.ts";
+import { ElementKind } from "./types.ts";
+import type { VoidElement } from "./void.ts";
 
 export type { JSX };
 
@@ -17,7 +16,7 @@ const jsx = ((
   tag: keyof JSX.IntrinsicElements | JSXComponent<Record<string, unknown>>,
   props?: Record<string, unknown> | null | undefined,
   ...children: JSXChildren[]
-): JSX.Element => {
+): JSXElement => {
   props ??= {};
   children = flatten(
     children.length
@@ -28,19 +27,15 @@ const jsx = ((
   return typeof tag === "string"
     ? {
       kind: ElementKind.Intrinsic,
-      element: {
-        tag,
-        props: props as IntrinsicElement["props"],
-        children: children as JSXElement[],
-      } satisfies IntrinsicElement,
+      tag,
+      props: props as IntrinsicElementProps,
+      children: children as JSXElement[],
       ref: mkRef<Element>(),
     }
     : {
       kind: ElementKind.Component,
-      element: {
-        Component: tag,
-        props: ((props.children = children), props),
-      },
+      Component: tag,
+      props: ((props.children = children), props),
       ref: mkRef(),
     };
 }) as {
@@ -55,10 +50,7 @@ const jsx = ((
     props?: JSX.IntrinsicElements[Tag] | null | undefined,
   ): JSXElement;
 
-  <
-    Cpt extends JSXComponent<Record<any, any>>,
-    Props extends ComponentProps<Cpt>,
-  >(
+  <Cpt extends JSXComponent<any>, Props extends ComponentProps<Cpt>>(
     component: Cpt,
     props?: NullableProps<
       Omit<Props, "children"> & Partial<Pick<Props, "children">>
@@ -68,9 +60,9 @@ const jsx = ((
       : Props extends { readonly children?: infer T }
         ? T extends readonly unknown[] ? T | [] : [T] | []
       : JSXChildren[]
-  ): JSX.Element;
+  ): JSXElement;
 
-  <Cpt extends JSXComponent<Record<any, any>>>(
+  <Cpt extends JSXComponent<any>>(
     component: Cpt,
     props?: NullableProps<ComponentProps<Cpt>>,
   ): JSXElement;
@@ -86,28 +78,30 @@ type NullableProps<Props> =
     ? null | undefined
     : never);
 
-const Fragment = ({ children }: { children: JSXChildren }): JSXElement => ({
+const Fragment = (
+  { children }: { children?: JSXChildren } = {},
+): JSXElement => ({
   kind: ElementKind.Fragment,
-  element: flatten(children),
+  children: flatten(children),
   ref: mkRef(),
 });
 
-const flatten = (children: JSXChildren): JSX.Element[] => {
+const flatten = (children: JSXChildren): JSXElement[] => {
   if (!Array.isArray(children)) children = [children];
 
-  const fragment: JSX.Element[] = [];
+  const fragment: JSXElement[] = [];
   for (const child of children) {
     if (Array.isArray(child)) {
       fragment.push(...flatten(child));
     } else if (child != null) {
       fragment.push(
         isJSable<DOMLiteral>(child)
-          ? { kind: ElementKind.JS, element: child, ref: mkRef() }
+          ? { kind: ElementKind.JS, js: child, ref: mkRef() }
           : typeof child === "object"
-          ? (child as JSX.Element)
+          ? (child as JSXElement)
           : {
             kind: ElementKind.Text,
-            element: { text: child as string | number },
+            text: child as string | number,
             ref: mkRef(),
           },
       );
@@ -116,5 +110,8 @@ const flatten = (children: JSXChildren): JSX.Element[] => {
 
   return fragment;
 };
+
+export const isJsx = (v: unknown): v is JSXElement =>
+  v != null && typeof v === "object" && isJSable((v as any).ref);
 
 export { Fragment, jsx, jsx as jsxDev, jsx as jsxs };

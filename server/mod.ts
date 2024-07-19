@@ -1,9 +1,9 @@
 export { Bundle } from "./component.ts";
-export {
-  addEffect,
-  createContext,
-  renderToStream,
-  renderToString,
-} from "./render.ts";
-export type { InferContext } from "./render.ts";
-export type { JSXChildren as Children, JSXComponent as FC } from "./types.ts";
+export { createContext, Effect, Html, render } from "./render.ts";
+export { $send, route } from "./router.ts";
+export type {
+  InferContext,
+  JSXChildren as Children,
+  JSXComponent as FC,
+  JSXContextAPI as Use,
+} from "./types.ts";
