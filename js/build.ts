@@ -24,8 +24,6 @@ const mkContext = async (
     .then((metaJson) => JSON.parse(metaJson) as esbuild.Metafile)
     .catch(() => undefined);
 
-  const externalSet = new Set([...external, ...Object.keys(modules)]);
-
   const denoOpts: DenoResolverPluginOptions = {
     configPath: resolve(
       await exists("deno.jsonc") ? "deno.jsonc" : "deno.json",
@@ -53,16 +51,24 @@ const mkContext = async (
       {
         name: "external-js",
         setup(build) {
+          const externalSet = new Set([...external, ...Object.keys(modules)]);
+          if (externalSet.size < 1) return;
+
+          const regexps: string[] = [];
           for (const x of externalSet) {
-            build.onResolve({
-              filter: new RegExp(
-                `^${x.replaceAll(/[\\.[\]()]/g, (m) => "\\" + m)}(?:$|/)`,
-              ),
-            }, (r) => ({
+            regexps.push(
+              x.replaceAll(/[\\.[\]()]/g, (m) => "\\" + m) +
+                (x.endsWith("/") ? "" : "(?:$|/)"),
+            );
+          }
+
+          build.onResolve(
+            { filter: new RegExp(`^(${regexps.join("|")})`) },
+            (r) => ({
               external: true,
               path: `${externalPrefix}${r.path}.js`,
-            }));
-          }
+            }),
+          );
         },
       } satisfies esbuild.Plugin,
 
@@ -123,17 +129,17 @@ const mkContext = async (
                 const dir = dirname(outPath);
                 const moduleName = moduleByEntry[entryPoint];
 
-                const externalModules = [
+                const externalImports = [
                   ...new Set(
                     imports.flatMap((i) => {
                       const m = i.path.startsWith(externalPrefix) &&
                         i.path.slice(externalPrefix.length, -3);
-                      return m && externalSet.has(m) ? m : [];
+                      return m || [];
                     }),
                   ),
                 ];
 
-                const importModules = externalModules.map((m, i) =>
+                const importModules = externalImports.map((m, i) =>
                   `\nimport 𐏑${i} from ${
                     JSON.stringify(
                       outPathByModule[m]
@@ -166,7 +172,7 @@ type 𐏑M = typeof import(${
 const ${exportName}: 𐏑JS<𐏑M> = 𐏑js.module(
   ${JSON.stringify(moduleName)},
   import.meta.resolve(${JSON.stringify(`./${basename(outPath)}`)}),
-  { imports: [${externalModules.map((_, i) => `𐏑${i}`).join(", ")}] }
+  { imports: [${externalImports.map((_, i) => `𐏑${i}`).join(", ")}] }
 );
 
 export default ${exportName};

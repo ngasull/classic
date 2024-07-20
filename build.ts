@@ -12,7 +12,7 @@ if (import.meta.main) {
     modules: {
       "@classic/router": "server/client-router.ts",
     },
-    external: ["@classic/js/dom", "@classic/js/dom/util"],
+    external: ["@classic/"],
     outdir: "server/dist",
   });
 }
