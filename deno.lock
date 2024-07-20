@@ -2,7 +2,6 @@
   "version": "3",
   "packages": {
     "specifiers": {
-      "jsr:@classic/js@0.1": "jsr:@classic/js@0.1.7",
       "jsr:@std/assert@^0.213.1": "jsr:@std/assert@0.213.1",
       "jsr:@std/assert@^0.226.0": "jsr:@std/assert@0.226.0",
       "jsr:@std/encoding@0.213": "jsr:@std/encoding@0.213.1",
@@ -14,9 +13,6 @@
       "npm:esbuild@^0.23.0": "npm:esbuild@0.23.0"
     },
     "jsr": {
-      "@classic/js@0.1.7": {
-        "integrity": "876b865ba96d9ea9c56118d31ab98c6a615e8cd484c951814b7e2d8a6a56af37"
-      },
       "@std/assert@0.213.1": {
         "integrity": "24c28178b30c8e0782c18e8e94ea72b16282207569cdd10ffb9d1d26f2edebfe"
       },
