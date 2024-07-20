@@ -8,27 +8,13 @@
     "@classic/element": "jsr:@classic/element@0.1",
     "@classic/js": "jsr:@classic/js@0.1",
     "@classic/server": "jsr:@classic/server@0.1",
-    "@luca/esbuild-deno-loader-original": "jsr:@luca/esbuild-deno-loader@^0.10.3",
-    "@luca/esbuild-deno-loader": "../esbuild_deno_loader/mod.ts",
+    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader@^0.10.3",
     "@std/fs": "jsr:@std/fs@^0.229.3",
     "@std/http": "jsr:@std/http@^0.224.5",
     "@std/path": "jsr:@std/path@^0.225.2",
     "esbuild": "npm:esbuild@^0.23.0",
     "hono": "jsr:@hono/hono@^4.4.8",
     "hono/types": "jsr:@hono/hono@^4.4.8/types"
-  },
-  "scopes": {
-    "../esbuild_deno_loader/": {
-      "@std/assert": "jsr:@std/assert@0.213",
-      "@std/encoding/base32": "jsr:@std/encoding@0.213/base32",
-      "@std/encoding": "jsr:@std/encoding@0.213",
-      "@std/fs": "jsr:@std/fs@0.213",
-      "@std/jsonc": "jsr:@std/jsonc@0.213",
-      "@std/path": "jsr:@std/path@0.213",
-      "x/importmap": "../esbuild_deno_loader/vendor/x/importmap/mod.ts",
-      "x/importmap/_util.ts": "../esbuild_deno_loader/vendor/x/importmap/_util.ts",
-      "x/import_map": "https://deno.land/x/import_map@v0.20.0/mod.ts"
-    }
   },
   "tasks": {
     "dev": "deno run -A dev.ts",
