@@ -20,8 +20,10 @@ const mkContext = async (
   { modules, outdir, external = [] }: BuildOpts,
 ) => {
   const metaPath = join(outdir, "metafile.json");
-  let prevMeta: esbuild.Metafile | undefined = await Deno.readTextFile(metaPath)
-    .then((metaJson) => JSON.parse(metaJson) as esbuild.Metafile)
+  let prevMeta = await Deno.readTextFile(metaPath)
+    .then((metaJson) =>
+      JSON.parse(metaJson) as esbuild.Metafile & { cwd: string; dist: string[] }
+    )
     .catch(() => undefined);
 
   const denoOpts: DenoResolverPluginOptions = {
@@ -98,73 +100,70 @@ const mkContext = async (
           build.onEnd(async (result) => {
             if (!result.metafile) return;
 
-            if (prevMeta) {
-              await Promise.all(
-                Object.keys(prevMeta.outputs)
-                  .map((outPath) =>
-                    !result.metafile!.outputs[outPath] &&
-                    Deno.remove(outPath).catch(() => {
-                      // Is ok if already removed
-                    })
-                  ),
+            const meta = result.metafile as NonNullable<typeof prevMeta>;
+            meta.cwd = Deno.cwd();
+            meta.dist = Object.keys(meta.outputs);
+
+            try {
+              const outputEntries = Object.entries(meta.outputs);
+              const outPathByModule = Object.fromEntries(
+                outputEntries.flatMap(([outPath, { entryPoint }]) =>
+                  entryPoint ? [[moduleByEntry[entryPoint], outPath]] : []
+                ),
               );
-            }
 
-            prevMeta = result.metafile;
-            await Deno.writeTextFile(metaPath, JSON.stringify(prevMeta));
+              for (const [outPath, { entryPoint, imports }] of outputEntries) {
+                if (
+                  entryPoint &&
+                  moduleByEntry[entryPoint] &&
+                  outPath.endsWith(".js")
+                ) {
+                  const dir = dirname(outPath);
+                  const moduleName = moduleByEntry[entryPoint];
 
-            const outputEntries = Object.entries(prevMeta.outputs);
-            const outPathByModule = Object.fromEntries(
-              outputEntries.flatMap(([outPath, { entryPoint }]) =>
-                entryPoint ? [[moduleByEntry[entryPoint], outPath]] : []
-              ),
-            );
+                  const externalImports = [
+                    ...new Set(
+                      imports.flatMap((i) => {
+                        const m = i.path.startsWith(externalPrefix) &&
+                          i.path.slice(
+                            externalPrefix.length,
+                            -3,
+                          );
+                        return m || [];
+                      }),
+                    ),
+                  ];
 
-            for (const [outPath, { entryPoint, imports }] of outputEntries) {
-              if (
-                entryPoint &&
-                moduleByEntry[entryPoint] &&
-                outPath.endsWith(".js")
-              ) {
-                const dir = dirname(outPath);
-                const moduleName = moduleByEntry[entryPoint];
+                  const importModules = externalImports.map((m, i) =>
+                    `\nimport 𐏑${i} from ${
+                      JSON.stringify(
+                        outPathByModule[m]
+                          ? `./${posixRelative(dir, outPathByModule[m])}.ts`
+                          : m + "/client",
+                      )
+                    };`
+                  );
 
-                const externalImports = [
-                  ...new Set(
-                    imports.flatMap((i) => {
-                      const m = i.path.startsWith(externalPrefix) &&
-                        i.path.slice(externalPrefix.length, -3);
-                      return m || [];
-                    }),
-                  ),
-                ];
-
-                const importModules = externalImports.map((m, i) =>
-                  `\nimport 𐏑${i} from ${
-                    JSON.stringify(
-                      outPathByModule[m]
-                        ? `./${posixRelative(dir, outPathByModule[m])}.ts`
-                        : m + "/js",
+                  const exportName = basename(moduleName)
+                    .replaceAll(
+                      /[/\\[\]()-](\w)/g,
+                      (_, l: string) => l.toUpperCase(),
                     )
-                  };`
-                );
+                    .replaceAll(/[/\\[\]()-]/g, "");
 
-                const exportName = basename(moduleName)
-                  .replaceAll(
-                    /[/\\[\]()-](\w)/g,
-                    (_, l: string) => l.toUpperCase(),
-                  )
-                  .replaceAll(/[/\\[\]()-]/g, "");
+                  const wrapperPath = `${
+                    join(dir, basename(moduleName))
+                  }.js.ts`;
 
-                Deno.writeTextFile(
-                  `${join(dir, basename(moduleName))}.js.ts`,
-                  `import { type JS as 𐏑JS, js as 𐏑js } from "@classic/js";${
-                    importModules.join("")
-                  }
+                  await Deno.writeTextFile(
+                    wrapperPath,
+                    `import { type JS as 𐏑JS, js as 𐏑js } from "@classic/js";${
+                      importModules.join("")
+                    }
 
 type 𐏑M = typeof import(${
-                    JSON.stringify("./" + posixRelative(dir, entryPoint))
-                  });
+                      JSON.stringify("./" + posixRelative(dir, entryPoint))
+                    });
 
 /**
  * Server wrapper for \`${moduleName}\`
@@ -177,8 +176,26 @@ const ${exportName}: 𐏑JS<𐏑M> = 𐏑js.module(
 
 export default ${exportName};
 `,
+                  );
+
+                  meta.dist.push(wrapperPath);
+                }
+              }
+            } finally {
+              if (prevMeta) {
+                const { cwd, dist } = prevMeta;
+                await Promise.all(
+                  dist.map((path) =>
+                    !meta.dist.includes(path) &&
+                    Deno.remove(relative(cwd, path)).catch(() => {
+                      // Is ok if already removed
+                    })
+                  ),
                 );
               }
+
+              prevMeta = meta;
+              await Deno.writeTextFile(metaPath, JSON.stringify(meta));
             }
           });
         },

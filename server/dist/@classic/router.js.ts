@@ -1,5 +1,5 @@
 import { type JS as 𐏑JS, js as 𐏑js } from "@classic/js";
-import 𐏑0 from "@classic/js/dom/util/js";
+import 𐏑0 from "@classic/js/dom/util/client";
 
 type 𐏑M = typeof import("./../../client-router.ts");
 

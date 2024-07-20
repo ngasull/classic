@@ -5,9 +5,9 @@
     ".": "./mod.ts",
     "./build": "./build.ts",
     "./dom": "./dom.ts",
-    "./dom/js": "./dist/@classic/js/dom.js.ts",
+    "./dom/client": "./dist/@classic/js/dom.js.ts",
     "./dom/util": "./dom/util.ts",
-    "./dom/util/js": "./dist/@classic/js/dom/util.js.ts"
+    "./dom/util/client": "./dist/@classic/js/dom/util.js.ts"
   },
   "compilerOptions": {
     "lib": [
