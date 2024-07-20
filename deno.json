@@ -5,10 +5,10 @@
     "./server"
   ],
   "imports": {
+    "@classic/element": "jsr:@classic/element@0",
+    "@classic/js": "jsr:@classic/js@0",
+    "@classic/server": "jsr:@classic/server@0",
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader@^0.10.3",
-    "@classic/element": "jsr:@classic/element@0.1.4",
-    "@classic/js": "jsr:@classic/js@0.1.8",
-    "@classic/server": "jsr:@classic/server@0.1.0",
     "@std/fs": "jsr:@std/fs@^0.229.3",
     "@std/http": "jsr:@std/http@^0.224.5",
     "@std/path": "jsr:@std/path@^0.225.2",

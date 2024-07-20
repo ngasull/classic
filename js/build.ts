@@ -1,5 +1,9 @@
-import { denoPlugins } from "@luca/esbuild-deno-loader";
-import { basename, dirname, join, resolve } from "@std/path";
+import {
+  denoLoaderPlugin,
+  denoResolverPlugin,
+  type DenoResolverPluginOptions,
+} from "@luca/esbuild-deno-loader";
+import { basename, dirname, join, relative, resolve } from "@std/path";
 import { relative as posixRelative } from "@std/path/posix";
 import { exists } from "@std/fs";
 import * as esbuild from "esbuild";
@@ -22,12 +26,19 @@ const mkContext = async (
 
   const externalSet = new Set([...external, ...Object.keys(modules)]);
 
+  const denoOpts: DenoResolverPluginOptions = {
+    configPath: resolve(
+      await exists("deno.jsonc") ? "deno.jsonc" : "deno.json",
+    ),
+  };
+
+  const moduleEntries = Object.entries(modules);
   const moduleByEntry = Object.fromEntries(
-    Object.entries(modules).map(([k, v]) => [v, k]),
+    moduleEntries.map(([k, v]) => [v, k]),
   );
-  const entryPoints = Object.values(modules);
+
   const context = esbuild.context({
-    entryPoints: Object.entries(modules).map(([spec, path]) => ({
+    entryPoints: moduleEntries.map(([spec, path]) => ({
       in: path,
       out: spec,
     })),
@@ -54,11 +65,27 @@ const mkContext = async (
           }
         },
       } satisfies esbuild.Plugin,
-      ...denoPlugins({
-        configPath: resolve(
-          await exists("deno.jsonc") ? "deno.jsonc" : "deno.json",
-        ),
+
+      denoResolverPlugin(denoOpts),
+
+      {
+        // Entry modules importing each other relatively should refer as external
+        name: "entry-to-external",
+        setup(build) {
+          build.onResolve({ filter: /^/ }, (r) => {
+            const m = r.kind !== "entry-point" &&
+              moduleByEntry[relative(".", r.path)];
+            if (m) return { external: true, path: `${externalPrefix}${m}.js` };
+          });
+        },
+      } satisfies esbuild.Plugin,
+
+      denoLoaderPlugin({
+        ...denoOpts,
+        // Portable loader doesn't rewrite deno.lock
+        loader: "portable",
       }),
+
       {
         name: "generate-ts-bindings",
         setup(build) {
@@ -91,7 +118,8 @@ const mkContext = async (
               const [outPath, { entryPoint, imports, exports }] of outputEntries
             ) {
               if (
-                entryPoint && entryPoints.includes(entryPoint) &&
+                entryPoint &&
+                moduleByEntry[entryPoint] &&
                 outPath.endsWith(".js")
               ) {
                 const dir = dirname(outPath);

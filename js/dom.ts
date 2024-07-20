@@ -1,6 +1,6 @@
-import { isFunction } from "@classic/js/dom/util";
 import { registerCleanup } from "./dom/lifecycle.ts";
 import { store } from "./dom/store.ts";
+import { isFunction } from "./dom/util.ts";
 
 /**
  * Tuple holding refs attached to a jsx tree render.
