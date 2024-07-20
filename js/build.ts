@@ -114,9 +114,7 @@ const mkContext = async (
               ),
             );
 
-            for (
-              const [outPath, { entryPoint, imports, exports }] of outputEntries
-            ) {
+            for (const [outPath, { entryPoint, imports }] of outputEntries) {
               if (
                 entryPoint &&
                 moduleByEntry[entryPoint] &&
@@ -152,14 +150,6 @@ const mkContext = async (
                   )
                   .replaceAll(/[/\\[\]()-]/g, "");
 
-                const exportLines = exports.flatMap((x) =>
-                  x === "default"
-                    ? []
-                    : `export const ${x}: 𐏑JS<𐏑M[${
-                      JSON.stringify(x)
-                    }]> = ${exportName}[${JSON.stringify(x)}];`
-                );
-
                 Deno.writeTextFile(
                   `${join(dir, basename(moduleName))}.js.ts`,
                   `import { type JS as 𐏑JS, js as 𐏑js } from "@classic/js";${
@@ -170,6 +160,9 @@ type 𐏑M = typeof import(${
                     JSON.stringify("./" + posixRelative(dir, entryPoint))
                   });
 
+/**
+ * Server wrapper for \`${moduleName}\`
+ */
 const ${exportName}: 𐏑JS<𐏑M> = 𐏑js.module(
   ${JSON.stringify(moduleName)},
   import.meta.resolve(${JSON.stringify(`./${basename(outPath)}`)}),
@@ -177,8 +170,6 @@ const ${exportName}: 𐏑JS<𐏑M> = 𐏑js.module(
 );
 
 export default ${exportName};
-
-${exportLines.join("\n")}
 `,
                 );
               }

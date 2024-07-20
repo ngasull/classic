@@ -4,7 +4,7 @@ import {
   type ServedJSContext,
 } from "@classic/js";
 import { accepts } from "@std/http";
-import { init as initJs } from "./dist/@classic/router.js.ts";
+import client from "./dist/@classic/router.js.ts";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import {
   $effects,
@@ -282,7 +282,7 @@ class Segment<
 
         const context = initContext(use);
         if (i === 0 && !reqFrom) {
-          context.provide($effects, [initJs() as JSable<void>]);
+          context.provide($effects, [client.init() as JSable<void>]);
         }
 
         stream = render(

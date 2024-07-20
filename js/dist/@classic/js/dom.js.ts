@@ -3,6 +3,9 @@ import 𐏑0 from "./dom/util.js.ts";
 
 type 𐏑M = typeof import("./../../../dom.ts");
 
+/**
+ * Server wrapper for `@classic/js/dom`
+ */
 const dom: 𐏑JS<𐏑M> = 𐏑js.module(
   "@classic/js/dom",
   import.meta.resolve("./dom.js"),
@@ -10,7 +13,3 @@ const dom: 𐏑JS<𐏑M> = 𐏑js.module(
 );
 
 export default dom;
-
-export const refs: 𐏑JS<𐏑M["refs"]> = dom["refs"];
-export const store: 𐏑JS<𐏑M["store"]> = dom["store"];
-export const sub: 𐏑JS<𐏑M["sub"]> = dom["sub"];
