@@ -14,7 +14,7 @@ import {
   NULL,
   querySelectorAll,
   UNDEFINED,
-} from "@classic/util";
+} from "@classic/js/dom/util";
 
 const $disconnectCallbacks: unique symbol = $() as never;
 const $internals: unique symbol = $() as never;

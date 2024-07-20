@@ -14,7 +14,7 @@ import {
   replaceWith,
   TRUE,
   win,
-} from "@classic/util";
+} from "@classic/js/dom/util";
 
 const suspenseDelay = 500;
 

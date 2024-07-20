@@ -1,3 +1,4 @@
+import domApi from "./dist/@classic/js/dom.js.ts";
 import type {
   Activation,
   Fn,
@@ -1035,11 +1036,6 @@ class JSMetaRefStore extends JSMeta {
 
 type DomApi = typeof import("./dom.ts");
 
-const domApi: JS<DomApi> = js.module<typeof import("./dom.ts")>(
-  "@classic/dom",
-  import.meta.resolve("../dist/dom.js"),
-  // { imports: js. }
-);
 const domStore = domApi.store;
 
 // Memoized version of the API, ensuring static JS references

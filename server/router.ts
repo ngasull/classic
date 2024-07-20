@@ -4,7 +4,7 @@ import {
   type ServedJSContext,
 } from "@classic/js";
 import { accepts } from "@std/http";
-import { init as initJs } from "../dist/@classic/router.js.ts";
+import { init as initJs } from "./dist/@classic/router.js.ts";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import {
   $effects,

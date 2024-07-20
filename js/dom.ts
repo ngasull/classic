@@ -1,4 +1,4 @@
-import { isFunction } from "@classic/util";
+import { isFunction } from "@classic/js/dom/util";
 import { registerCleanup } from "./dom/lifecycle.ts";
 import { store } from "./dom/store.ts";
 

@@ -1,4 +1,4 @@
-import { isFunction } from "@classic/util";
+import { isFunction } from "@classic/js/dom/util";
 
 export type Signal<T> = readonly [() => T, (v: T) => void];
 

@@ -2,14 +2,12 @@
   "workspace": [
     "./element",
     "./js",
-    "./server",
-    "./util"
+    "./server"
   ],
   "imports": {
     "@classic/element": "jsr:@classic/element@0.1",
     "@classic/js": "jsr:@classic/js@0.1",
     "@classic/server": "jsr:@classic/server@0.1",
-    "@classic/util": "jsr:@classic/util@0.1",
     "@luca/esbuild-deno-loader-original": "jsr:@luca/esbuild-deno-loader@^0.10.3",
     "@luca/esbuild-deno-loader": "../esbuild_deno_loader/mod.ts",
     "@std/fs": "jsr:@std/fs@^0.229.3",
@@ -37,7 +35,7 @@
     "build": "deno run -A build.ts",
     "npm": "deno run -A script/build_npm.ts",
     "test": "deno test --allow-read --allow-env --allow-run",
-    "clean": "rm -rf npm dist"
+    "clean": "rm -rf npm */dist"
   },
   "exclude": [
     ".git",
@@ -48,9 +46,8 @@
       "LICENSE",
       "README.md",
       "*/README.md",
-      "dist/**/*.js",
-      "dist/**/*.js.map",
-      "**/*.ts"
+      "**/*.[jt]s",
+      "**/*.js.map"
     ],
     "exclude": [
       "build.ts"

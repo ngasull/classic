@@ -1,4 +1,4 @@
-import { deepMap, doc, entries, listen, NULL } from "@classic/util";
+import { deepMap, doc, entries, listen, NULL } from "@classic/js/dom/util";
 import type { Classic, CustomElement } from "./element.ts";
 import { type Children, renderChildren } from "./element.ts";
 import type { JSXInternal } from "./jsx-dom.d.ts";

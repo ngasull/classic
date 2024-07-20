@@ -20,7 +20,7 @@ const mkContext = async (
     .then((metaJson) => JSON.parse(metaJson) as esbuild.Metafile)
     .catch(() => undefined);
 
-  external = [...external, ...Object.keys(modules)];
+  const externalSet = new Set([...external, ...Object.keys(modules)]);
 
   const moduleByEntry = Object.fromEntries(
     Object.entries(modules).map(([k, v]) => [v, k]),
@@ -42,7 +42,7 @@ const mkContext = async (
       {
         name: "external-js",
         setup(build) {
-          for (const x of new Set(external)) {
+          for (const x of externalSet) {
             build.onResolve({
               filter: new RegExp(
                 `^${x.replaceAll(/[\\.[\]()]/g, (m) => "\\" + m)}(?:$|/)`,
@@ -80,28 +80,41 @@ const mkContext = async (
             prevMeta = result.metafile;
             await Deno.writeTextFile(metaPath, JSON.stringify(prevMeta));
 
+            const outputEntries = Object.entries(prevMeta.outputs);
+            const outPathByModule = Object.fromEntries(
+              outputEntries.flatMap(([outPath, { entryPoint }]) =>
+                entryPoint ? [[moduleByEntry[entryPoint], outPath]] : []
+              ),
+            );
+
             for (
-              const [outPath, { entryPoint, imports, exports }] of Object
-                .entries(prevMeta.outputs)
+              const [outPath, { entryPoint, imports, exports }] of outputEntries
             ) {
               if (
                 entryPoint && entryPoints.includes(entryPoint) &&
                 outPath.endsWith(".js")
               ) {
+                const dir = dirname(outPath);
                 const moduleName = moduleByEntry[entryPoint];
 
                 const externalModules = [
                   ...new Set(
-                    imports.flatMap((i) =>
-                      i.path.startsWith(externalPrefix)
-                        ? i.path.slice(externalPrefix.length, -3)
-                        : []
-                    ),
+                    imports.flatMap((i) => {
+                      const m = i.path.startsWith(externalPrefix) &&
+                        i.path.slice(externalPrefix.length, -3);
+                      return m && externalSet.has(m) ? m : [];
+                    }),
                   ),
                 ];
 
                 const importModules = externalModules.map((m, i) =>
-                  `\nimport 𐏑${i} from ${JSON.stringify(m + "/js")};`
+                  `\nimport 𐏑${i} from ${
+                    JSON.stringify(
+                      outPathByModule[m]
+                        ? `./${posixRelative(dir, outPathByModule[m])}.ts`
+                        : m + "/js",
+                    )
+                  };`
                 );
 
                 const exportName = basename(moduleName)
@@ -118,8 +131,6 @@ const mkContext = async (
                       JSON.stringify(x)
                     }]> = ${exportName}[${JSON.stringify(x)}];`
                 );
-
-                const dir = dirname(outPath);
 
                 Deno.writeTextFile(
                   `${join(dir, basename(moduleName))}.js.ts`,

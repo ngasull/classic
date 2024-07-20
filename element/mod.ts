@@ -16,4 +16,4 @@ export { ref, svgns } from "./jsx-runtime.ts";
 
 export type { Tagged } from "./jsx-runtime.ts";
 
-export { eventType, html, listen } from "@classic/util";
+export { eventType, html, listen } from "@classic/js/dom/util";

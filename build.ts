@@ -1,14 +1,18 @@
-import { build, type BuildOpts } from "./js/build.ts";
-
-export const opts: BuildOpts = {
-  modules: {
-    "@classic/dom": "js/dom.ts",
-    "@classic/router": "server/client-router.ts",
-    "@classic/util": "util/util.ts",
-  },
-  outdir: "dist",
-};
+import { build } from "./js/build.ts";
 
 if (import.meta.main) {
-  await build(opts);
+  await build({
+    modules: {
+      "@classic/js/dom": "js/dom.ts",
+      "@classic/js/dom/util": "js/dom/util.ts",
+    },
+    outdir: "js/dist",
+  });
+  await build({
+    modules: {
+      "@classic/router": "server/client-router.ts",
+    },
+    external: ["@classic/js/dom", "@classic/js/dom/util"],
+    outdir: "server/dist",
+  });
 }
