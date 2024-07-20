@@ -222,7 +222,7 @@ class Segment<
   async fetch(
     req: Request,
     { context, js = globalServedJSContext }: {
-      context?: JSXContextInit<unknown>[] | undefined;
+      context?: JSXContextInit<unknown>[] | JSXContextAPI | undefined;
       js?: ServedJSContext | boolean;
     } = {},
   ): Promise<Response | void> {
