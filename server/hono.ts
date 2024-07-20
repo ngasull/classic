@@ -22,21 +22,3 @@ async (c, next) =>
     ...opts,
   }) ??
     next();
-
-type FakePath<P> = P extends
-  [infer H extends string, ...infer T extends string[]] ? `/:${H}${FakePath<T>}`
-  : ``;
-
-// https://www.hacklewayne.com/typescript-convert-union-to-tuple-array-yes-but-how
-type Contra<T> = T extends any ? (arg: T) => void
-  : never;
-
-type InferContra<T> = [T] extends [(arg: infer I) => void] ? I
-  : never;
-
-type PickOne<T> = InferContra<InferContra<Contra<Contra<T>>>>;
-
-type Union2Tuple<T> = PickOne<T> extends infer U
-  ? Exclude<T, U> extends never ? [T]
-  : [...Union2Tuple<Exclude<T, U>>, U]
-  : never;
