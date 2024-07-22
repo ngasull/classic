@@ -17,11 +17,9 @@
     "hono/types": "jsr:@hono/hono@^4.4.8/types"
   },
   "tasks": {
-    "dev": "deno run -A dev.ts",
-    "build": "deno run -A build.ts",
     "npm": "deno run -A script/build_npm.ts",
     "test": "deno test --allow-read --allow-env --allow-run",
-    "clean": "rm -rf npm */dist"
+    "clean": "rm -rf npm"
   },
   "exclude": [
     ".git",

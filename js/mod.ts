@@ -1,10 +1,8 @@
 export {
-  client,
-  globalServedJSContext,
+  createServedContext,
   indexedUris,
   inline,
   js,
-  jsPublicPath,
   jsResources,
   mkRef,
   ServedJSContext,

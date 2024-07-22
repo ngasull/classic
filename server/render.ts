@@ -1,5 +1,4 @@
 import {
-  client,
   type Fn,
   indexedUris,
   inline,
@@ -10,6 +9,7 @@ import {
   jsResources,
   mkRef,
   type RefTree,
+  type ServedJSContext,
   toJS,
   unsafe,
 } from "@classic/js";
@@ -75,27 +75,17 @@ export const render = (
 
       if (!ctx.get($effects)) ctx.provide($effects, []);
       const effects = ctx($effects);
+      const served = ctx.get($served);
 
       const write = (chunk: Uint8Array) => controller.enqueue(chunk);
       const tree = domNodes(root, ctx);
 
-      writeDOMTree(tree, { effects, write, ...opts }, true)
+      writeDOMTree(tree, { served, effects, write, ...opts }, true)
         .finally(() => {
           controller.close();
         });
     },
   });
-
-// const init = await Promise.race([
-//   ctx($initResponse).promise,
-//   streamPromise!,
-// ]) ?? {};
-// if (init instanceof Response) return init;
-// init.headers ??= {};
-// (init.headers as Record<string, string>)["Content-Type"] =
-//   "text/html; charset=UTF-8";
-
-// return new Response(stream, init);
 
 export const createContext = <T>(name?: string): JSXContext<T> => {
   const $ = Symbol(name);
@@ -156,18 +146,38 @@ const contextProto = {
 
 export const $effects = createContext<JSable<void>[]>("effect");
 
+export const $served = createContext<ServedJSContext>("served");
+
+export const $client = <T>(name: string) => (use: JSXContextAPI): JS<T> => {
+  const module = use($served).getModule(name);
+  if (!module) {
+    throw Error(
+      `${name} needs to be added to your client modules configuration`,
+    );
+  }
+  return module as JS<T>;
+};
+
 const activate = async (
   refs: RefTree,
   opts: {
+    served?: ServedJSContext;
     effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },
 ): Promise<DOMNode | void> => {
-  const { effects } = opts;
+  const { effects, served } = opts;
   if (effects.length) {
+    if (!served) {
+      effects.splice(0, effects.length);
+      return console.error(
+        `Can't attach JS to refs: no served JS context is provided`,
+      );
+    }
+
     const [activationScript] = await toJS(
       () => effects,
-      { refs: refs.length ? ["$", refs] : true },
+      { served, refs: refs.length ? ["$", refs] : true },
     );
 
     effects.splice(0, effects.length);
@@ -192,6 +202,7 @@ const writeDOMTree = async (
   tree: Iterable<DOMNode> | AsyncIterable<DOMNode>,
   opts: {
     doctype?: boolean;
+    served?: ServedJSContext;
     effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },
@@ -385,20 +396,6 @@ const domNodes = async function* (
           effects.push(subAttribute(uris, node.ref, name, () => inline(expr)));
         }
       }
-
-      // if (tag === "head") {
-      //   yield {
-      //     kind: DOMNodeKind.Tag,
-      //     tag: "script",
-      //     attributes: new Map([["type", "importmap"]]),
-      //     children: [{
-      //       kind: DOMNodeKind.Text,
-      //       text: `{"scopes":{"/.js/":{"/":"/.js/"}}}`,
-      //       ref: mkRef(),
-      //     }],
-      //     ref: node.ref,
-      //   };
-      // }
 
       return yield {
         kind: DOMNodeKind.Tag,

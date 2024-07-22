@@ -1,13 +1,10 @@
-import {
-  globalServedJSContext,
-  type JSable,
-  type ServedJSContext,
-} from "@classic/js";
+import { type JSable, type ServedJSContext } from "@classic/js";
 import { accepts } from "@std/http";
-import client from "./dist/@classic/router.js.ts";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import {
+  $client,
   $effects,
+  $served,
   createContext,
   Html,
   initContext,
@@ -221,21 +218,14 @@ class Segment<
 
   async fetch(
     req: Request,
-    { context, js = globalServedJSContext }: {
+    { context, js: jsContext }: {
       context?: JSXContextInit<unknown>[] | JSXContextAPI | undefined;
-      js?: ServedJSContext | boolean;
-    } = {},
+      js: ServedJSContext;
+    },
   ): Promise<Response | void> {
-    const jsContext = typeof js === "boolean"
-      ? js ? globalServedJSContext : null
-      : js;
-    if (jsContext) {
-      const moduleRes = await jsContext.fetch(req);
-      if (moduleRes) return moduleRes;
-    }
-
     const use = initContext(context);
     use.provide($initResponse, {});
+    use.provide($served, jsContext);
 
     const acceptsHtml = req.method === "GET" &&
       accepts(req).includes("text/html");
@@ -282,7 +272,13 @@ class Segment<
 
         const context = initContext(use);
         if (i === 0 && !reqFrom) {
-          context.provide($effects, [client.init() as JSable<void>]);
+          context.provide($effects, [
+            use(
+              $client<typeof import("./client-router.ts")>(
+                "@classic/server/client/router",
+              ),
+            ).init() as JSable<void>,
+          ]);
         }
 
         stream = render(
