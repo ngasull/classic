@@ -12,9 +12,9 @@ export const $hono = (use: JSXContextAPI): Context => use(honoContext);
 export const classicRouter = <E extends Env, P extends string, I extends Input>(
   router: Segment<never, never, undefined>,
   { context = () => [], ...opts }: {
+    js: ServedJSContext;
     context?: (c: Context<E, P, I>) => JSXContextInit<unknown>[];
-    js?: ServedJSContext;
-  } = {},
+  },
 ): MiddlewareHandler<E, P, I> =>
 async (c, next) =>
   await router.fetch(c.req.raw, {

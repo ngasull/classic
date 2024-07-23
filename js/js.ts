@@ -866,7 +866,7 @@ export class ServedJSContext {
 
   #base!: string;
   #servedPathRegExp!: RegExp;
-  get base() {
+  get base(): string {
     return this.#base;
   }
   set base(base: string) {
@@ -921,7 +921,7 @@ export class ServedJSContext {
   }
 }
 
-export const createServedContext = () => new ServedJSContext();
+export const createServedContext = (): ServedJSContext => new ServedJSContext();
 
 class JSMetaModule extends JSMeta {
   constructor(

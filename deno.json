@@ -1,13 +1,17 @@
 {
   "workspace": [
+    "./build",
     "./element",
     "./js",
-    "./server"
+    "./server",
+    "./util"
   ],
   "imports": {
+    "@classic/build": "jsr:@classic/build@0",
     "@classic/element": "jsr:@classic/element@0",
     "@classic/js": "jsr:@classic/js@0",
     "@classic/server": "jsr:@classic/server@0",
+    "@classic/util": "jsr:@classic/util@0",
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader@^0.10.3",
     "@std/fs": "jsr:@std/fs@^0.229.3",
     "@std/http": "jsr:@std/http@^0.224.5",

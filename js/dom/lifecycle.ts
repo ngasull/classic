@@ -6,7 +6,7 @@ import {
   listen,
   reverseForOf,
   stopPropagation,
-} from "./util.ts";
+} from "@classic/util";
 
 const trackEvent = eventType<() => void>({ type: "lf-t" });
 const untrackEvent = eventType({ type: "lf-u" });

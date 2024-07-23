@@ -1,4 +1,5 @@
 import {
+  client,
   type Fn,
   indexedUris,
   inline,

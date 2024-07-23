@@ -1,4 +1,4 @@
-import { call, entries, forEach, isFunction } from "./util.ts";
+import { call, entries, forEach, isFunction } from "@classic/util";
 
 type JSONLiteral = string | number | boolean | null;
 

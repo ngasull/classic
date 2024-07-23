@@ -1,3 +1,4 @@
+import type { ServedJSContext } from "@classic/js";
 import { denoPlugins } from "@luca/esbuild-deno-loader";
 import { dirname, join, resolve, SEPARATOR, toFileUrl } from "@std/path";
 import {
@@ -6,15 +7,22 @@ import {
 } from "@std/path/posix";
 import { exists } from "@std/fs";
 import * as esbuild from "esbuild";
-import { ServedJSContext } from "./js.ts";
 
 const externalPrefix = `..${SEPARATOR}`;
 const toPosix = SEPARATOR === "/"
   ? (p: string) => p
   : (p: string) => p.replaceAll(SEPARATOR, "/");
 
-export const buildAppClient = async (
-  opts: ContextOpts & { readonly outDir: string },
+export type JSContextOpts = {
+  readonly modules: string[];
+  readonly clientDir: string;
+  readonly clientFile: string;
+  readonly external?: string[];
+  readonly outDir?: string;
+};
+
+export const buildJSContext = async (
+  opts: JSContextOpts & { readonly outDir: string },
 ): Promise<void> => {
   const context = await mkContext(opts);
   try {
@@ -28,13 +36,18 @@ export const buildAppClient = async (
   }
 };
 
-export const devAppClient = async (
-  { host = "127.0.0.1", port, ...opts }: ContextOpts & {
+export const loadJSContext = (
+  { clientFile }: Pick<JSContextOpts, "clientFile">,
+): Promise<ServedJSContext> =>
+  import(toFileUrl(resolve(clientFile)).href).then(({ servedJS }) => servedJS);
+
+export const devJSContext = async (
+  { host = "127.0.0.1", port, ...opts }: JSContextOpts & {
     readonly host?: string;
     readonly port?: number;
   },
 ): Promise<{
-  served: ServedJSContext;
+  servedJS: ServedJSContext;
   host: string;
   port: number;
   hmr: string;
@@ -45,11 +58,12 @@ export const devAppClient = async (
   const server = await context.serve({ host, port });
 
   await context.rebuild();
-  const { served } = await import(toFileUrl(resolve(opts.clientFile)).href);
+  const servedJS = await loadJSContext(opts);
+  servedJS.base = `http://${server.host}:${server.port}/`;
 
   return {
     ...server,
-    served,
+    servedJS,
     get hmr() {
       return `new EventSource("http://${server.host}:${server.port}/esbuild").addEventListener("change", () => location.reload());`;
     },
@@ -60,17 +74,8 @@ export const devAppClient = async (
   };
 };
 
-type ContextOpts = {
-  readonly modules: string[];
-  readonly clientDir: string;
-  readonly clientFile: string;
-  readonly external?: string[];
-  readonly outDir?: string;
-};
-
-const mkContext = async (opts: ContextOpts) => {
+const mkContext = async (opts: JSContextOpts) => {
   const { modules, external, clientDir, clientFile, outDir } = opts;
-  let prevClient: string | Promise<string> = Deno.readTextFile(clientFile);
   return esbuild.context({
     entryPoints: [...modules, join(clientDir, "*")],
     external,
@@ -94,6 +99,8 @@ const mkContext = async (opts: ContextOpts) => {
       {
         name: "generate-ts-bindings",
         setup(build) {
+          let prevClient: string | Promise<string> = Deno
+            .readTextFile(clientFile).catch((_) => "");
           build.onEnd(async (result) => {
             if (!result.metafile) return;
 
@@ -144,7 +151,7 @@ const mkContext = async (opts: ContextOpts) => {
             const newClient =
               `import { createServedContext, type JS } from "@classic/js";
 
-export const served = createServedContext();
+export const servedJS = createServedContext();
 
 type Client = {${
                 outs.map(({ moduleName, modulePath }) =>
@@ -160,7 +167,7 @@ type Client = {${
  */
 export const client: Client = {${
                 outs.map(({ moduleName, modulePath, outPath }) =>
-                  `\n  ${JSON.stringify(moduleName)}: served.add(
+                  `\n  ${JSON.stringify(moduleName)}: servedJS.add(
     ${JSON.stringify(moduleName)},
     import.meta.resolve(${JSON.stringify(modulePath)}),
     ${JSON.stringify(outPath)},

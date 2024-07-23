@@ -9,26 +9,28 @@ export type RefTree =
 
 export type JS<T> = _JS<T, []>;
 
-type _JS<T, Depth extends unknown[]> = JSable<T> & _JSProxy<T, Depth>;
-
-type _JSProxy<T, Depth extends unknown[]> = T extends NonNullable<JSPrimitive>
-  ? { [K in keyof PrimitivePrototype<T>]: JS<PrimitivePrototype<T>[K]> }
-  : JSOverride<T> extends never ? (
-      & (T extends (...args: infer Args) => infer Ret ? (
-          <R = Ret>(...args: { [I in keyof Args]: JSArg<Args[I]> }) => JS<R>
-        )
-        : T extends unknown[] ? Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
-          : { [I in keyof T]: _JS<T[I], [0, ...Depth]> }
-        : unknown)
-      & (Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
-        : T extends Record<any, any> ? (
-            // Only map actual objects to avoid polluting debugging
-            Record<any, never> extends T ? unknown
-              : { [K in keyof T]: _JS<T[K], [0, ...Depth]> }
+type _JS<T, Depth extends unknown[]> =
+  & JSable<T>
+  & (T extends string ? JS<typeof String["prototype"]>
+    : T extends number ? JS<typeof Number["prototype"]>
+    : T extends bigint ? JS<typeof BigInt["prototype"]>
+    : T extends boolean ? JS<typeof Boolean["prototype"]>
+    : JSOverride<T> extends never ? (
+        & (T extends (...args: infer Args) => infer Ret ? (
+            <R = Ret>(...args: { [I in keyof Args]: JSArg<Args[I]> }) => JS<R>
           )
-        : unknown)
-    )
-  : JSOverride<T>;
+          : T extends unknown[] ? Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
+            : { [I in keyof T]: _JS<T[I], [0, ...Depth]> }
+          : unknown)
+        & (Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
+          : T extends Record<any, any> ? (
+              // Only map actual objects to avoid polluting debugging
+              Record<any, never> extends T ? unknown
+                : { [K in keyof T]: _JS<T[K], [0, ...Depth]> }
+            )
+          : unknown)
+      )
+    : JSOverride<T>);
 
 export type JSArg<Arg> = _JSArg<Arg, []>;
 
@@ -44,13 +46,6 @@ type _JSArg<Arg, Depth extends unknown[]> =
     ? Fn<AArgs, AR>
     : Arg extends JSONable ? Arg
     : never);
-
-type PrimitivePrototype<T extends NonNullable<JSPrimitive>> = T extends string
-  ? typeof String["prototype"]
-  : T extends number ? typeof Number["prototype"]
-  : T extends bigint ? typeof BigInt["prototype"]
-  : T extends boolean ? typeof Boolean["prototype"]
-  : never;
 
 type JSArgUnion = JSMapped | JSFunction | JSPrimitive;
 type JSPrimitive = string | number | bigint | boolean | null | undefined;

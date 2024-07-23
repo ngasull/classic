@@ -1,7 +1,6 @@
 export { css, define, onDisconnect, useInternals } from "./element.ts";
 
 export type {
-  Classic,
   CSSRules,
   CustomElement,
   ElementProps,
@@ -12,8 +11,6 @@ export { onChange, signal, track } from "./signal.ts";
 
 export type { Signal } from "./signal.ts";
 
-export { ref, svgns } from "./jsx-runtime.ts";
+export { ref, svgns } from "./jsx.ts";
 
-export type { Tagged } from "./jsx-runtime.ts";
-
-export { eventType, html, listen } from "@classic/js/dom/util";
+export type { Classic } from "./jsx.ts";

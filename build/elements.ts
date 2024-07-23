@@ -3,34 +3,37 @@ import {
   denoResolverPlugin,
 } from "@luca/esbuild-deno-loader";
 import { exists } from "@std/fs";
-import { fromFileUrl, relative, resolve } from "@std/path";
+import { join, relative, resolve, SEPARATOR } from "@std/path";
 import * as esbuild from "esbuild";
 
-export type ClassicBundle = {
+export type ElementsBundle = {
   // **Not** readonly (dev mode)
   js: Promise<Uint8Array>;
   css: Promise<Uint8Array | undefined>;
 };
 
-export const bundle = async (
-  entryPoints: string[],
-  { denoJsonPath, transformCss }: {
-    denoJsonPath?: string;
-    transformCss?: (css: string) => string;
-  } = {},
-): Promise<{ readonly js: Uint8Array; readonly css?: Uint8Array }> => {
+export const buildElements = async (
+  {
+    elementsDir,
+    elementsDeclarationFile,
+    extraModules = [],
+    denoJsonPath,
+    transformCss,
+  }: BuildElementsOpts & {
+    readonly transformCss?: (css: string) => string;
+  },
+): Promise<{ js: Uint8Array; css?: Uint8Array }> => {
+  const elementFiles: string[] = [];
+  for await (const { name, isFile } of Deno.readDir(elementsDir)) {
+    if (isFile && tsRegExp.test(name)) {
+      elementFiles.push(`${elementsDir}/${name}`);
+    }
+  }
+
   const result = await esbuild.build({
     stdin: {
-      contents: entryPoints
-        .map((p) =>
-          `import ${
-            JSON.stringify(
-              p.match(/^\.\.?\//)
-                ? resolve(p)
-                : fromFileUrl(import.meta.resolve(p)),
-            )
-          };`
-        )
+      contents: [...elementFiles, ...extraModules]
+        .map((p) => `import ${JSON.stringify(`./${toPosix(p)}`)};`)
         .join("\n"),
       loader: "js",
       resolveDir: ".",
@@ -63,7 +66,10 @@ export const bundle = async (
         },
       },
       ...await resolvePlugins(denoJsonPath),
-      ...(transformCss
+      ...elementsDeclarationFile
+        ? [genTypesPlugin(elementsDir, elementsDeclarationFile)]
+        : [],
+      ...transformCss
         ? [
           {
             name: "transform-tagged-css",
@@ -84,7 +90,7 @@ export const bundle = async (
             },
           } satisfies esbuild.Plugin,
         ]
-        : []),
+        : [],
     ],
   });
   await esbuild.stop();
@@ -107,35 +113,46 @@ export const bundle = async (
       }
       return [ext, contents];
     }),
-  ) as { readonly js: Uint8Array; readonly css?: Uint8Array };
+  ) as { js: Uint8Array; css?: Uint8Array };
 };
 
-export type DevServer = Readonly<{
-  stop: () => Promise<void>;
-  bundle: ClassicBundle;
-  hmr: string;
-}>;
+export type BuildElementsOpts = {
+  readonly elementsDir: string;
+  readonly elementsDeclarationFile?: string;
+  readonly extraModules?: string[];
+  readonly denoJsonPath?: string;
+};
 
-export const serveDev = async (
-  entryPoints: string[],
-  { denoJsonPath, host = "localhost", port }: {
-    denoJsonPath?: string;
-    host?: string;
-    port?: number;
-  } = {},
-): Promise<DevServer> => {
+export const devElements = async (
+  {
+    elementsDir,
+    elementsDeclarationFile,
+    extraModules = [],
+    denoJsonPath,
+    host = "localhost",
+    port,
+  }: BuildElementsOpts & {
+    readonly host?: string;
+    readonly port?: number;
+  },
+): Promise<{
+  stop: () => Promise<void>;
+  bundle: ElementsBundle;
+  hmr: string;
+}> => {
   type Result = esbuild.BuildResult<typeof opts>;
   let last: Result | null = null;
   let next = Promise.withResolvers<Result>();
 
   const opts = {
-    entryPoints,
-    entryNames: "[name]-[hash]",
+    entryPoints: [join(elementsDir, "*"), ...extraModules],
+    outbase: elementsDir,
     outdir: ".",
     metafile: true,
     sourcemap: true,
     write: false,
     bundle: true,
+    // entryNames: "[name]-[hash]",
     // splitting: true,
     // format: "esm",
     charset: "utf8",
@@ -154,6 +171,10 @@ export const serveDev = async (
       },
     ],
   } satisfies esbuild.BuildOptions;
+
+  if (elementsDeclarationFile) {
+    opts.plugins.push(genTypesPlugin(elementsDir, elementsDeclarationFile));
+  }
 
   const context = await esbuild.context(opts);
 
@@ -259,6 +280,55 @@ const resolvePlugins = async (
   }
 };
 
+const tsRegExp = /^(.+)\.tsx?$/;
+
 const taggedCssRegExp = /\bcss(`(?:[^\\]\\`|[^`])+`)/g;
 
 const extensionRegExp = /\.([^.]+)$/;
+
+const genTypesPlugin = (
+  elementsDir: string,
+  typesFile: string,
+): esbuild.Plugin => ({
+  name: "generate-types",
+  setup(build) {
+    let prevDef: string | Promise<string> = Deno
+      .readTextFile(typesFile).catch((_) => "");
+
+    build.onEnd(async () => {
+      const elementToSrc: [string, string][] = [];
+      for await (const { name, isFile } of Deno.readDir(elementsDir)) {
+        const match = name.match(tsRegExp);
+        if (isFile && match) {
+          elementToSrc.push([match[1], `./${toPosix(elementsDir)}/${name}`]);
+        }
+      }
+
+      const newDef = `import "@classic/element";
+
+declare module "@classic/element" {
+  namespace Classic {
+    interface Elements {
+${
+        elementToSrc.map(([name, src]) =>
+          `      ${JSON.stringify(name)}: typeof import(${
+            JSON.stringify(src)
+          })["default"];`
+        ).join("\n")
+      }
+    }
+  }
+}
+`;
+
+      if (newDef !== await prevDef) {
+        await Deno.writeTextFile(typesFile, newDef);
+        prevDef = newDef;
+      }
+    });
+  },
+});
+
+const toPosix: (p: string) => string = SEPARATOR === "/"
+  ? (p) => p
+  : (p) => p.replaceAll(SEPARATOR, "/");

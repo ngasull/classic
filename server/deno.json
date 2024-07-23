@@ -4,7 +4,6 @@
   "exports": {
     ".": "./mod.ts",
     "./client/router": "./client-router.ts",
-    "./element": "./serve-element.ts",
     "./hono": "./hono.ts",
     "./jsx-runtime": "./jsx-runtime.ts"
   },

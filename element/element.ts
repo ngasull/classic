@@ -1,4 +1,3 @@
-import { callOrReturn, onChange, signal } from "./signal.ts";
 import {
   $,
   deepMap,
@@ -14,34 +13,29 @@ import {
   NULL,
   querySelectorAll,
   UNDEFINED,
-} from "@classic/js/dom/util";
+} from "@classic/util";
+import { callOrReturn, onChange, signal } from "./signal.ts";
 
 const $disconnectCallbacks: unique symbol = $() as never;
 const $internals: unique symbol = $() as never;
 const $props: unique symbol = $() as never;
 const $propsSet: unique symbol = $() as never;
 declare const $tag: unique symbol;
-
-declare namespace Classic {
-  interface Elements {}
-}
-
-export type { Classic };
-
-type ClassOf<T> = { new (): T; readonly prototype: T };
+declare const $ref: unique symbol;
 
 type CustomTag = `${string}-${string}`;
 
 export type CustomElement<
   Tag extends CustomTag | undefined,
   Props,
-  T = unknown,
-> =
-  & ClassOf<HTMLElement & Props & T>
-  & {
-    [$tag]?: Tag;
-    readonly [$props]: Props;
-  };
+  Ref extends EventTarget = HTMLElement,
+> = {
+  [$tag]?: Tag;
+  readonly [$ref]: Ref;
+  readonly [$props]: Props;
+  new (): Ref;
+  readonly prototype: Ref;
+};
 
 export type TypedHost<Public, Form extends boolean | undefined> =
   & Public
@@ -52,8 +46,8 @@ export type TypedHost<Public, Form extends boolean | undefined> =
   };
 
 export type ElementProps<T> = T extends
-  CustomElement<CustomTag, infer Props, infer Base>
-  ? Partial<Props> & { readonly ref?: (el: HTMLElement & Base) => void }
+  CustomElement<CustomTag, infer Props, infer Ref>
+  ? Partial<Props> & { readonly ref?: (el: Ref) => void }
   : never;
 
 export type Children = Child | readonly Children[];
@@ -84,7 +78,7 @@ export const define = <
     props: Reactive<Props>,
   ) => unknown,
   Props extends PropTypesProps<PropTypes>,
-  Api extends ReturnType<Def>,
+  Ref extends HTMLElement & Props & ReturnType<Def>,
 >(
   name: N,
   { props: propTypes = {} as PropTypes, extends: extendsTag, form, js, css }: {
@@ -100,7 +94,7 @@ export const define = <
     /** Makes `js` run after DOMContentLoaded, ensuring declarative shadow DOM has natively executed */
     // readonly declarative?: Declarative;
   },
-): CustomElement<N, Props, Api> => {
+): CustomElement<N, Props, Ref> => {
   if (!doc) {
     // @ts-ignore stub switch for universal compiling
     return;
@@ -205,7 +199,7 @@ export const define = <
 
   customElements.define(name, ElementClass, { extends: extendsTag });
 
-  return ElementClass as unknown as CustomElement<N, Props, Api>;
+  return ElementClass as unknown as CustomElement<N, Props, Ref>;
 };
 
 export const onDisconnect = (

@@ -111,7 +111,4 @@ const flatten = (children: JSXChildren): JSXElement[] => {
   return fragment;
 };
 
-export const isJsx = (v: unknown): v is JSXElement =>
-  v != null && typeof v === "object" && isJSable((v as any).ref);
-
 export { Fragment, jsx, jsx as jsxDev, jsx as jsxs };

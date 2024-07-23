@@ -1,5 +1,7 @@
 // Modified from source: https://github.com/preactjs/preact/blob/main/src/jsx.d.ts
 
+type Reactive<T> = { [K in keyof T]: T[K] | (() => T[K]) };
+
 type Defaultize<Props, Defaults> =
   // Distribute over unions
   Props extends any // Make any properties included in Default optional
@@ -40,8 +42,7 @@ export namespace JSXInternal {
     cssText?: string | null;
   }
 
-  export interface SVGAttributes<Target extends EventTarget = SVGElement>
-    extends HTMLAttributes<Target> {
+  export interface SVGAttributes {
     accentHeight?:
       | number
       | string
@@ -1086,7 +1087,7 @@ export namespace JSXInternal {
       | string
       | undefined;
     xlinkActuate?: string | undefined;
-    "xlink:actuate"?: SVGAttributes["xlinkActuate"];
+    "xlink:actuate"?: MergedSVGAttributes["xlinkActuate"];
     xlinkArcrole?: string | undefined;
     "xlink:arcrole"?: string | undefined;
     xlinkHref?: string | undefined;
@@ -1114,6 +1115,9 @@ export namespace JSXInternal {
     z?: number | string | undefined;
     zoomAndPan?: string | undefined;
   }
+
+  export interface MergedSVGAttributes<Target extends EventTarget = SVGElement>
+    extends Reactive<SVGAttributes>, MergedHTMLAttributes<Target> {}
 
   export interface PathAttributes {
     d: string;
@@ -1807,18 +1811,13 @@ export namespace JSXInternal {
     | "window"
     | "none presentation";
 
-  export interface HTMLAttributes<RefType extends EventTarget = EventTarget>
-    extends
-      // ClassAttributes<RefType>,
-      DOMAttributes<RefType>,
-      DataAttributes,
-      AriaAttributes {
+  export interface HTMLAttributes {
     // Standard HTML Attributes
     accept?: string | undefined;
     acceptCharset?: string | undefined;
-    "accept-charset"?: HTMLAttributes["acceptCharset"];
+    "accept-charset"?: MergedHTMLAttributes["acceptCharset"];
     accessKey?: string | undefined;
-    accesskey?: HTMLAttributes["accessKey"];
+    accesskey?: MergedHTMLAttributes["accessKey"];
     action?: string | undefined;
     allow?: string | undefined;
     allowFullScreen?: boolean | undefined;
@@ -1854,7 +1853,7 @@ export namespace JSXInternal {
       | "plaintext-only"
       | "inherit"
       | undefined;
-    contenteditable?: HTMLAttributes["contentEditable"];
+    contenteditable?: MergedHTMLAttributes["contentEditable"];
     /** @deprecated See https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/contextmenu */
     contextMenu?: string | undefined;
     /** @deprecated See https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/contextmenu */
@@ -1899,7 +1898,7 @@ export namespace JSXInternal {
       | "send"
       | undefined;
     elementTiming?: string | undefined;
-    elementtiming?: HTMLAttributes["elementTiming"];
+    elementtiming?: MergedHTMLAttributes["elementTiming"];
     exportparts?: string | undefined;
     for?: string | undefined;
     form?: string | undefined;
@@ -2106,8 +2105,17 @@ export namespace JSXInternal {
     itemref?: string | undefined;
   }
 
+  export interface MergedHTMLAttributes<
+    RefType extends EventTarget = EventTarget,
+  > extends
+    // ClassAttributes<RefType>,
+    Reactive<HTMLAttributes>,
+    DOMAttributes<RefType>,
+    DataAttributes,
+    AriaAttributes {}
+
   export type DetailedHTMLProps<
-    HA extends HTMLAttributes<RefType>,
+    HA extends MergedHTMLAttributes<RefType>,
     RefType extends EventTarget = EventTarget,
   > = HA;
 
@@ -2155,8 +2163,7 @@ export namespace JSXInternal {
       | undefined;
   }
 
-  export interface MathMLAttributes<Target extends EventTarget = MathMLElement>
-    extends HTMLAttributes<Target> {
+  export interface MathMLAttributes {
     dir?: "ltr" | "rtl" | undefined;
     displaystyle?: boolean | undefined;
     /** @deprecated This feature is non-standard. See https://developer.mozilla.org/en-US/docs/Web/MathML/Global_attributes/href  */
@@ -2170,6 +2177,12 @@ export namespace JSXInternal {
     nonce?: string | undefined;
     scriptlevel?: string | undefined;
   }
+
+  export interface MergedMathMLAttributes<
+    Target extends EventTarget = MathMLElement,
+  > extends
+    Omit<MergedHTMLAttributes<Target>, keyof MathMLAttributes>,
+    Reactive<MathMLAttributes> {}
 
   export interface HTMLAnnotationElement extends MathMLElement {
     encoding?: string | undefined;
@@ -2448,219 +2461,219 @@ export namespace JSXInternal {
 
   export interface IntrinsicElements {
     // HTML
-    a: HTMLAttributes<HTMLAnchorElement>;
-    abbr: HTMLAttributes<HTMLElement>;
-    address: HTMLAttributes<HTMLElement>;
-    area: HTMLAttributes<HTMLAreaElement>;
-    article: HTMLAttributes<HTMLElement>;
-    aside: HTMLAttributes<HTMLElement>;
-    audio: HTMLAttributes<HTMLAudioElement>;
-    b: HTMLAttributes<HTMLElement>;
-    base: HTMLAttributes<HTMLBaseElement>;
-    bdi: HTMLAttributes<HTMLElement>;
-    bdo: HTMLAttributes<HTMLElement>;
-    big: HTMLAttributes<HTMLElement>;
-    blockquote: HTMLAttributes<HTMLQuoteElement>;
-    body: HTMLAttributes<HTMLBodyElement>;
-    br: HTMLAttributes<HTMLBRElement>;
-    button: HTMLAttributes<HTMLButtonElement>;
-    canvas: HTMLAttributes<HTMLCanvasElement>;
-    caption: HTMLAttributes<HTMLTableCaptionElement>;
-    cite: HTMLAttributes<HTMLElement>;
-    code: HTMLAttributes<HTMLElement>;
-    col: HTMLAttributes<HTMLTableColElement>;
-    colgroup: HTMLAttributes<HTMLTableColElement>;
-    data: HTMLAttributes<HTMLDataElement>;
-    datalist: HTMLAttributes<HTMLDataListElement>;
-    dd: HTMLAttributes<HTMLElement>;
-    del: HTMLAttributes<HTMLModElement>;
-    details: HTMLAttributes<HTMLDetailsElement>;
-    dfn: HTMLAttributes<HTMLElement>;
-    dialog: HTMLAttributes<HTMLDialogElement>;
-    div: HTMLAttributes<HTMLDivElement>;
-    dl: HTMLAttributes<HTMLDListElement>;
-    dt: HTMLAttributes<HTMLElement>;
-    em: HTMLAttributes<HTMLElement>;
-    embed: HTMLAttributes<HTMLEmbedElement>;
-    fieldset: HTMLAttributes<HTMLFieldSetElement>;
-    figcaption: HTMLAttributes<HTMLElement>;
-    figure: HTMLAttributes<HTMLElement>;
-    footer: HTMLAttributes<HTMLElement>;
-    form: HTMLAttributes<HTMLFormElement>;
-    h1: HTMLAttributes<HTMLHeadingElement>;
-    h2: HTMLAttributes<HTMLHeadingElement>;
-    h3: HTMLAttributes<HTMLHeadingElement>;
-    h4: HTMLAttributes<HTMLHeadingElement>;
-    h5: HTMLAttributes<HTMLHeadingElement>;
-    h6: HTMLAttributes<HTMLHeadingElement>;
-    head: HTMLAttributes<HTMLHeadElement>;
-    header: HTMLAttributes<HTMLElement>;
-    hgroup: HTMLAttributes<HTMLElement>;
-    hr: HTMLAttributes<HTMLHRElement>;
-    html: HTMLAttributes<HTMLHtmlElement>;
-    i: HTMLAttributes<HTMLElement>;
-    iframe: HTMLAttributes<HTMLIFrameElement>;
-    img: HTMLAttributes<HTMLImageElement>;
-    input: HTMLAttributes<HTMLInputElement>;
-    ins: HTMLAttributes<HTMLModElement>;
-    kbd: HTMLAttributes<HTMLElement>;
-    keygen: HTMLAttributes<HTMLUnknownElement>;
-    label: HTMLAttributes<HTMLLabelElement>;
-    legend: HTMLAttributes<HTMLLegendElement>;
-    li: HTMLAttributes<HTMLLIElement>;
-    link: HTMLAttributes<HTMLLinkElement>;
-    main: HTMLAttributes<HTMLElement>;
-    map: HTMLAttributes<HTMLMapElement>;
-    mark: HTMLAttributes<HTMLElement>;
-    marquee: HTMLAttributes<HTMLMarqueeElement>;
-    menu: HTMLAttributes<HTMLMenuElement>;
-    menuitem: HTMLAttributes<HTMLUnknownElement>;
-    meta: HTMLAttributes<HTMLMetaElement>;
-    meter: HTMLAttributes<HTMLMeterElement>;
-    nav: HTMLAttributes<HTMLElement>;
-    noscript: HTMLAttributes<HTMLElement>;
-    object: HTMLAttributes<HTMLObjectElement>;
-    ol: HTMLAttributes<HTMLOListElement>;
-    optgroup: HTMLAttributes<HTMLOptGroupElement>;
-    option: HTMLAttributes<HTMLOptionElement>;
-    output: HTMLAttributes<HTMLOutputElement>;
-    p: HTMLAttributes<HTMLParagraphElement>;
-    param: HTMLAttributes<HTMLParamElement>;
-    picture: HTMLAttributes<HTMLPictureElement>;
-    pre: HTMLAttributes<HTMLPreElement>;
-    progress: HTMLAttributes<HTMLProgressElement>;
-    q: HTMLAttributes<HTMLQuoteElement>;
-    rp: HTMLAttributes<HTMLElement>;
-    rt: HTMLAttributes<HTMLElement>;
-    ruby: HTMLAttributes<HTMLElement>;
-    s: HTMLAttributes<HTMLElement>;
-    samp: HTMLAttributes<HTMLElement>;
-    script: HTMLAttributes<HTMLScriptElement>;
-    search: HTMLAttributes<HTMLElement>;
-    section: HTMLAttributes<HTMLElement>;
-    select: HTMLAttributes<HTMLSelectElement>;
-    slot: HTMLAttributes<HTMLSlotElement>;
-    small: HTMLAttributes<HTMLElement>;
-    source: HTMLAttributes<HTMLSourceElement>;
-    span: HTMLAttributes<HTMLSpanElement>;
-    strong: HTMLAttributes<HTMLElement>;
-    style: HTMLAttributes<HTMLStyleElement>;
-    sub: HTMLAttributes<HTMLElement>;
-    summary: HTMLAttributes<HTMLElement>;
-    sup: HTMLAttributes<HTMLElement>;
-    table: HTMLAttributes<HTMLTableElement>;
-    tbody: HTMLAttributes<HTMLTableSectionElement>;
-    td: HTMLAttributes<HTMLTableCellElement>;
-    textarea: HTMLAttributes<HTMLTextAreaElement>;
-    tfoot: HTMLAttributes<HTMLTableSectionElement>;
-    th: HTMLAttributes<HTMLTableCellElement>;
-    thead: HTMLAttributes<HTMLTableSectionElement>;
-    time: HTMLAttributes<HTMLTimeElement>;
-    title: HTMLAttributes<HTMLTitleElement>;
-    tr: HTMLAttributes<HTMLTableRowElement>;
-    track: HTMLAttributes<HTMLTrackElement>;
-    u: HTMLAttributes<HTMLElement>;
-    ul: HTMLAttributes<HTMLUListElement>;
-    var: HTMLAttributes<HTMLElement>;
-    video: HTMLAttributes<HTMLVideoElement>;
-    wbr: HTMLAttributes<HTMLElement>;
+    a: MergedHTMLAttributes<HTMLAnchorElement>;
+    abbr: MergedHTMLAttributes<HTMLElement>;
+    address: MergedHTMLAttributes<HTMLElement>;
+    area: MergedHTMLAttributes<HTMLAreaElement>;
+    article: MergedHTMLAttributes<HTMLElement>;
+    aside: MergedHTMLAttributes<HTMLElement>;
+    audio: MergedHTMLAttributes<HTMLAudioElement>;
+    b: MergedHTMLAttributes<HTMLElement>;
+    base: MergedHTMLAttributes<HTMLBaseElement>;
+    bdi: MergedHTMLAttributes<HTMLElement>;
+    bdo: MergedHTMLAttributes<HTMLElement>;
+    big: MergedHTMLAttributes<HTMLElement>;
+    blockquote: MergedHTMLAttributes<HTMLQuoteElement>;
+    body: MergedHTMLAttributes<HTMLBodyElement>;
+    br: MergedHTMLAttributes<HTMLBRElement>;
+    button: MergedHTMLAttributes<HTMLButtonElement>;
+    canvas: MergedHTMLAttributes<HTMLCanvasElement>;
+    caption: MergedHTMLAttributes<HTMLTableCaptionElement>;
+    cite: MergedHTMLAttributes<HTMLElement>;
+    code: MergedHTMLAttributes<HTMLElement>;
+    col: MergedHTMLAttributes<HTMLTableColElement>;
+    colgroup: MergedHTMLAttributes<HTMLTableColElement>;
+    data: MergedHTMLAttributes<HTMLDataElement>;
+    datalist: MergedHTMLAttributes<HTMLDataListElement>;
+    dd: MergedHTMLAttributes<HTMLElement>;
+    del: MergedHTMLAttributes<HTMLModElement>;
+    details: MergedHTMLAttributes<HTMLDetailsElement>;
+    dfn: MergedHTMLAttributes<HTMLElement>;
+    dialog: MergedHTMLAttributes<HTMLDialogElement>;
+    div: MergedHTMLAttributes<HTMLDivElement>;
+    dl: MergedHTMLAttributes<HTMLDListElement>;
+    dt: MergedHTMLAttributes<HTMLElement>;
+    em: MergedHTMLAttributes<HTMLElement>;
+    embed: MergedHTMLAttributes<HTMLEmbedElement>;
+    fieldset: MergedHTMLAttributes<HTMLFieldSetElement>;
+    figcaption: MergedHTMLAttributes<HTMLElement>;
+    figure: MergedHTMLAttributes<HTMLElement>;
+    footer: MergedHTMLAttributes<HTMLElement>;
+    form: MergedHTMLAttributes<HTMLFormElement>;
+    h1: MergedHTMLAttributes<HTMLHeadingElement>;
+    h2: MergedHTMLAttributes<HTMLHeadingElement>;
+    h3: MergedHTMLAttributes<HTMLHeadingElement>;
+    h4: MergedHTMLAttributes<HTMLHeadingElement>;
+    h5: MergedHTMLAttributes<HTMLHeadingElement>;
+    h6: MergedHTMLAttributes<HTMLHeadingElement>;
+    head: MergedHTMLAttributes<HTMLHeadElement>;
+    header: MergedHTMLAttributes<HTMLElement>;
+    hgroup: MergedHTMLAttributes<HTMLElement>;
+    hr: MergedHTMLAttributes<HTMLHRElement>;
+    html: MergedHTMLAttributes<HTMLHtmlElement>;
+    i: MergedHTMLAttributes<HTMLElement>;
+    iframe: MergedHTMLAttributes<HTMLIFrameElement>;
+    img: MergedHTMLAttributes<HTMLImageElement>;
+    input: MergedHTMLAttributes<HTMLInputElement>;
+    ins: MergedHTMLAttributes<HTMLModElement>;
+    kbd: MergedHTMLAttributes<HTMLElement>;
+    keygen: MergedHTMLAttributes<HTMLUnknownElement>;
+    label: MergedHTMLAttributes<HTMLLabelElement>;
+    legend: MergedHTMLAttributes<HTMLLegendElement>;
+    li: MergedHTMLAttributes<HTMLLIElement>;
+    link: MergedHTMLAttributes<HTMLLinkElement>;
+    main: MergedHTMLAttributes<HTMLElement>;
+    map: MergedHTMLAttributes<HTMLMapElement>;
+    mark: MergedHTMLAttributes<HTMLElement>;
+    marquee: MergedHTMLAttributes<HTMLMarqueeElement>;
+    menu: MergedHTMLAttributes<HTMLMenuElement>;
+    menuitem: MergedHTMLAttributes<HTMLUnknownElement>;
+    meta: MergedHTMLAttributes<HTMLMetaElement>;
+    meter: MergedHTMLAttributes<HTMLMeterElement>;
+    nav: MergedHTMLAttributes<HTMLElement>;
+    noscript: MergedHTMLAttributes<HTMLElement>;
+    object: MergedHTMLAttributes<HTMLObjectElement>;
+    ol: MergedHTMLAttributes<HTMLOListElement>;
+    optgroup: MergedHTMLAttributes<HTMLOptGroupElement>;
+    option: MergedHTMLAttributes<HTMLOptionElement>;
+    output: MergedHTMLAttributes<HTMLOutputElement>;
+    p: MergedHTMLAttributes<HTMLParagraphElement>;
+    param: MergedHTMLAttributes<HTMLParamElement>;
+    picture: MergedHTMLAttributes<HTMLPictureElement>;
+    pre: MergedHTMLAttributes<HTMLPreElement>;
+    progress: MergedHTMLAttributes<HTMLProgressElement>;
+    q: MergedHTMLAttributes<HTMLQuoteElement>;
+    rp: MergedHTMLAttributes<HTMLElement>;
+    rt: MergedHTMLAttributes<HTMLElement>;
+    ruby: MergedHTMLAttributes<HTMLElement>;
+    s: MergedHTMLAttributes<HTMLElement>;
+    samp: MergedHTMLAttributes<HTMLElement>;
+    script: MergedHTMLAttributes<HTMLScriptElement>;
+    search: MergedHTMLAttributes<HTMLElement>;
+    section: MergedHTMLAttributes<HTMLElement>;
+    select: MergedHTMLAttributes<HTMLSelectElement>;
+    slot: MergedHTMLAttributes<HTMLSlotElement>;
+    small: MergedHTMLAttributes<HTMLElement>;
+    source: MergedHTMLAttributes<HTMLSourceElement>;
+    span: MergedHTMLAttributes<HTMLSpanElement>;
+    strong: MergedHTMLAttributes<HTMLElement>;
+    style: MergedHTMLAttributes<HTMLStyleElement>;
+    sub: MergedHTMLAttributes<HTMLElement>;
+    summary: MergedHTMLAttributes<HTMLElement>;
+    sup: MergedHTMLAttributes<HTMLElement>;
+    table: MergedHTMLAttributes<HTMLTableElement>;
+    tbody: MergedHTMLAttributes<HTMLTableSectionElement>;
+    td: MergedHTMLAttributes<HTMLTableCellElement>;
+    textarea: MergedHTMLAttributes<HTMLTextAreaElement>;
+    tfoot: MergedHTMLAttributes<HTMLTableSectionElement>;
+    th: MergedHTMLAttributes<HTMLTableCellElement>;
+    thead: MergedHTMLAttributes<HTMLTableSectionElement>;
+    time: MergedHTMLAttributes<HTMLTimeElement>;
+    title: MergedHTMLAttributes<HTMLTitleElement>;
+    tr: MergedHTMLAttributes<HTMLTableRowElement>;
+    track: MergedHTMLAttributes<HTMLTrackElement>;
+    u: MergedHTMLAttributes<HTMLElement>;
+    ul: MergedHTMLAttributes<HTMLUListElement>;
+    var: MergedHTMLAttributes<HTMLElement>;
+    video: MergedHTMLAttributes<HTMLVideoElement>;
+    wbr: MergedHTMLAttributes<HTMLElement>;
 
     //SVG
-    svg: SVGAttributes<SVGSVGElement>;
-    animate: SVGAttributes<SVGAnimateElement>;
-    circle: SVGAttributes<SVGCircleElement>;
-    animateMotion: SVGAttributes<SVGAnimateMotionElement>;
-    animateTransform: SVGAttributes<SVGAnimateTransformElement>;
-    clipPath: SVGAttributes<SVGClipPathElement>;
-    defs: SVGAttributes<SVGDefsElement>;
-    desc: SVGAttributes<SVGDescElement>;
-    ellipse: SVGAttributes<SVGEllipseElement>;
-    feBlend: SVGAttributes<SVGFEBlendElement>;
-    feColorMatrix: SVGAttributes<SVGFEColorMatrixElement>;
-    feComponentTransfer: SVGAttributes<SVGFEComponentTransferElement>;
-    feComposite: SVGAttributes<SVGFECompositeElement>;
-    feConvolveMatrix: SVGAttributes<SVGFEConvolveMatrixElement>;
-    feDiffuseLighting: SVGAttributes<SVGFEDiffuseLightingElement>;
-    feDisplacementMap: SVGAttributes<SVGFEDisplacementMapElement>;
-    feDistantLight: SVGAttributes<SVGFEDistantLightElement>;
-    feDropShadow: SVGAttributes<SVGFEDropShadowElement>;
-    feFlood: SVGAttributes<SVGFEFloodElement>;
-    feFuncA: SVGAttributes<SVGFEFuncAElement>;
-    feFuncB: SVGAttributes<SVGFEFuncBElement>;
-    feFuncG: SVGAttributes<SVGFEFuncGElement>;
-    feFuncR: SVGAttributes<SVGFEFuncRElement>;
-    feGaussianBlur: SVGAttributes<SVGFEGaussianBlurElement>;
-    feImage: SVGAttributes<SVGFEImageElement>;
-    feMerge: SVGAttributes<SVGFEMergeElement>;
-    feMergeNode: SVGAttributes<SVGFEMergeNodeElement>;
-    feMorphology: SVGAttributes<SVGFEMorphologyElement>;
-    feOffset: SVGAttributes<SVGFEOffsetElement>;
-    fePointLight: SVGAttributes<SVGFEPointLightElement>;
-    feSpecularLighting: SVGAttributes<SVGFESpecularLightingElement>;
-    feSpotLight: SVGAttributes<SVGFESpotLightElement>;
-    feTile: SVGAttributes<SVGFETileElement>;
-    feTurbulence: SVGAttributes<SVGFETurbulenceElement>;
-    filter: SVGAttributes<SVGFilterElement>;
-    foreignObject: SVGAttributes<SVGForeignObjectElement>;
-    g: SVGAttributes<SVGGElement>;
-    image: SVGAttributes<SVGImageElement>;
-    line: SVGAttributes<SVGLineElement>;
-    linearGradient: SVGAttributes<SVGLinearGradientElement>;
-    marker: SVGAttributes<SVGMarkerElement>;
-    mask: SVGAttributes<SVGMaskElement>;
-    metadata: SVGAttributes<SVGMetadataElement>;
-    mpath: SVGAttributes<SVGMPathElement>;
-    path: SVGAttributes<SVGPathElement>;
-    pattern: SVGAttributes<SVGPatternElement>;
-    polygon: SVGAttributes<SVGPolygonElement>;
-    polyline: SVGAttributes<SVGPolylineElement>;
-    radialGradient: SVGAttributes<SVGRadialGradientElement>;
-    rect: SVGAttributes<SVGRectElement>;
-    set: SVGAttributes<SVGSetElement>;
-    stop: SVGAttributes<SVGStopElement>;
-    switch: SVGAttributes<SVGSwitchElement>;
-    symbol: SVGAttributes<SVGSymbolElement>;
-    text: SVGAttributes<SVGTextElement>;
-    textPath: SVGAttributes<SVGTextPathElement>;
-    tspan: SVGAttributes<SVGTSpanElement>;
-    use: SVGAttributes<SVGUseElement>;
-    view: SVGAttributes<SVGViewElement>;
+    svg: MergedSVGAttributes<SVGSVGElement>;
+    animate: MergedSVGAttributes<SVGAnimateElement>;
+    circle: MergedSVGAttributes<SVGCircleElement>;
+    animateMotion: MergedSVGAttributes<SVGAnimateMotionElement>;
+    animateTransform: MergedSVGAttributes<SVGAnimateTransformElement>;
+    clipPath: MergedSVGAttributes<SVGClipPathElement>;
+    defs: MergedSVGAttributes<SVGDefsElement>;
+    desc: MergedSVGAttributes<SVGDescElement>;
+    ellipse: MergedSVGAttributes<SVGEllipseElement>;
+    feBlend: MergedSVGAttributes<SVGFEBlendElement>;
+    feColorMatrix: MergedSVGAttributes<SVGFEColorMatrixElement>;
+    feComponentTransfer: MergedSVGAttributes<SVGFEComponentTransferElement>;
+    feComposite: MergedSVGAttributes<SVGFECompositeElement>;
+    feConvolveMatrix: MergedSVGAttributes<SVGFEConvolveMatrixElement>;
+    feDiffuseLighting: MergedSVGAttributes<SVGFEDiffuseLightingElement>;
+    feDisplacementMap: MergedSVGAttributes<SVGFEDisplacementMapElement>;
+    feDistantLight: MergedSVGAttributes<SVGFEDistantLightElement>;
+    feDropShadow: MergedSVGAttributes<SVGFEDropShadowElement>;
+    feFlood: MergedSVGAttributes<SVGFEFloodElement>;
+    feFuncA: MergedSVGAttributes<SVGFEFuncAElement>;
+    feFuncB: MergedSVGAttributes<SVGFEFuncBElement>;
+    feFuncG: MergedSVGAttributes<SVGFEFuncGElement>;
+    feFuncR: MergedSVGAttributes<SVGFEFuncRElement>;
+    feGaussianBlur: MergedSVGAttributes<SVGFEGaussianBlurElement>;
+    feImage: MergedSVGAttributes<SVGFEImageElement>;
+    feMerge: MergedSVGAttributes<SVGFEMergeElement>;
+    feMergeNode: MergedSVGAttributes<SVGFEMergeNodeElement>;
+    feMorphology: MergedSVGAttributes<SVGFEMorphologyElement>;
+    feOffset: MergedSVGAttributes<SVGFEOffsetElement>;
+    fePointLight: MergedSVGAttributes<SVGFEPointLightElement>;
+    feSpecularLighting: MergedSVGAttributes<SVGFESpecularLightingElement>;
+    feSpotLight: MergedSVGAttributes<SVGFESpotLightElement>;
+    feTile: MergedSVGAttributes<SVGFETileElement>;
+    feTurbulence: MergedSVGAttributes<SVGFETurbulenceElement>;
+    filter: MergedSVGAttributes<SVGFilterElement>;
+    foreignObject: MergedSVGAttributes<SVGForeignObjectElement>;
+    g: MergedSVGAttributes<SVGGElement>;
+    image: MergedSVGAttributes<SVGImageElement>;
+    line: MergedSVGAttributes<SVGLineElement>;
+    linearGradient: MergedSVGAttributes<SVGLinearGradientElement>;
+    marker: MergedSVGAttributes<SVGMarkerElement>;
+    mask: MergedSVGAttributes<SVGMaskElement>;
+    metadata: MergedSVGAttributes<SVGMetadataElement>;
+    mpath: MergedSVGAttributes<SVGMPathElement>;
+    path: MergedSVGAttributes<SVGPathElement>;
+    pattern: MergedSVGAttributes<SVGPatternElement>;
+    polygon: MergedSVGAttributes<SVGPolygonElement>;
+    polyline: MergedSVGAttributes<SVGPolylineElement>;
+    radialGradient: MergedSVGAttributes<SVGRadialGradientElement>;
+    rect: MergedSVGAttributes<SVGRectElement>;
+    set: MergedSVGAttributes<SVGSetElement>;
+    stop: MergedSVGAttributes<SVGStopElement>;
+    switch: MergedSVGAttributes<SVGSwitchElement>;
+    symbol: MergedSVGAttributes<SVGSymbolElement>;
+    text: MergedSVGAttributes<SVGTextElement>;
+    textPath: MergedSVGAttributes<SVGTextPathElement>;
+    tspan: MergedSVGAttributes<SVGTSpanElement>;
+    use: MergedSVGAttributes<SVGUseElement>;
+    view: MergedSVGAttributes<SVGViewElement>;
 
     // MathML See https://developer.mozilla.org/en-US/docs/Web/MathML
-    "annotation-xml": MathMLAttributes<HTMLAnnotationXmlElement>;
-    annotation: MathMLAttributes<HTMLAnnotationElement>;
+    "annotation-xml": MergedMathMLAttributes<HTMLAnnotationXmlElement>;
+    annotation: MergedMathMLAttributes<HTMLAnnotationElement>;
     /** @deprecated See https://developer.mozilla.org/en-US/docs/Web/MathML/Element/maction */
-    maction: MathMLAttributes<HTMLMActionElement>;
-    math: MathMLAttributes<HTMLMathElement>;
+    maction: MergedMathMLAttributes<HTMLMActionElement>;
+    math: MergedMathMLAttributes<HTMLMathElement>;
     /** This feature is non-standard. See https://developer.mozilla.org/en-US/docs/Web/MathML/Element/menclose  */
-    menclose: MathMLAttributes<HTMLMEncloseElement>;
-    merror: MathMLAttributes<HTMLMErrorElement>;
+    menclose: MergedMathMLAttributes<HTMLMEncloseElement>;
+    merror: MergedMathMLAttributes<HTMLMErrorElement>;
     /** @deprecated See https://developer.mozilla.org/en-US/docs/Web/MathML/Element/mfenced */
-    mfenced: HTMLAttributes<HTMLMFencedElement>;
-    mfrac: MathMLAttributes<HTMLMFracElement>;
-    mi: MathMLAttributes<HTMLMiElement>;
-    mmultiscripts: MathMLAttributes<HTMLMmultiScriptsElement>;
-    mn: MathMLAttributes<HTMLMNElement>;
-    mo: MathMLAttributes<HTMLMOElement>;
-    mover: MathMLAttributes<HTMLMOverElement>;
-    mpadded: MathMLAttributes<HTMLMPaddedElement>;
-    mphantom: MathMLAttributes<HTMLMPhantomElement>;
-    mprescripts: MathMLAttributes<HTMLMPrescriptsElement>;
-    mroot: MathMLAttributes<HTMLMRootElement>;
-    mrow: MathMLAttributes<HTMLMRowElement>;
-    ms: MathMLAttributes<HTMLMSElement>;
-    mspace: MathMLAttributes<HTMLMSpaceElement>;
-    msqrt: MathMLAttributes<HTMLMSqrtElement>;
-    mstyle: MathMLAttributes<HTMLMStyleElement>;
-    msub: MathMLAttributes<HTMLMSubElement>;
-    msubsup: MathMLAttributes<HTMLMSubsupElement>;
-    msup: MathMLAttributes<HTMLMSupElement>;
-    mtable: MathMLAttributes<HTMLMTableElement>;
-    mtd: MathMLAttributes<HTMLMTdElement>;
-    mtext: MathMLAttributes<HTMLMTextElement>;
-    mtr: MathMLAttributes<HTMLMTrElement>;
-    munder: MathMLAttributes<HTMLMUnderElement>;
-    munderover: MathMLAttributes<HTMLMUnderoverElement>;
-    semantics: MathMLAttributes<HTMLSemanticsElement>;
+    mfenced: MergedHTMLAttributes<HTMLMFencedElement>;
+    mfrac: MergedMathMLAttributes<HTMLMFracElement>;
+    mi: MergedMathMLAttributes<HTMLMiElement>;
+    mmultiscripts: MergedMathMLAttributes<HTMLMmultiScriptsElement>;
+    mn: MergedMathMLAttributes<HTMLMNElement>;
+    mo: MergedMathMLAttributes<HTMLMOElement>;
+    mover: MergedMathMLAttributes<HTMLMOverElement>;
+    mpadded: MergedMathMLAttributes<HTMLMPaddedElement>;
+    mphantom: MergedMathMLAttributes<HTMLMPhantomElement>;
+    mprescripts: MergedMathMLAttributes<HTMLMPrescriptsElement>;
+    mroot: MergedMathMLAttributes<HTMLMRootElement>;
+    mrow: MergedMathMLAttributes<HTMLMRowElement>;
+    ms: MergedMathMLAttributes<HTMLMSElement>;
+    mspace: MergedMathMLAttributes<HTMLMSpaceElement>;
+    msqrt: MergedMathMLAttributes<HTMLMSqrtElement>;
+    mstyle: MergedMathMLAttributes<HTMLMStyleElement>;
+    msub: MergedMathMLAttributes<HTMLMSubElement>;
+    msubsup: MergedMathMLAttributes<HTMLMSubsupElement>;
+    msup: MergedMathMLAttributes<HTMLMSupElement>;
+    mtable: MergedMathMLAttributes<HTMLMTableElement>;
+    mtd: MergedMathMLAttributes<HTMLMTdElement>;
+    mtext: MergedMathMLAttributes<HTMLMTextElement>;
+    mtr: MergedMathMLAttributes<HTMLMTrElement>;
+    munder: MergedMathMLAttributes<HTMLMUnderElement>;
+    munderover: MergedMathMLAttributes<HTMLMUnderoverElement>;
+    semantics: MergedMathMLAttributes<HTMLSemanticsElement>;
   }
 }

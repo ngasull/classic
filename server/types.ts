@@ -1,38 +1,40 @@
-import type { Classic } from "@classic/element";
-import type { DOMClass } from "@classic/element/jsx-runtime";
+import type { Classic, CustomElement } from "@classic/element";
 import type { JS, JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
+import type { VoidElement } from "./void.ts";
 
-type ServerHTML<T> =
-  & { [P in keyof T]?: JSOr<T[P]> }
-  & { readonly children?: JSXChildren };
+type IntrinsicServerElement<
+  T,
+  Ref extends EventTarget,
+  Children = JSXChildren,
+> =
+  & { [P in keyof T]: T[P] | JSable<T[P]> }
+  & {
+    readonly children?: Children;
+    readonly ref?: JSXRef<Ref>;
+  };
 
 declare namespace JSX {
   type IntrinsicElements =
     & {
-      [K in keyof JSXInternal.IntrinsicElements]:
-        & ServerHTML<
-          JSXInternal.IntrinsicElements[K]
-        >
-        & {
-          readonly ref?: JSXRef<
-            JSXInternal.IntrinsicElements[K] extends
-              JSXInternal.HTMLAttributes<infer E> ? E
-              : JSXInternal.IntrinsicElements[K] extends
-                JSXInternal.SVGAttributes<infer E> ? E
-              : never
-          >;
-        };
+      [K in keyof JSXInternal.IntrinsicElements]: IntrinsicServerElement<
+        JSXInternal.IntrinsicElements[K],
+        JSXInternal.IntrinsicElements[K] extends
+          JSXInternal.HTMLAttributes<infer E> ? E
+          : JSXInternal.IntrinsicElements[K] extends
+            JSXInternal.SVGAttributes<infer E> ? E
+          : never,
+        K extends VoidElement ? never : JSXChildren
+      >;
     }
     & {
-      "cc-route": ServerHTML<{ path?: string }> & {
-        readonly ref?: HTMLElement;
-      };
+      "cc-route": IntrinsicServerElement<{ path?: string }, HTMLElement>;
     }
     & {
-      [K in keyof Classic.Elements]: ServerHTML<Classic.Elements[K]> & {
-        readonly ref?: DOMClass<Classic.Elements[K]> & EventTarget;
-      };
+      [K in keyof Classic.Elements]: Classic.Elements[K] extends
+        CustomElement<any, infer Props, infer Ref>
+        ? IntrinsicServerElement<Props, Ref>
+        : never;
     };
   type Element = JSXElement | null | PromiseLike<JSXElement | null>;
 }
@@ -78,8 +80,6 @@ export type JSXElement =
     readonly html: ReadableStream<Uint8Array>;
     readonly ref: JS<Node>;
   };
-
-type JSOr<T> = T | JSable<T>;
 
 export enum ElementKind {
   Fragment,
