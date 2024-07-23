@@ -2,7 +2,9 @@
   "name": "@classic/build",
   "version": "0.1.0",
   "exports": {
-    ".": "./mod.ts"
+    ".": "./mod.ts",
+    "./bundle": "./bundle.ts",
+    "./modules": "./modules.ts"
   },
   "compilerOptions": {
     "lib": [

@@ -6,22 +6,30 @@ import { exists } from "@std/fs";
 import { join, relative, resolve, SEPARATOR } from "@std/path";
 import * as esbuild from "esbuild";
 
-export type ElementsBundle = {
+export type Bundle = {
   // **Not** readonly (dev mode)
   js: Promise<Uint8Array>;
   css: Promise<Uint8Array | undefined>;
 };
 
-export const buildElements = async (
+export type BundleOpts = {
+  readonly elementsDir: string;
+  readonly elementsDeclarationFile?: string;
+  readonly extraModules?: string[];
+  readonly external?: string[];
+  readonly transformCss?: (css: string) => string;
+  readonly denoJsonPath?: string;
+};
+
+export const buildBundle = async (
   {
     elementsDir,
     elementsDeclarationFile,
     extraModules = [],
-    denoJsonPath,
+    external,
     transformCss,
-  }: BuildElementsOpts & {
-    readonly transformCss?: (css: string) => string;
-  },
+    denoJsonPath,
+  }: BundleOpts,
 ): Promise<{ js: Uint8Array; css?: Uint8Array }> => {
   const elementFiles: string[] = [];
   for await (const { name, isFile } of Deno.readDir(elementsDir)) {
@@ -38,6 +46,7 @@ export const buildElements = async (
       loader: "js",
       resolveDir: ".",
     },
+    external,
     outdir: ".",
     bundle: true,
     minify: true,
@@ -59,7 +68,7 @@ export const buildElements = async (
                   namespace: args.path.endsWith(".css")
                     ? "css-intercept"
                     : "file",
-                  path: args.path,
+                  path: resolve(args.path),
                 }
                 : undefined,
           );
@@ -69,31 +78,9 @@ export const buildElements = async (
       ...elementsDeclarationFile
         ? [genTypesPlugin(elementsDir, elementsDeclarationFile)]
         : [],
-      ...transformCss
-        ? [
-          {
-            name: "transform-tagged-css",
-            setup(build) {
-              build.onLoad({ filter: /\.([jt]sx?)$/ }, async (args) => {
-                const source = await Deno.readTextFile(args.path);
-                return {
-                  contents: source.replaceAll(
-                    taggedCssRegExp,
-                    (_, literal) =>
-                      `\`${
-                        transformCss(new Function(`return ${literal}`)())
-                          .replaceAll("`", "\\`")
-                      }\``,
-                  ),
-                };
-              });
-            },
-          } satisfies esbuild.Plugin,
-        ]
-        : [],
+      ...transformCss ? [transformCssPlugin(transformCss)] : [],
     ],
   });
-  await esbuild.stop();
 
   const byExt = result.outputFiles.reduce((byExt, file) => {
     const [, ext] = file.path.match(extensionRegExp)!;
@@ -116,28 +103,23 @@ export const buildElements = async (
   ) as { js: Uint8Array; css?: Uint8Array };
 };
 
-export type BuildElementsOpts = {
-  readonly elementsDir: string;
-  readonly elementsDeclarationFile?: string;
-  readonly extraModules?: string[];
-  readonly denoJsonPath?: string;
-};
-
-export const devElements = async (
+export const devBundle = async (
   {
     elementsDir,
     elementsDeclarationFile,
     extraModules = [],
+    external,
+    transformCss,
     denoJsonPath,
     host = "localhost",
     port,
-  }: BuildElementsOpts & {
+  }: BundleOpts & {
     readonly host?: string;
     readonly port?: number;
   },
 ): Promise<{
   stop: () => Promise<void>;
-  bundle: ElementsBundle;
+  bundle: Bundle;
   hmr: string;
 }> => {
   type Result = esbuild.BuildResult<typeof opts>;
@@ -146,6 +128,7 @@ export const devElements = async (
 
   const opts = {
     entryPoints: [join(elementsDir, "*"), ...extraModules],
+    external,
     outbase: elementsDir,
     outdir: ".",
     metafile: true,
@@ -169,6 +152,7 @@ export const devElements = async (
           });
         },
       },
+      ...transformCss ? [transformCssPlugin(transformCss)] : [],
     ],
   } satisfies esbuild.BuildOptions;
 
@@ -285,6 +269,25 @@ const tsRegExp = /^(.+)\.tsx?$/;
 const taggedCssRegExp = /\bcss(`(?:[^\\]\\`|[^`])+`)/g;
 
 const extensionRegExp = /\.([^.]+)$/;
+
+const transformCssPlugin = (transformCss: (css: string) => string) => ({
+  name: "transform-tagged-css",
+  setup(build) {
+    build.onLoad({ filter: /\.([jt]sx?)$/ }, async (args) => {
+      const source = await Deno.readTextFile(args.path);
+      return {
+        contents: source.replaceAll(
+          taggedCssRegExp,
+          (_, literal) =>
+            `\`${
+              transformCss(new Function(`return ${literal}`)())
+                .replaceAll("`", "\\`")
+            }\``,
+        ),
+      };
+    });
+  },
+} satisfies esbuild.Plugin);
 
 const genTypesPlugin = (
   elementsDir: string,

@@ -13,16 +13,16 @@ const toPosix = SEPARATOR === "/"
   ? (p: string) => p
   : (p: string) => p.replaceAll(SEPARATOR, "/");
 
-export type JSContextOpts = {
+export type ModulesOpts = {
   readonly modules: string[];
   readonly clientDir: string;
   readonly clientFile: string;
   readonly external?: string[];
-  readonly outDir?: string;
+  readonly denoJsonPath?: string;
 };
 
-export const buildJSContext = async (
-  opts: JSContextOpts & { readonly outDir: string },
+export const buildModules = async (
+  opts: ModulesOpts & { readonly outDir: string },
 ): Promise<void> => {
   const context = await mkContext(opts);
   try {
@@ -32,17 +32,16 @@ export const buildJSContext = async (
     }
   } finally {
     await context.dispose();
-    await esbuild.stop();
   }
 };
 
-export const loadJSContext = (
-  { clientFile }: Pick<JSContextOpts, "clientFile">,
+export const loadModules = (
+  { clientFile }: Pick<ModulesOpts, "clientFile">,
 ): Promise<ServedJSContext> =>
   import(toFileUrl(resolve(clientFile)).href).then(({ servedJS }) => servedJS);
 
-export const devJSContext = async (
-  { host = "127.0.0.1", port, ...opts }: JSContextOpts & {
+export const devModules = async (
+  { host = "127.0.0.1", port, ...opts }: ModulesOpts & {
     readonly host?: string;
     readonly port?: number;
   },
@@ -58,7 +57,7 @@ export const devJSContext = async (
   const server = await context.serve({ host, port });
 
   await context.rebuild();
-  const servedJS = await loadJSContext(opts);
+  const servedJS = await loadModules(opts);
   servedJS.base = `http://${server.host}:${server.port}/`;
 
   return {
@@ -74,8 +73,11 @@ export const devJSContext = async (
   };
 };
 
-const mkContext = async (opts: JSContextOpts) => {
-  const { modules, external, clientDir, clientFile, outDir } = opts;
+const mkContext = async (
+  opts: ModulesOpts & { readonly outDir?: string },
+) => {
+  const { denoJsonPath, modules, external, clientDir, clientFile, outDir } =
+    opts;
   return esbuild.context({
     entryPoints: [...modules, join(clientDir, "*")],
     external,
@@ -93,7 +95,8 @@ const mkContext = async (opts: JSContextOpts) => {
     plugins: [
       ...denoPlugins({
         configPath: resolve(
-          await exists("deno.jsonc") ? "deno.jsonc" : "deno.json",
+          denoJsonPath ??
+            (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
         ),
       }),
       {
