@@ -2,21 +2,21 @@
 
 const gbl = globalThis;
 
-const Array = gbl.Array;
-const DOMParser = gbl.DOMParser;
-const JSON = gbl.JSON;
-const Object = gbl.Object;
+const Array = /* @__PURE__ */ gbl.Array;
+const DOMParser = /* @__PURE__ */ gbl.DOMParser;
+const JSON = /* @__PURE__ */ gbl.JSON;
+const Object = /* @__PURE__ */ gbl.Object;
 
 export const TRUE: true = !0;
 export const FALSE: false = !TRUE;
 export const NULL: null = null;
 export const UNDEFINED: undefined = void 0;
 
-export const doc = gbl.document;
-export const Promise = gbl.Promise;
-export const $ = gbl.Symbol;
-export const win = gbl.window;
-export const location = gbl.location;
+export const doc = /* @__PURE__ */ gbl.document;
+export const Promise = /* @__PURE__ */ gbl.Promise;
+export const $ = /* @__PURE__ */ gbl.Symbol;
+export const win = /* @__PURE__ */ gbl.window;
+export const location = /* @__PURE__ */ gbl.location;
 
 export const routeLoadEvent = "route-load";
 
@@ -78,24 +78,25 @@ export const pushR = <T>(arr: T[], ...v: T[]): T[] => (arr.push(...v), arr);
 
 export const toLowerCase = (str: string): string => str.toLowerCase();
 
-export const isArray = Array.isArray;
+export const isArray = /* @__PURE__ */ Array.isArray;
 
-export const arraySlice = Array.prototype.slice;
+export const arraySlice = /* @__PURE__ */ Array.prototype.slice;
 
-export const parse = JSON.parse;
+export const parse = /* @__PURE__ */ JSON.parse;
 
-export const assign = Object.assign;
-export const defineProperties = Object.defineProperties;
-export const entries = Object.entries;
-export const freeze = Object.freeze;
-export const fromEntries = Object.fromEntries;
-export const getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
-export const keys = Object.keys;
-export const values = Object.values;
+export const assign = /* @__PURE__ */ Object.assign;
+export const defineProperties = /* @__PURE__ */ Object.defineProperties;
+export const entries = /* @__PURE__ */ Object.entries;
+export const freeze = /* @__PURE__ */ Object.freeze;
+export const fromEntries = /* @__PURE__ */ Object.fromEntries;
+export const getOwnPropertyDescriptors =
+  /* @__PURE__ */ Object.getOwnPropertyDescriptors;
+export const keys = /* @__PURE__ */ Object.keys;
+export const values = /* @__PURE__ */ Object.values;
 
 // DOM
 
-const domParser = DOMParser && new DOMParser();
+const domParser = /* @__PURE__ */ DOMParser && new DOMParser();
 
 export const domParse = (html: string): Document =>
   domParser.parseFromString(html, "text/html");
@@ -168,11 +169,13 @@ export const hyphenize = (camel: string): string =>
 export const global = <T>(name: string, init: T): { (): T; (v: T): T } => {
   let $accessor = $.for(name),
     getSet = (...args: [] | [T]) =>
-      // @ts-ignore wrapped in this function to avoid overloading global types
-      length(args) ? gbl[$accessor] = args[0] : gbl[$accessor];
-
-  if (!($accessor in gbl)) getSet(init);
-
+      length(args)
+        // @ts-ignore wrapped in this function to avoid overloading global types
+        ? gbl[$accessor] = args[0]
+        : $accessor in gbl
+        // @ts-ignore wrapped in this function to avoid overloading global types
+        ? gbl[$accessor]
+        : init;
   return getSet;
 };
 
@@ -181,7 +184,7 @@ export type EventType<T> =
     : { (detail: T): CustomEvent<T> })
   & { readonly type: string };
 
-const eventTypeIndex = global("cc.eti", 0);
+const eventTypeIndex = /* @__PURE__ */ global("cc.eti", 0);
 
 export const eventType = <T = undefined>(
   { type, ...opts }: CustomEventInit<T> & { type?: string } = {},

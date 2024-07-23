@@ -621,7 +621,7 @@ const jsUtils = {
             );
           }
           return [module[jsSymbol]];
-        }),
+        }, { isntAssignable: true }),
       )<T>(),
     ),
 
@@ -880,8 +880,18 @@ export class ServedJSContext {
   }
 
   add<M>(name: string, localUrl: string, publicUrl: string): JS<M> {
-    const m = this.#byName[name] ??= makeConvenient(
-      jsable(new JSMetaModule(this, localUrl, publicUrl))<M>(),
+    const moduleMemo: Record<string | symbol, JSable<unknown>> = {};
+    const m = this.#byName[name] ??= new Proxy(
+      makeConvenient(jsable(new JSMetaModule(this, localUrl, publicUrl))<M>()),
+      {
+        get(target, p) {
+          if (p in moduleMemo) return moduleMemo[p];
+          moduleMemo[p] = target[p as never];
+          // Module exports can be mutable
+          moduleMemo[p][jsSymbol].isntAssignable = true;
+          return moduleMemo[p];
+        },
+      },
     );
     this.#byPublic[publicUrl] = localUrl;
     return m as JS<M>;
