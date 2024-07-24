@@ -16,9 +16,11 @@
     "@std/fs": "jsr:@std/fs@^0.229.3",
     "@std/http": "jsr:@std/http@^0.224.5",
     "@std/path": "jsr:@std/path@^0.225.2",
+    "cssnano": "npm:cssnano@^7.0.4",
     "esbuild": "npm:esbuild@^0.23.0",
     "hono": "jsr:@hono/hono@^4.4.8",
-    "hono/types": "jsr:@hono/hono@^4.4.8/types"
+    "hono/types": "jsr:@hono/hono@^4.4.8/types",
+    "postcss": "npm:postcss@^8.4.39"
   },
   "tasks": {
     "npm": "deno run -A script/build_npm.ts",

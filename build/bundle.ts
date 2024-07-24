@@ -4,7 +4,9 @@ import {
 } from "@luca/esbuild-deno-loader";
 import { exists } from "@std/fs";
 import { join, relative, resolve, SEPARATOR } from "@std/path";
+import cssnano from "cssnano";
 import * as esbuild from "esbuild";
+import postcss from "postcss";
 
 export type Bundle = {
   // **Not** readonly (dev mode)
@@ -17,7 +19,7 @@ export type BundleOpts = {
   readonly elementsDeclarationFile?: string;
   readonly extraModules?: string[];
   readonly external?: string[];
-  readonly transformCss?: (css: string) => string;
+  readonly transformCss?: (css: string, from: string) => Promise<string>;
   readonly denoJsonPath?: string;
 };
 
@@ -27,7 +29,7 @@ export const buildBundle = async (
     elementsDeclarationFile,
     extraModules = [],
     external,
-    transformCss,
+    transformCss = defaultCssTransform(),
     denoJsonPath,
   }: BundleOpts,
 ): Promise<{ js: Uint8Array; css?: Uint8Array }> => {
@@ -74,11 +76,10 @@ export const buildBundle = async (
           );
         },
       },
-      ...await resolvePlugins(denoJsonPath),
+      ...await resolvePlugins(denoJsonPath, transformCss),
       ...elementsDeclarationFile
         ? [genTypesPlugin(elementsDir, elementsDeclarationFile)]
         : [],
-      ...transformCss ? [transformCssPlugin(transformCss)] : [],
     ],
   });
 
@@ -135,14 +136,11 @@ export const devBundle = async (
     sourcemap: true,
     write: false,
     bundle: true,
-    // entryNames: "[name]-[hash]",
-    // splitting: true,
-    // format: "esm",
     charset: "utf8",
     jsx: "automatic",
     jsxImportSource: "@classic/element",
     plugins: [
-      ...await resolvePlugins(denoJsonPath),
+      ...await resolvePlugins(denoJsonPath, transformCss),
       {
         name: "watch-meta",
         setup(build) {
@@ -152,7 +150,6 @@ export const devBundle = async (
           });
         },
       },
-      ...transformCss ? [transformCssPlugin(transformCss)] : [],
     ],
   } satisfies esbuild.BuildOptions;
 
@@ -224,6 +221,7 @@ new EventSource("http://${server.host}:${server.port}/esbuild").addEventListener
 
 const resolvePlugins = async (
   denoJsonPath?: string,
+  transformCss?: ((css: string, from: string) => Promise<string>) | undefined,
 ): Promise<esbuild.Plugin[]> => {
   if ("Deno" in globalThis) {
     const configPath = resolve(
@@ -257,6 +255,7 @@ const resolvePlugins = async (
           );
         },
       } satisfies esbuild.Plugin,
+      ...transformCss ? [transformCssPlugin(transformCss)] : [],
       denoLoaderPlugin({ configPath }),
     ];
   } else {
@@ -270,24 +269,48 @@ const taggedCssRegExp = /\bcss(`(?:[^\\]\\`|[^`])+`)/g;
 
 const extensionRegExp = /\.([^.]+)$/;
 
-const transformCssPlugin = (transformCss: (css: string) => string) => ({
+const transformCssPlugin = (
+  transformCss: (css: string, from: string) => Promise<string>,
+) => ({
   name: "transform-tagged-css",
   setup(build) {
     build.onLoad({ filter: /\.([jt]sx?)$/ }, async (args) => {
+      let prevIndex = 0;
+      const parts: string[] = [];
       const source = await Deno.readTextFile(args.path);
-      return {
-        contents: source.replaceAll(
-          taggedCssRegExp,
-          (_, literal) =>
-            `\`${
-              transformCss(new Function(`return ${literal}`)())
-                .replaceAll("`", "\\`")
-            }\``,
-        ),
-      };
+      for (const match of source.matchAll(taggedCssRegExp)) {
+        parts.push(
+          source.slice(prevIndex, match.index),
+          `\`${
+            (await transformCss(
+              new Function(`return ${match[1]}`)(),
+              args.path,
+            ))
+              .replaceAll("`", "\\`")
+          }\``,
+        );
+        prevIndex = match.index + match[0].length;
+      }
+
+      if (parts.length) {
+        parts.push(source.slice(prevIndex));
+        return {
+          loader: args.path.match(extensionRegExp)![1] as any,
+          contents: parts.join(""),
+        };
+      }
     });
   },
 } satisfies esbuild.Plugin);
+
+const defaultCssTransform = () => {
+  let build: postcss.Processor | null = null;
+  return async (css: string, from: string) => {
+    build ??= postcss([cssnano({ preset: "default" })]);
+    const result = await build.process(css, { from });
+    return result.css;
+  };
+};
 
 const genTypesPlugin = (
   elementsDir: string,
