@@ -1,7 +1,7 @@
 import {
   adoptNode,
   call,
-  doc,
+  document,
   domParse,
   forEach,
   listen,
@@ -13,7 +13,7 @@ import {
   remove,
   replaceWith,
   TRUE,
-  win,
+  window,
 } from "@classic/util";
 
 const suspenseDelay = 500;
@@ -94,12 +94,12 @@ const navigate = async (href: string) => {
 
   if (!slot) navigateFallback(href);
 
-  if (title) doc.title = title;
+  if (title) document.title = title;
 
-  forEachSourceable(doc.head, (el, key) => currentHead[key] = el);
+  forEachSourceable(document.head, (el, key) => currentHead[key] = el);
   forEachSourceable(
     receivedDoc.head,
-    (el, key) => !currentHead[key] && doc.head.append(adoptNode(el)),
+    (el, key) => !currentHead[key] && document.head.append(adoptNode(el)),
   );
 
   replaceWith(slot, adoptNode(receivedSlot!));
@@ -136,7 +136,7 @@ const forEachSourceable = (
   );
 
 const reviveScript = (script: HTMLScriptElement) => {
-  let copy = doc.createElement("script");
+  let copy = document.createElement("script");
   copy.text = script.text;
   replaceWith(script, copy);
 };
@@ -150,7 +150,7 @@ export const init = (): () => void => {
   let t: EventTarget | null,
     subs: Array<() => void> = [
       listen(
-        doc.body,
+        document.body,
         "click",
         (e) =>
           !e.ctrlKey &&
@@ -160,7 +160,7 @@ export const init = (): () => void => {
       ),
 
       listen(
-        doc.body,
+        document.body,
         "submit",
         (e) =>
           (t = e.target) instanceof HTMLFormElement &&
@@ -169,7 +169,7 @@ export const init = (): () => void => {
           isLocal(t.action) && (preventDefault(e), navigate(t.action)),
       ),
 
-      listen(win, "popstate", () => navigate(location.href)),
+      listen(window, "popstate", () => navigate(location.href)),
     ];
 
   return () => subs.map(call);

@@ -12,10 +12,11 @@ export const FALSE: false = !TRUE;
 export const NULL: null = null;
 export const UNDEFINED: undefined = void 0;
 
-export const doc = /* @__PURE__ */ gbl.document;
+export const document = /* @__PURE__ */ gbl.document;
+export const CSSStyleSheet = /* @__PURE__ */ gbl.CSSStyleSheet;
 export const Promise = /* @__PURE__ */ gbl.Promise;
 export const $ = /* @__PURE__ */ gbl.Symbol;
-export const win = /* @__PURE__ */ gbl.window;
+export const window = /* @__PURE__ */ gbl.window;
 export const location = /* @__PURE__ */ gbl.location;
 
 export const routeLoadEvent = "route-load";
@@ -106,7 +107,8 @@ export const html = (
   xml: string,
 ): ChildNode[] => [...domParse(xml).body.childNodes];
 
-export const adoptNode = <T extends Node>(node: T): T => doc.adoptNode(node);
+export const adoptNode = <T extends Node>(node: T): T =>
+  document.adoptNode(node);
 
 export const cloneNode = <T extends Node>(node: T): T =>
   node.cloneNode(TRUE) as T;
@@ -131,12 +133,12 @@ export const preventDefault = (e: Event): void => e.preventDefault();
 
 export const querySelector = <E extends Element>(
   selector: string,
-  node: ParentNode = doc.body,
+  node: ParentNode = document.body,
 ): E | null => node.querySelector<E>(selector);
 
 export const querySelectorAll = <E extends Element>(
   selector: string,
-  node: ParentNode = doc.body,
+  node: ParentNode = document.body,
 ): NodeListOf<E> => node.querySelectorAll<E>(selector);
 
 export const remove = <Args extends readonly unknown[], R>(
@@ -228,3 +230,25 @@ export const listen = <
       options,
     );
 };
+
+export type CSSRules = Record<string, CSSDeclaration | string>;
+
+type CSSDeclaration = { [k: string]: string | number | CSSDeclaration };
+
+export const toCSS = (rules: CSSRules): string =>
+  entries(rules).map(([selector, declaration]) =>
+    isString(declaration)
+      ? selector + declaration
+      : toRule(selector, declaration)
+  ).join("");
+
+const toRule = (selector: string, declaration: CSSDeclaration): string =>
+  `${selector || ":host"}{${
+    entries(declaration)
+      .map(([property, value], ty: any) =>
+        (ty = typeof value) === "object"
+          ? toRule(property, value as CSSDeclaration)
+          : `${hyphenize(property)}:${value}${ty === "number" ? "px" : ""};`
+      )
+      .join("")
+  }}`;

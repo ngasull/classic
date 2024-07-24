@@ -1,14 +1,14 @@
 import {
   $,
+  CSSStyleSheet,
   deepMap,
   defineProperties,
   defineProperty,
-  doc,
+  document,
   entries,
   fromEntries,
   getOwnPropertyDescriptors,
   hyphenize,
-  isString,
   keys,
   length,
   NULL,
@@ -86,22 +86,18 @@ export const define = <
     readonly props?: PropTypes;
     readonly extends?: string;
     readonly form?: Form;
-    readonly css?:
-      | string
-      | CSSRules
-      | CSSStyleSheet
-      | (string | CSSRules | CSSStyleSheet)[];
+    readonly css?: string | CSSStyleSheet | (string | CSSStyleSheet)[];
     readonly js?: Def;
   },
 ): CustomElement<N, Props, Ref> => {
-  if (!doc) {
+  if (!document) {
     // @ts-ignore stub switch for universal compiling
     return;
   }
 
   let ParentClass =
     (extendsTag
-      ? doc.createElement(extendsTag).constructor
+      ? document.createElement(extendsTag).constructor
       : HTMLElement) as typeof HTMLElement;
   let definedStyleSheets: CSSStyleSheet[] | null = NULL;
   let attrToProp: Record<string, keyof Props> = {};
@@ -147,7 +143,10 @@ export const define = <
       if (css) {
         if (!js) root ??= attachShadow(self);
         adoptedStyleSheets(root!).push(
-          ...definedStyleSheets ??= deepMap(css, buildStyleSheet),
+          ...definedStyleSheets ??= deepMap(
+            css,
+            (v) => v instanceof CSSStyleSheet ? v : constructCSS(v),
+          ),
         );
       }
     }
@@ -261,7 +260,7 @@ export const declarativeFirstStyle = (): void => {
 export const cloneStyleSheet = (styleSheet: CSSStyleSheet): CSSStyleSheet => {
   let cssRules: string[] = [], r;
   for (r of styleSheet.cssRules) cssRules.push(r.cssText);
-  return buildStyleSheet(cssRules.join(""));
+  return constructCSS(cssRules.join(""));
 };
 
 export const renderChildren = (el: ParentNode, children: Children) =>
@@ -273,7 +272,7 @@ export const renderChildren = (el: ParentNode, children: Children) =>
           node = (callOrReturn(c) ?? "") as Node;
           return node = node instanceof Node
             ? node
-            : doc.createTextNode(node as string);
+            : document.createTextNode(node as string);
         },
         (current, prev) => el.replaceChild(current, prev),
       );
@@ -283,42 +282,9 @@ export const renderChildren = (el: ParentNode, children: Children) =>
 
 export const css = (tpl: TemplateStringsArray): string => tpl[0];
 
-export type CSSRules = Record<string, CSSDeclaration | string>;
-
-type CSSDeclaration = { [k: string]: string | number | CSSDeclaration };
-
-export const buildStyleSheet = (
-  rules: string | CSSRules | CSSStyleSheet,
-): CSSStyleSheet => {
-  let Clazz = CSSStyleSheet, styleSheet;
-
-  if (rules instanceof Clazz) return rules;
-
-  styleSheet = new Clazz();
-  if (isString(rules)) {
-    styleSheet.replace(rules);
-  } else {
-    entries(rules).forEach(([selector, declaration], i) =>
-      styleSheet.insertRule(
-        isString(declaration)
-          ? selector + declaration
-          : toRule(selector, declaration),
-        i,
-      )
-    );
-  }
-  return styleSheet;
-};
-
-const toRule = (selector: string, declaration: CSSDeclaration): string =>
-  `${selector || ":host"}{${
-    entries(declaration)
-      .map(([property, value], ty: any) =>
-        (ty = typeof value) === "object"
-          ? toRule(property, value as CSSDeclaration)
-          : `${hyphenize(property)}:${value}${ty === "number" ? "px" : ""};`
-      )
-      .join("")
-  }}`;
+const constructCSS = (
+  css: string,
+  styleSheet = new CSSStyleSheet(),
+) => (styleSheet.replace(css), styleSheet);
 
 const attachShadow = (host: HTMLElement) => host.attachShadow({ mode: "open" });

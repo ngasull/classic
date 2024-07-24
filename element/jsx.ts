@@ -1,4 +1,4 @@
-import { deepMap, doc, entries, listen, NULL } from "@classic/util";
+import { deepMap, document, entries, listen, NULL } from "@classic/util";
 import {
   type Children,
   type CustomElement,
@@ -45,7 +45,9 @@ export const jsx = <T extends keyof JSX.IntrinsicElements>(
 ): ChildNode => {
   if (!type) return deepMap(children, (c) => c) as never;
 
-  let el = ns ? doc.createElementNS(ns, type) : doc.createElement(type);
+  let el = ns
+    ? document.createElementNS(ns, type)
+    : document.createElement(type);
   let ref: ((v: ParentNode) => void) | null = NULL;
   let eventMatch: RegExpMatchArray | null;
 
