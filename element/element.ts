@@ -313,10 +313,10 @@ export const buildStyleSheet = (
 const toRule = (selector: string, declaration: CSSDeclaration): string =>
   `${selector || ":host"}{${
     entries(declaration)
-      .map(([property, value]) =>
-        typeof value === "object"
-          ? toRule(property, value)
-          : `${hyphenize(property)}:${value};`
+      .map(([property, value], ty: any) =>
+        (ty = typeof value) === "object"
+          ? toRule(property, value as CSSDeclaration)
+          : `${hyphenize(property)}:${value}${ty === "number" ? "px" : ""};`
       )
       .join("")
   }}`;
