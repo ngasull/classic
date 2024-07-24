@@ -19,7 +19,7 @@ export type BundleOpts = {
   readonly elementsDeclarationFile?: string;
   readonly extraModules?: string[];
   readonly external?: string[];
-  readonly transformCss?: (css: string, from: string) => Promise<string>;
+  readonly transformCss?: CSSTransformer;
   readonly denoJsonPath?: string;
 };
 
@@ -221,7 +221,7 @@ new EventSource("http://${server.host}:${server.port}/esbuild").addEventListener
 
 const resolvePlugins = async (
   denoJsonPath?: string,
-  transformCss?: ((css: string, from: string) => Promise<string>) | undefined,
+  transformCss?: CSSTransformer,
 ): Promise<esbuild.Plugin[]> => {
   if ("Deno" in globalThis) {
     const configPath = resolve(
@@ -269,9 +269,9 @@ const taggedCssRegExp = /\bcss(`(?:[^\\]\\`|[^`])+`)/g;
 
 const extensionRegExp = /\.([^.]+)$/;
 
-const transformCssPlugin = (
-  transformCss: (css: string, from: string) => Promise<string>,
-) => ({
+type CSSTransformer = (css: string, from: string) => Promise<string>;
+
+const transformCssPlugin = (transformCss: CSSTransformer) => ({
   name: "transform-tagged-css",
   setup(build) {
     build.onLoad({ filter: /\.([jt]sx?)$/ }, async (args) => {
@@ -279,16 +279,42 @@ const transformCssPlugin = (
       const parts: string[] = [];
       const source = await Deno.readTextFile(args.path);
       for (const match of source.matchAll(taggedCssRegExp)) {
-        parts.push(
-          source.slice(prevIndex, match.index),
-          `\`${
-            (await transformCss(
-              new Function(`return ${match[1]}`)(),
-              args.path,
-            ))
-              .replaceAll("`", "\\`")
-          }\``,
-        );
+        try {
+          const css = await transformCss(
+            new Function(`return ${match[1]}`)(),
+            args.path,
+          );
+          parts.push(
+            source.slice(prevIndex, match.index),
+            `\`${css.replaceAll("`", "\\`")}\``,
+          );
+        } catch (e) {
+          const lines = source.split("\n");
+          let i = 0, l = 0;
+          for (const line of lines) {
+            if (i + line.length > match.index) break;
+            i += line.length + 1;
+            l++;
+          }
+          return {
+            errors: [{
+              text: e instanceof TransformCSSError ? e.text : e.toString(),
+              location: e instanceof TransformCSSError
+                ? {
+                  file: args.path,
+                  lineText: e.lineText,
+                  line: l + e.line,
+                  column: e.line === 1 ? match.index - i + e.column : e.column,
+                }
+                : {
+                  file: args.path,
+                  lineText: lines[l],
+                  line: l + 1,
+                  column: match.index - i + 1,
+                },
+            }],
+          };
+        }
         prevIndex = match.index + match[0].length;
       }
 
@@ -303,12 +329,33 @@ const transformCssPlugin = (
   },
 } satisfies esbuild.Plugin);
 
+class TransformCSSError {
+  lineText!: string;
+  line!: number;
+  column!: number;
+
+  constructor(
+    readonly text: string,
+    location: Pick<esbuild.Location, "lineText" | "line" | "column">,
+  ) {
+    Object.assign(this, location);
+  }
+}
+
 const defaultCssTransform = () => {
   let build: postcss.Processor | null = null;
   return async (css: string, from: string) => {
     build ??= postcss([cssnano({ preset: "default" })]);
-    const result = await build.process(css, { from });
-    return result.css;
+    try {
+      const result = await build.process(css, { from });
+      return result.css;
+    } catch (e) {
+      throw new TransformCSSError(e.toString(), {
+        lineText: e.source.split("\n")[e.line - 1],
+        line: e.line,
+        column: e.column,
+      });
+    }
   };
 };
 
