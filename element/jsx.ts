@@ -5,8 +5,10 @@ import {
   isFunction,
   listen,
   NULL,
+  UNDEFINED,
 } from "@classic/util";
 import {
+  $extends,
   $props,
   type Children,
   type CustomElement,
@@ -55,11 +57,17 @@ export const jsx = ((
   } = {},
 ): ChildNode => {
   if (!type) return deepMap(children, (c) => c) as never;
-  type = isFunction(type) ? type.tag : type;
+
+  let createOpts: ElementCreationOptions | undefined = UNDEFINED;
+  type = isFunction(type)
+    ? type[$extends]
+      ? (createOpts = { is: type.tag }, type[$extends])
+      : type.tag
+    : type;
 
   let el = ns
-    ? document.createElementNS(ns, type)
-    : document.createElement(type);
+    ? document.createElementNS(ns, type, createOpts)
+    : document.createElement(type, createOpts);
   let ref: ((v: ParentNode) => void) | null = NULL;
   let eventMatch: RegExpMatchArray | null;
 

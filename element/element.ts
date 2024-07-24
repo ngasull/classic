@@ -18,7 +18,7 @@ import {
 import { callOrReturn, onChange, signal } from "./signal.ts";
 
 const $disconnectCallbacks: unique symbol = $() as never;
-const $extends: unique symbol = $() as never;
+export const $extends: unique symbol = $() as never;
 const $internals: unique symbol = $() as never;
 export const $props: unique symbol = $() as never;
 const $propsSet: unique symbol = $() as never;
@@ -89,15 +89,11 @@ export const element = <
     readonly js?: Def;
   },
 ): CustomElement<Props, Ref> => {
-  let ParentClass =
-    (extendsTag
-      ? document.createElement(extendsTag).constructor
-      : HTMLElement) as typeof HTMLElement;
   let definedStyleSheets: CSSStyleSheet[] | null = NULL;
   let attrToProp: Record<string, keyof Props> = {};
   let propToAttr = {} as Record<keyof Props, string>;
 
-  class ElementClass extends ParentClass {
+  class ElementClass extends HTMLElement {
     [$propsSet]: SignalsSet<Props> = {} as never;
     [$props]: Reactive<Props> = fromEntries(
       entries(propTypes).map(([prop, type]) => {
@@ -108,7 +104,7 @@ export const element = <
         return [prop, get];
       }),
     ) as never;
-    [$extends] = extendsTag;
+    static [$extends] = extendsTag;
     [$internals] = (form && this.attachInternals()) as Form extends true
       ? ElementInternals
       : never;
