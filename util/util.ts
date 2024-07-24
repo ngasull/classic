@@ -85,6 +85,7 @@ export const arraySlice = /* @__PURE__ */ Array.prototype.slice;
 export const parse = /* @__PURE__ */ JSON.parse;
 
 export const assign = /* @__PURE__ */ Object.assign;
+export const defineProperty = /* @__PURE__ */ Object.defineProperty;
 export const defineProperties = /* @__PURE__ */ Object.defineProperties;
 export const entries = /* @__PURE__ */ Object.entries;
 export const freeze = /* @__PURE__ */ Object.freeze;

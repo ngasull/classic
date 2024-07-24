@@ -2,6 +2,7 @@ import {
   $,
   deepMap,
   defineProperties,
+  defineProperty,
   doc,
   entries,
   fromEntries,
@@ -91,8 +92,6 @@ export const define = <
       | CSSStyleSheet
       | (string | CSSRules | CSSStyleSheet)[];
     readonly js?: Def;
-    /** Makes `js` run after DOMContentLoaded, ensuring declarative shadow DOM has natively executed */
-    // readonly declarative?: Declarative;
   },
 ): CustomElement<N, Props, Ref> => {
   if (!doc) {
@@ -132,11 +131,6 @@ export const define = <
       let self = this;
       let root = self.shadowRoot;
 
-      // if (declarative) {
-      // Attach declarative for dynamic updates and browsers that dont support it
-      // onDOMContentLoaded(() => root ??= attachDeclarative(self));
-      // }
-
       let api = js?.(
         ((...args: [] | [Children | ShadowRoot]) => (
           length(args) &&
@@ -146,13 +140,12 @@ export const define = <
         self[$props],
       );
 
-      if (!js && css) root ??= attachShadow(self);
-
       if (api) {
         defineProperties(self, getOwnPropertyDescriptors(api));
       }
 
       if (css) {
+        if (!js) root ??= attachShadow(self);
         adoptedStyleSheets(root!).push(
           ...definedStyleSheets ??= deepMap(css, buildStyleSheet),
         );
@@ -174,27 +167,23 @@ export const define = <
   }
 
   let proto = ElementClass.prototype;
-  let properties: PropertyDescriptorMap & {
-    [p: string]: ThisType<ElementClass>;
-  } = {};
 
   for (let prop of keys(propTypes) as (keyof Props & string)[]) {
     let attr = hyphenize(prop);
     attrToProp[attr] = prop;
     propToAttr[prop] = attr;
     if (!(prop in proto)) {
-      properties[prop] = {
+      defineProperty(proto, prop, {
         get() {
           return this[$props][prop]();
         },
         set(value) {
           this[$propsSet][prop](value);
         },
-      };
+      });
     }
   }
 
-  defineProperties(proto, properties);
   ElementClass.observedAttributes = keys(attrToProp);
 
   customElements.define(name, ElementClass, { extends: extendsTag });
@@ -333,12 +322,3 @@ const toRule = (selector: string, declaration: CSSDeclaration): string =>
   }}`;
 
 const attachShadow = (host: HTMLElement) => host.attachShadow({ mode: "open" });
-
-// const attachDeclarative = (
-//   host: HTMLElement,
-//   template = querySelector<HTMLTemplateElement>(
-//     "template[shadowrootmode=open]",
-//     host,
-//   ),
-//   shadow = host.attachShadow({ mode: "open" }),
-// ) => (template && (shadow.append(template.content), remove(template)), shadow);
