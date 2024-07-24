@@ -188,10 +188,15 @@ export const define = <Props, Ref extends HTMLElement>(
   ElementClass: CustomElement<Props, Ref>,
 ) => {
   ElementClass.tag = name;
-  customElements.define(name, ElementClass, {
+  ElementClass.prototype && customElements.define(name, ElementClass, {
     extends: ElementClass[$extends],
   });
 };
+
+export const declareTag = (): CustomElement<
+  Record<never, never>,
+  HTMLElement
+> => (() => {}) as never;
 
 export const onDisconnect = (
   host: TypedHost<any, boolean>,

@@ -1,4 +1,11 @@
-export { css, define, element, onDisconnect, useInternals } from "./element.ts";
+export {
+  css,
+  declareTag,
+  define,
+  element,
+  onDisconnect,
+  useInternals,
+} from "./element.ts";
 
 export type { CustomElement, ElementProps, PropTypesProps } from "./element.ts";
 
