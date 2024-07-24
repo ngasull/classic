@@ -1,5 +1,13 @@
-import { deepMap, document, entries, listen, NULL } from "@classic/util";
 import {
+  deepMap,
+  document,
+  entries,
+  isFunction,
+  listen,
+  NULL,
+} from "@classic/util";
+import {
+  $props,
   type Children,
   type CustomElement,
   renderChildren,
@@ -11,20 +19,27 @@ type IntrinsicElementProps<T> = T extends "" ? Record<never, never>
   : T extends keyof JSX.IntrinsicElements ? JSX.IntrinsicElements[T]
   : never;
 
+export type ClassicElementJSXProps<T> = T extends
+  CustomElement<infer Props, infer Ref> ?
+    & { [P in keyof Props]: Props[P] | (() => Props[P]) }
+    & JSXInternal.MergedHTMLAttributes<Ref>
+    & { readonly children?: Children }
+  : never;
+
 type NativeElement = Element;
 
 declare namespace JSX {
   type IntrinsicElements =
     & JSXInternal.IntrinsicElements
     & {
-      [K in keyof Classic.Elements]: Classic.Elements[K] extends
-        CustomElement<any, infer Props, infer Ref> ?
-          & { [P in keyof Props]: Props[P] | (() => Props[P]) }
-          & JSXInternal.MergedHTMLAttributes<Ref>
-          & { readonly children?: Children }
-        : never;
+      [K in keyof Classic.Elements]: ClassicElementJSXProps<
+        Classic.Elements[K]
+      >;
     };
+
   type Element = NativeElement;
+
+  type ElementAttributesProperty = { [$props]: unknown };
 }
 
 declare namespace Classic {
@@ -33,17 +48,14 @@ declare namespace Classic {
 
 export type { Classic, JSX };
 
-export const jsx = <T extends keyof JSX.IntrinsicElements>(
-  type: T,
-  { children, xmlns: _, ...props }: IntrinsicElementProps<T> & {
+export const jsx = ((
+  type: string | CustomElement<unknown, HTMLElement>,
+  { children, xmlns: _, ...props }: Record<string, unknown> & {
     readonly children?: Children;
-    readonly xmlns?: never;
-  } = {} as IntrinsicElementProps<T> & {
-    readonly children?: Children;
-    readonly xmlns?: never;
-  },
+  } = {},
 ): ChildNode => {
   if (!type) return deepMap(children, (c) => c) as never;
+  type = isFunction(type) ? type.tag : type;
 
   let el = ns
     ? document.createElementNS(ns, type)
@@ -82,6 +94,18 @@ export const jsx = <T extends keyof JSX.IntrinsicElements>(
   ref?.(el);
   renderChildren(el, children);
   return el;
+}) as {
+  <T extends keyof JSX.IntrinsicElements>(
+    type: T,
+    opts: IntrinsicElementProps<T> & {
+      readonly children?: Children;
+      readonly xmlns?: never;
+    },
+  ): ChildNode;
+  <T extends CustomElement<unknown, HTMLElement>>(
+    type: T,
+    opts: ClassicElementJSXProps<T>,
+  ): ChildNode;
 };
 
 export { jsx as jsxs };

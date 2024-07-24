@@ -32,7 +32,7 @@ declare namespace JSX {
     }
     & {
       [K in keyof Classic.Elements]: Classic.Elements[K] extends
-        CustomElement<any, infer Props, infer Ref>
+        CustomElement<infer Props, infer Ref>
         ? IntrinsicServerElement<Props, Ref>
         : never;
     };

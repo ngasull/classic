@@ -3,7 +3,7 @@ import {
   denoResolverPlugin,
 } from "@luca/esbuild-deno-loader";
 import { exists } from "@std/fs";
-import { join, relative, resolve, SEPARATOR } from "@std/path";
+import { join, relative, resolve, SEPARATOR, toFileUrl } from "@std/path";
 import cssnano from "cssnano";
 import * as esbuild from "esbuild";
 import postcss from "postcss";
@@ -23,6 +23,17 @@ export type BundleOpts = {
   readonly denoJsonPath?: string;
 };
 
+const readElements = async (elementsDir: string) => {
+  const elements: [string, string][] = [];
+  for await (const { name, isFile } of Deno.readDir(elementsDir)) {
+    const match = name.match(tsRegExp);
+    if (isFile && match) {
+      elements.push([match[1], `${elementsDir}/${name}`]);
+    }
+  }
+  return elements;
+};
+
 export const buildBundle = async (
   {
     elementsDir,
@@ -33,18 +44,21 @@ export const buildBundle = async (
     denoJsonPath,
   }: BundleOpts,
 ): Promise<{ js: Uint8Array; css?: Uint8Array }> => {
-  const elementFiles: string[] = [];
-  for await (const { name, isFile } of Deno.readDir(elementsDir)) {
-    if (isFile && tsRegExp.test(name)) {
-      elementFiles.push(`${elementsDir}/${name}`);
-    }
-  }
-
+  const elements = await readElements(elementsDir);
   const result = await esbuild.build({
     stdin: {
-      contents: [...elementFiles, ...extraModules]
-        .map((p) => `import ${JSON.stringify(`./${toPosix(p)}`)};`)
-        .join("\n"),
+      contents: [
+        `import { define } from "@classic/element";`,
+        ...elements.map(([, path], i) =>
+          `import e${i} from ${JSON.stringify(`./${toPosix(path)}`)};`
+        ),
+        ...elements.map(([name], i) =>
+          `define(${JSON.stringify(name)}, e${i});`
+        ),
+        ...extraModules.map((p) =>
+          `import ${JSON.stringify(`./${toPosix(p)}`)};`
+        ),
+      ].join("\n"),
       loader: "js",
       resolveDir: ".",
     },
@@ -128,13 +142,14 @@ export const devBundle = async (
   let next = Promise.withResolvers<Result>();
 
   const opts = {
-    entryPoints: [join(elementsDir, "*"), ...extraModules],
+    entryPoints: ["@classic/element", join(elementsDir, "*"), ...extraModules],
     external,
     outbase: elementsDir,
     outdir: ".",
     metafile: true,
-    sourcemap: true,
     write: false,
+    format: "iife",
+    globalName: "exports",
     bundle: true,
     charset: "utf8",
     jsx: "automatic",
@@ -191,28 +206,41 @@ export const devBundle = async (
         );
       },
       get js() {
-        return Promise.resolve(last ?? next.promise).then((result) =>
-          encoder.encode(`
-${
-            result.outputFiles
+        return Promise.resolve(last ?? next.promise).then(async (result) => {
+          const classicElementEntry = import.meta.resolve("@classic/element");
+          const elements = await readElements(elementsDir);
+          const elementNameByPath = Object.fromEntries(
+            elements.map(([name, path]) => [path, name]),
+          );
+          return encoder.encode([
+            "{",
+            ...result.outputFiles
               .flatMap((outFile) => {
                 const ext = outFile.path.match(extensionRegExp)![1];
-                const relativePath = relative(Deno.cwd(), outFile.path);
-                if (
-                  ext === "js" &&
-                  result.metafile.outputs[relativePath]?.entryPoint
-                ) {
-                  return outFile.text + ";";
-                  // return `import("http://${server.host}:${server.port}/${relativePath}");`;
+                const outPath = relative(Deno.cwd(), outFile.path);
+                const { entryPoint } = result.metafile.outputs[outPath]!;
+                if (ext === "js" && entryPoint) {
+                  if (
+                    toFileUrl(resolve(entryPoint)).href === classicElementEntry
+                  ) {
+                    return [outFile.text, `const { define } = exports;`];
+                  } else if (elementNameByPath[entryPoint]) {
+                    return [
+                      outFile.text,
+                      `define(${
+                        JSON.stringify(elementNameByPath[entryPoint])
+                      }, exports.default);`,
+                    ];
+                  }
+                  return [outFile.text];
                 } else {
                   return [];
                 }
-              })
-              .join("\n")
-          }
-new EventSource("http://${server.host}:${server.port}/esbuild").addEventListener("change", () => location.reload());
-`)
-        );
+              }),
+            "}",
+            `new EventSource("http://${server.host}:${server.port}/esbuild").addEventListener("change", () => location.reload());`,
+          ].join("\n"));
+        });
       },
     },
     hmr: `http://${server.host}:${server.port}/esbuild`,

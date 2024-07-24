@@ -18,24 +18,23 @@ import {
 import { callOrReturn, onChange, signal } from "./signal.ts";
 
 const $disconnectCallbacks: unique symbol = $() as never;
+const $extends: unique symbol = $() as never;
 const $internals: unique symbol = $() as never;
-const $props: unique symbol = $() as never;
+export const $props: unique symbol = $() as never;
 const $propsSet: unique symbol = $() as never;
-declare const $tag: unique symbol;
 declare const $ref: unique symbol;
 
-type CustomTag = `${string}-${string}`;
-
 export type CustomElement<
-  Tag extends CustomTag | undefined,
   Props,
-  Ref extends EventTarget = HTMLElement,
+  Ref extends HTMLElement = HTMLElement,
 > = {
-  [$tag]?: Tag;
+  tag: string;
+  readonly [$extends]?: string;
   readonly [$ref]: Ref;
   readonly [$props]: Props;
-  new (): Ref;
-  readonly prototype: Ref;
+  new (): Ref & {
+    readonly [$props]: Props;
+  };
 };
 
 export type TypedHost<Public, Form extends boolean | undefined> =
@@ -46,8 +45,7 @@ export type TypedHost<Public, Form extends boolean | undefined> =
     readonly [$disconnectCallbacks]: Array<() => void>;
   };
 
-export type ElementProps<T> = T extends
-  CustomElement<CustomTag, infer Props, infer Ref>
+export type ElementProps<T> = T extends CustomElement<infer Props, infer Ref>
   ? Partial<Props> & { readonly ref?: (el: Ref) => void }
   : never;
 
@@ -65,8 +63,7 @@ type SignalsSet<Props> = { [K in keyof Props]: (v: Props[K]) => void };
 
 type Reactive<Props> = { [K in keyof Props]: () => Props[K] };
 
-export const define = <
-  N extends CustomTag,
+export const element = <
   PropTypes extends Record<string, PropType>,
   Form extends boolean | undefined,
   Def extends (
@@ -79,9 +76,11 @@ export const define = <
     props: Reactive<Props>,
   ) => unknown,
   Props extends PropTypesProps<PropTypes>,
-  Ref extends HTMLElement & Props & ReturnType<Def>,
+  Ref extends
+    & HTMLElement
+    & Props
+    & (ReturnType<Def> extends {} ? ReturnType<Def> : unknown),
 >(
-  name: N,
   { props: propTypes = {} as PropTypes, extends: extendsTag, form, js, css }: {
     readonly props?: PropTypes;
     readonly extends?: string;
@@ -89,12 +88,7 @@ export const define = <
     readonly css?: string | CSSStyleSheet | (string | CSSStyleSheet)[];
     readonly js?: Def;
   },
-): CustomElement<N, Props, Ref> => {
-  if (!document) {
-    // @ts-ignore stub switch for universal compiling
-    return;
-  }
-
+): CustomElement<Props, Ref> => {
   let ParentClass =
     (extendsTag
       ? document.createElement(extendsTag).constructor
@@ -114,6 +108,7 @@ export const define = <
         return [prop, get];
       }),
     ) as never;
+    [$extends] = extendsTag;
     [$internals] = (form && this.attachInternals()) as Form extends true
       ? ElementInternals
       : never;
@@ -185,9 +180,17 @@ export const define = <
 
   ElementClass.observedAttributes = keys(attrToProp);
 
-  customElements.define(name, ElementClass, { extends: extendsTag });
+  return ElementClass as unknown as CustomElement<Props, Ref>;
+};
 
-  return ElementClass as unknown as CustomElement<N, Props, Ref>;
+export const define = <Props, Ref extends HTMLElement>(
+  name: `${string}-${string}`,
+  ElementClass: CustomElement<Props, Ref>,
+) => {
+  ElementClass.tag = name;
+  customElements.define(name, ElementClass, {
+    extends: ElementClass[$extends],
+  });
 };
 
 export const onDisconnect = (
