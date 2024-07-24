@@ -186,7 +186,7 @@ export const element = <
 export const define = <Props, Ref extends HTMLElement>(
   name: `${string}-${string}`,
   ElementClass: CustomElement<Props, Ref>,
-) => {
+): void => {
   ElementClass.tag = name;
   ElementClass.prototype && customElements.define(name, ElementClass, {
     extends: ElementClass[$extends],
