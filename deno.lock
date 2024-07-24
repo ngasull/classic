@@ -2,6 +2,7 @@
   "version": "3",
   "packages": {
     "specifiers": {
+      "jsr:@hono/hono@^4.4.8": "jsr:@hono/hono@4.4.8",
       "jsr:@luca/esbuild-deno-loader@^0.10.3": "jsr:@luca/esbuild-deno-loader@0.10.3",
       "jsr:@std/assert@^0.213.1": "jsr:@std/assert@0.213.1",
       "jsr:@std/assert@^0.226.0": "jsr:@std/assert@0.226.0",
@@ -22,9 +23,13 @@
       "jsr:@std/path@^0.225.2": "jsr:@std/path@0.225.2",
       "jsr:@std/streams@^0.224.5": "jsr:@std/streams@0.224.5",
       "npm:cssnano@^7.0.4": "npm:cssnano@7.0.4_postcss@8.4.39",
-      "npm:esbuild@^0.23.0": "npm:esbuild@0.23.0"
+      "npm:esbuild@^0.23.0": "npm:esbuild@0.23.0",
+      "npm:postcss@^8.4.39": "npm:postcss@8.4.39"
     },
     "jsr": {
+      "@hono/hono@4.4.8": {
+        "integrity": "6b387c666d4a1d2f50fbf7968ecaa73eb37690d08be0f5f3efe2d15dd6a679ce"
+      },
       "@luca/esbuild-deno-loader@0.10.3": {
         "integrity": "32fc93f7e7f78060234fd5929a740668aab1c742b808c6048b57f9aaea514921",
         "dependencies": [
@@ -715,8 +720,13 @@
       "jsr:@classic/util@0",
       "jsr:@hono/hono@^4.4.8",
       "jsr:@luca/esbuild-deno-loader@^0.10.3",
+      "jsr:@std/assert@0.213",
+      "jsr:@std/encoding@0.213",
+      "jsr:@std/fs@0.213",
       "jsr:@std/fs@^0.229.3",
       "jsr:@std/http@^0.224.5",
+      "jsr:@std/jsonc@0.213",
+      "jsr:@std/path@0.213",
       "jsr:@std/path@^0.225.2",
       "npm:cssnano@^7.0.4",
       "npm:esbuild@^0.23.0",
