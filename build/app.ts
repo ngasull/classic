@@ -1,6 +1,6 @@
 import { ServedJSContext } from "@classic/js";
 import { join } from "@std/path";
-import { buildBundle, Bundle, devBundle } from "./bundle.ts";
+import { buildBundle, Bundle, CSSTransformer, devBundle } from "./bundle.ts";
 import { buildModules, devModules, loadModules } from "./modules.ts";
 
 export type AppBuild = {
@@ -17,7 +17,7 @@ export type BuildOpts = {
   readonly criticalModules?: string[];
   readonly deferredModules: string[];
   readonly external?: string[];
-  readonly transformCss?: (css: string) => string;
+  readonly transformCss?: CSSTransformer;
   readonly denoJsonPath?: string;
 };
 
