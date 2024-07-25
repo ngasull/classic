@@ -1,20 +1,18 @@
 import {
   adoptNode,
   call,
-  document,
   domParse,
   forEach,
   listen,
-  location,
   preventDefault,
-  Promise,
   querySelector,
   querySelectorAll,
   remove,
   replaceWith,
   TRUE,
-  window,
 } from "@classic/util";
+
+const { document, location, Promise } = globalThis;
 
 const suspenseDelay = 500;
 

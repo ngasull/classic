@@ -1,10 +1,7 @@
 import {
-  $,
-  CSSStyleSheet,
   deepMap,
   defineProperties,
   defineProperty,
-  document,
   entries,
   fromEntries,
   getOwnPropertyDescriptors,
@@ -12,16 +9,17 @@ import {
   keys,
   length,
   NULL,
-  querySelectorAll,
   UNDEFINED,
 } from "@classic/util";
 import { callOrReturn, onChange, signal } from "./signal.ts";
 
-const $disconnectCallbacks: unique symbol = $() as never;
-export const $extends: unique symbol = $() as never;
-const $internals: unique symbol = $() as never;
-export const $props: unique symbol = $() as never;
-const $propsSet: unique symbol = $() as never;
+const { CSSStyleSheet: CSSStyleSheet_, Symbol: Symbol_ } = globalThis;
+
+const $disconnectCallbacks: unique symbol = Symbol_() as never;
+export const $extends: unique symbol = Symbol_() as never;
+const $internals: unique symbol = Symbol_() as never;
+export const $props: unique symbol = Symbol_() as never;
+const $propsSet: unique symbol = Symbol_() as never;
 declare const $ref: unique symbol;
 
 export type CustomElement<
@@ -136,7 +134,7 @@ export const element = <
         adoptedStyleSheets(root!).push(
           ...definedStyleSheets ??= deepMap(
             css,
-            (v) => v instanceof CSSStyleSheet ? v : constructCSS(v),
+            (v) => v instanceof CSSStyleSheet_ ? v : constructCSS(v),
           ),
         );
       }
@@ -245,22 +243,6 @@ const nativePropTypes = new Map<PropType, (attr: string | null) => any>([
 export const adoptedStyleSheets = (shadow: ShadowRoot): CSSStyleSheet[] =>
   shadow.adoptedStyleSheets;
 
-export const declarativeFirstStyle = (): void => {
-  let tagStyles: Record<string, CSSStyleSheet[] | undefined> = {},
-    el,
-    shadowRoot;
-  for (el of querySelectorAll(":not(:defined)")) {
-    shadowRoot = el.shadowRoot;
-    if (shadowRoot) {
-      adoptedStyleSheets(shadowRoot).push(
-        ...tagStyles[el.tagName] ??= [
-          ...(shadowRoot.styleSheets ?? []),
-        ].map(cloneStyleSheet),
-      );
-    }
-  }
-};
-
 export const cloneStyleSheet = (styleSheet: CSSStyleSheet): CSSStyleSheet => {
   let cssRules: string[] = [], r;
   for (r of styleSheet.cssRules) cssRules.push(r.cssText);
@@ -288,7 +270,7 @@ export const css = (tpl: TemplateStringsArray): string => tpl[0];
 
 const constructCSS = (
   css: string,
-  styleSheet = new CSSStyleSheet(),
+  styleSheet = new CSSStyleSheet_(),
 ) => (styleSheet.replace(css), styleSheet);
 
 const attachShadow = (host: HTMLElement) => host.attachShadow({ mode: "open" });

@@ -1,6 +1,5 @@
 import {
   deepMap,
-  document,
   entries,
   isFunction,
   listen,
@@ -16,6 +15,8 @@ import {
 } from "./element.ts";
 import type { JSXInternal } from "./jsx-dom.d.ts";
 import { callOrReturn, track } from "./signal.ts";
+
+const doc = document;
 
 type IntrinsicElementProps<T> = T extends "" ? Record<never, never>
   : T extends keyof JSX.IntrinsicElements ? JSX.IntrinsicElements[T]
@@ -66,8 +67,8 @@ export const jsx = ((
     : type;
 
   let el = ns
-    ? document.createElementNS(ns, type, createOpts)
-    : document.createElement(type, createOpts);
+    ? doc.createElementNS(ns, type, createOpts)
+    : doc.createElement(type, createOpts);
   let ref: ((v: ParentNode) => void) | null = NULL;
   let eventMatch: RegExpMatchArray | null;
 

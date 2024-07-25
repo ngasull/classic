@@ -1,25 +1,12 @@
 // Const
 
-const gbl = globalThis;
-
-const Array = /* @__PURE__ */ gbl.Array;
-const DOMParser = /* @__PURE__ */ gbl.DOMParser;
-const JSON = /* @__PURE__ */ gbl.JSON;
-const Object = /* @__PURE__ */ gbl.Object;
+const globalThis_ = globalThis;
+const Object_ = Object;
 
 export const TRUE: true = !0;
-export const FALSE: false = !TRUE;
+export const FALSE: false = !1;
 export const NULL: null = null;
 export const UNDEFINED: undefined = void 0;
-
-export const document = /* @__PURE__ */ gbl.document;
-export const CSSStyleSheet = /* @__PURE__ */ gbl.CSSStyleSheet;
-export const Promise = /* @__PURE__ */ gbl.Promise;
-export const $ = /* @__PURE__ */ gbl.Symbol;
-export const window = /* @__PURE__ */ gbl.window;
-export const location = /* @__PURE__ */ gbl.location;
-
-export const routeLoadEvent = "route-load";
 
 // FP
 
@@ -60,48 +47,27 @@ export const isString = (v: unknown): v is string => typeof v === "string";
 
 export const length = (lengthy: { length: number }) => lengthy.length;
 
-export const memo1 = <Fn extends (arg: any) => any>(
-  fn: Fn,
-): Fn & { del: (a: Parameters<Fn>[0]) => boolean } => {
-  let cache = new WeakMap(),
-    m = ((arg) => (
-      !cache.has(arg) && cache.set(arg, fn(arg)), cache.get(arg)
-    )) as Fn & { del: (a: Parameters<Fn>[0]) => boolean };
-  m.del = (arg: Parameters<Fn>[0]) => cache.delete(arg);
-  return m;
-};
-
 export const noop = (): void => {};
-
-export const popR = <T>(arr: T[]): T[] => (arr.pop(), arr);
-
-export const pushR = <T>(arr: T[], ...v: T[]): T[] => (arr.push(...v), arr);
-
-export const toLowerCase = (str: string): string => str.toLowerCase();
 
 export const isArray = /* @__PURE__ */ Array.isArray;
 
-export const arraySlice = /* @__PURE__ */ Array.prototype.slice;
-
-export const parse = /* @__PURE__ */ JSON.parse;
-
-export const assign = /* @__PURE__ */ Object.assign;
-export const defineProperty = /* @__PURE__ */ Object.defineProperty;
-export const defineProperties = /* @__PURE__ */ Object.defineProperties;
-export const entries = /* @__PURE__ */ Object.entries;
-export const freeze = /* @__PURE__ */ Object.freeze;
-export const fromEntries = /* @__PURE__ */ Object.fromEntries;
+export const assign = /* @__PURE__ */ Object_.assign;
+export const defineProperty = /* @__PURE__ */ Object_.defineProperty;
+export const defineProperties = /* @__PURE__ */ Object_.defineProperties;
+export const entries = /* @__PURE__ */ Object_.entries;
+export const freeze = /* @__PURE__ */ Object_.freeze;
+export const fromEntries = /* @__PURE__ */ Object_.fromEntries;
 export const getOwnPropertyDescriptors =
-  /* @__PURE__ */ Object.getOwnPropertyDescriptors;
-export const keys = /* @__PURE__ */ Object.keys;
-export const values = /* @__PURE__ */ Object.values;
+  /* @__PURE__ */ Object_.getOwnPropertyDescriptors;
+export const keys = /* @__PURE__ */ Object_.keys;
+export const values = /* @__PURE__ */ Object_.values;
 
 // DOM
 
-const domParser = /* @__PURE__ */ DOMParser && new DOMParser();
+let domParser: DOMParser | null = NULL;
 
 export const domParse = (html: string): Document =>
-  domParser.parseFromString(html, "text/html");
+  (domParser ??= new DOMParser()).parseFromString(html, "text/html");
 
 export const html = (
   xml: string,
@@ -170,14 +136,14 @@ export const hyphenize = (camel: string): string =>
   );
 
 export const global = <T>(name: string, init: T): { (): T; (v: T): T } => {
-  let $accessor = $.for(name),
+  let $accessor = Symbol.for(name),
     getSet = (...args: [] | [T]) =>
       length(args)
         // @ts-ignore wrapped in this function to avoid overloading global types
-        ? gbl[$accessor] = args[0]
-        : $accessor in gbl
+        ? globalThis_[$accessor] = args[0]
+        : $accessor in globalThis_
         // @ts-ignore wrapped in this function to avoid overloading global types
-        ? gbl[$accessor]
+        ? globalThis_[$accessor]
         : init;
   return getSet;
 };
