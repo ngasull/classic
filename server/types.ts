@@ -1,4 +1,4 @@
-import type { Classic, CustomElement } from "@classic/element";
+import type { CustomElement, CustomElements } from "@classic/element";
 import type { JS, JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
 import type { VoidElement } from "./void.ts";
@@ -31,7 +31,7 @@ declare namespace JSX {
       "cc-route": IntrinsicServerElement<{ path?: string }, HTMLElement>;
     }
     & {
-      [K in keyof Classic.Elements]: Classic.Elements[K] extends
+      [K in keyof CustomElements]: CustomElements[K] extends
         CustomElement<infer Props, infer Ref>
         ? IntrinsicServerElement<Props, Ref>
         : never;

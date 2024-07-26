@@ -35,9 +35,7 @@ declare namespace JSX {
   type IntrinsicElements =
     & JSXInternal.IntrinsicElements
     & {
-      [K in keyof Classic.Elements]: ClassicElementJSXProps<
-        Classic.Elements[K]
-      >;
+      [K in keyof CustomElements]: ClassicElementJSXProps<CustomElements[K]>;
     };
 
   type Element = NativeElement;
@@ -45,11 +43,9 @@ declare namespace JSX {
   type ElementAttributesProperty = { [$props]: unknown };
 }
 
-declare namespace Classic {
-  interface Elements {}
-}
+export interface CustomElements {}
 
-export type { Classic, JSX };
+export type { JSX };
 
 export const jsx = ((
   type: string | CustomElement<unknown, HTMLElement>,

@@ -577,6 +577,8 @@ export const jsResources = (expr: JSable): string[] => {
   return [...r];
 };
 
+export interface Module {}
+
 const jsUtils = {
   comma: <T>(...exprs: [...JSable<unknown>[], JSable<T>]): JS<T> => {
     const parts = Array(exprs.length + 1);
@@ -609,7 +611,7 @@ const jsUtils = {
       ? JS<(...args: Args) => T> & { [jsSymbol]: JSMetaFunction }
       : never,
 
-  module: <T>(name: string): JS<T> =>
+  module: ((name: string) =>
     makeConvenient(
       jsable(
         new JSMetaVar((context) => {
@@ -622,8 +624,11 @@ const jsUtils = {
           }
           return [module[jsSymbol]];
         }, { isntAssignable: true }),
-      )<T>(),
-    ),
+      )(),
+    )) as {
+      <M extends keyof Module>(name: M): JS<Module[M]>;
+      <T = never>(name: string): T extends never ? never : JS<T>;
+    },
 
   optional: <T>(expr: JSable<T>): JS<NonNullable<T>> => {
     const p = js<NonNullable<T>>`${expr}`;
@@ -856,6 +861,15 @@ const contentTypes = {
   map: "application/json; charset=utf-8",
 } as const;
 
+export type ServedMeta = {
+  base: string;
+  modules: Array<{
+    name: string;
+    src: string;
+    pub: string;
+  }>;
+};
+
 export class ServedJSContext {
   readonly #byName: Record<string, { [jsSymbol]: JSMetaModule }> = {};
   readonly #byPublic: Record<string, string> = {};
@@ -879,12 +893,25 @@ export class ServedJSContext {
     );
   }
 
+  meta(): string {
+    const meta: ServedMeta = {
+      base: this.base,
+      modules: Object.entries(this.#byName).map(([name, m]) => ({
+        name,
+        src: m[jsSymbol].localUrl,
+        pub: m[jsSymbol].publicUrl,
+      })),
+    };
+    return JSON.stringify(meta);
+  }
+
   add<M>(name: string, localUrl: string, publicUrl: string): JS<M> {
     const moduleMemo: Record<string | symbol, JSable<unknown>> = {};
     const m = this.#byName[name] ??= new Proxy(
       makeConvenient(jsable(new JSMetaModule(this, localUrl, publicUrl))<M>()),
       {
         get(target, p) {
+          if (p in target) return target[p as keyof typeof target];
           if (p in moduleMemo) return moduleMemo[p];
           moduleMemo[p] = target[p as never];
           // Module exports can be mutable
@@ -923,11 +950,23 @@ export class ServedJSContext {
 
 export const createServedContext = (): ServedJSContext => new ServedJSContext();
 
+export const loadServedContext = (meta: string): ServedJSContext => {
+  const { base, modules }: ServedMeta = JSON.parse(meta);
+  const served = new ServedJSContext();
+  served.base = base;
+
+  for (const { name, src, pub } of modules) {
+    served.add(name, src, pub);
+  }
+
+  return served;
+};
+
 class JSMetaModule extends JSMeta {
   constructor(
     private readonly context: ServedJSContext,
-    private readonly localUrl: string,
-    private readonly publicUrl: string,
+    readonly localUrl: string,
+    readonly publicUrl: string,
   ) {
     super();
   }

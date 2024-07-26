@@ -15,4 +15,4 @@ export type { Signal } from "./signal.ts";
 
 export { ref, svgns } from "./jsx.ts";
 
-export type { Classic } from "./jsx.ts";
+export type { CustomElements } from "./jsx.ts";

@@ -1,6 +1,6 @@
-import type { ServedJSContext } from "@classic/js";
+import { createServedContext, ServedJSContext } from "@classic/js";
 import { denoPlugins } from "@luca/esbuild-deno-loader";
-import { dirname, join, resolve, SEPARATOR, toFileUrl } from "@std/path";
+import { dirname, join, resolve, SEPARATOR } from "@std/path";
 import {
   fromFileUrl as posixFromFileUrl,
   relative as posixRelative,
@@ -14,55 +14,49 @@ const toPosix = SEPARATOR === "/"
   : (p: string) => p.replaceAll(SEPARATOR, "/");
 
 export type ModulesOpts = {
-  readonly modules: string[];
-  readonly clientDir: string;
-  readonly clientFile: string;
-  readonly external?: string[];
-  readonly denoJsonPath?: string;
+  modules: string[];
+  clientDir: string;
+  clientFile: string;
+  external?: string[];
+  denoJsonPath?: string;
 };
 
 export const buildModules = async (
-  opts: ModulesOpts & { readonly outDir: string },
-): Promise<void> => {
-  const context = await mkContext(opts);
+  opts: Readonly<ModulesOpts & { outDir: string }>,
+): Promise<string> => {
+  const [context, served] = await mkContext(opts);
   try {
     const result = await context.rebuild();
     if (result.errors.length) {
       throw Error(result.errors.map((e) => e.text).join("\n"));
     }
+    return served.meta();
   } finally {
     await context.dispose();
   }
 };
 
-export const loadModules = (
-  { clientFile }: Pick<ModulesOpts, "clientFile">,
-): Promise<ServedJSContext> =>
-  import(toFileUrl(resolve(clientFile)).href).then(({ servedJS }) => servedJS);
-
 export const devModules = async (
-  { host = "127.0.0.1", port, ...opts }: ModulesOpts & {
-    readonly host?: string;
-    readonly port?: number;
-  },
+  { host = "127.0.0.1", port, ...opts }: Readonly<
+    ModulesOpts & { host?: string; port?: number }
+  >,
 ): Promise<{
-  servedJS: ServedJSContext;
+  served: ServedJSContext;
   host: string;
   port: number;
   hmr: string;
   stop: () => Promise<void>;
 }> => {
-  const context = await mkContext(opts);
+  const [context, served] = await mkContext(opts);
   await context.watch();
   const server = await context.serve({ host, port });
 
   await context.rebuild();
-  const servedJS = await loadModules(opts);
-  servedJS.base = `http://${server.host}:${server.port}/`;
+  served.base = `http://${server.host}:${server.port}/`;
 
   return {
     ...server,
-    servedJS,
+    served,
     get hmr() {
       return `new EventSource("http://${server.host}:${server.port}/esbuild").addEventListener("change", () => location.reload());`;
     },
@@ -74,11 +68,13 @@ export const devModules = async (
 };
 
 const mkContext = async (
-  opts: ModulesOpts & { readonly outDir?: string },
+  opts: Readonly<ModulesOpts & { outDir?: string }>,
 ) => {
   const { denoJsonPath, modules, external, clientDir, clientFile, outDir } =
     opts;
-  return esbuild.context({
+  const served = createServedContext();
+
+  const context = await esbuild.context({
     entryPoints: [...modules, join(clientDir, "*")],
     external,
     outbase: clientDir,
@@ -123,7 +119,6 @@ const mkContext = async (
             );
             const outputEntries = Object.entries(result.metafile!.outputs);
             const outs: {
-              outPath: string;
               entryPoint: string;
               modulePath: string;
               moduleName: string;
@@ -142,8 +137,9 @@ const mkContext = async (
                     "./" + posixRelative(posixDir, entryPoint),
                   ];
 
+                served.add(moduleName, entryPoint, outPath);
+
                 outs.push({
-                  outPath,
                   entryPoint,
                   moduleName,
                   modulePath,
@@ -151,33 +147,18 @@ const mkContext = async (
               }
             }
 
-            const newClient =
-              `import { createServedContext, type JS } from "@classic/js";
+            const newClient = `import "@classic/js";
 
-export const servedJS = createServedContext();
-
-type Client = {${
-                outs.map(({ moduleName, modulePath }) =>
-                  `\n  ${JSON.stringify(moduleName)}: JS<typeof import(${
-                    JSON.stringify(modulePath)
-                  })>,`
-                ).join("")
-              }
-};
-
-/**
- * Client code wrapper
- */
-export const client: Client = {${
-                outs.map(({ moduleName, modulePath, outPath }) =>
-                  `\n  ${JSON.stringify(moduleName)}: servedJS.add(
-    ${JSON.stringify(moduleName)},
-    import.meta.resolve(${JSON.stringify(modulePath)}),
-    ${JSON.stringify(outPath)},
-  ),`
-                ).join("")
-              }
-};
+declare module "@classic/js" {
+  interface Module {${
+              outs.map(({ moduleName, modulePath }) =>
+                `\n    ${JSON.stringify(moduleName)}: typeof import(${
+                  JSON.stringify(modulePath)
+                });`
+              ).join("")
+            }
+  }
+}
 `;
 
             if (newClient !== await prevClient) {
@@ -189,4 +170,6 @@ export const client: Client = {${
       } satisfies esbuild.Plugin,
     ],
   });
+
+  return [context, served] as const;
 };

@@ -455,16 +455,14 @@ const genTypesPlugin = (
       const newDef = `import "@classic/element";
 
 declare module "@classic/element" {
-  namespace Classic {
-    interface Elements {
+  interface CustomElements {
 ${
         elementToSrc.map(([name, src]) =>
-          `      ${JSON.stringify(name)}: typeof import(${
+          `    ${JSON.stringify(name)}: typeof import(${
             JSON.stringify(src)
           })["default"];`
         ).join("\n")
       }
-    }
   }
 }
 `;

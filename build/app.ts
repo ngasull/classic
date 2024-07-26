@@ -1,7 +1,7 @@
-import { ServedJSContext } from "@classic/js";
+import { loadServedContext, ServedJSContext } from "@classic/js";
 import { join } from "@std/path";
 import { buildBundle, Bundle, CSSTransformer, devBundle } from "./bundle.ts";
-import { buildModules, devModules, loadModules } from "./modules.ts";
+import { buildModules, devModules } from "./modules.ts";
 
 export type AppBuild = {
   critical: Bundle;
@@ -32,7 +32,7 @@ export const devApp = async ({
   transformCss,
   denoJsonPath,
 }: BuildOpts): Promise<AppBuild> => {
-  const [{ bundle }, { servedJS }] = await Promise.all([
+  const [{ bundle }, { served }] = await Promise.all([
     devBundle({
       elementsDir,
       elementsDeclarationFile,
@@ -50,7 +50,7 @@ export const devApp = async ({
     }),
   ]);
 
-  return { critical: bundle, deferred: servedJS };
+  return { critical: bundle, deferred: served };
 };
 
 export const buildApp = async ({
@@ -65,7 +65,7 @@ export const buildApp = async ({
   transformCss,
   denoJsonPath,
 }: BuildOpts & { readonly outDir: string }): Promise<void> => {
-  const [{ js, css }] = await Promise.all([
+  const [{ js, css }, meta] = await Promise.all([
     buildBundle({
       elementsDir,
       elementsDeclarationFile,
@@ -85,12 +85,15 @@ export const buildApp = async ({
     }),
   ]);
 
-  await Deno.writeFile(join(outDir, "critical.js"), js);
-  if (css) await Deno.writeFile(join(outDir, "critical.css"), css);
+  await Promise.all([
+    Deno.writeTextFile(join(outDir, "meta.json"), meta),
+    Deno.writeFile(join(outDir, "critical.js"), js),
+    css && Deno.writeFile(join(outDir, "critical.css"), css),
+  ]);
 };
 
 export const loadApp = async (
-  { outDir, clientFile }: Pick<BuildOpts, "clientFile"> & {
+  { outDir }: Pick<BuildOpts, "clientFile"> & {
     readonly outDir: string;
   },
 ): Promise<AppBuild> => {
@@ -99,6 +102,8 @@ export const loadApp = async (
       js: Deno.readFile(join(outDir, "critical.js")),
       css: Deno.readFile(join(outDir, "critical.css")).catch((_) => undefined),
     },
-    deferred: await loadModules({ clientFile }),
+    deferred: loadServedContext(
+      await Deno.readTextFile(join(outDir, "meta.json")),
+    ),
   };
 };
