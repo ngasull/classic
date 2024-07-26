@@ -3,8 +3,7 @@
 const globalThis_ = globalThis;
 const Object_ = Object;
 
-export const TRUE: true = !0;
-export const FALSE: false = !1;
+export const TRUE: boolean = !0;
 export const NULL: null = null;
 export const UNDEFINED: undefined = void 0;
 

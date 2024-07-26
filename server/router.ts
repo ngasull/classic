@@ -17,6 +17,8 @@ import type {
   JSXContextInit,
 } from "./types.ts";
 
+const globalCssPath = "/global.css";
+
 type LayoutComponent<Params extends string> = JSXComponent<
   { [P in Params]: string } & { readonly children?: JSX.Element }
 >;
@@ -218,27 +220,36 @@ class Segment<
 
   async fetch(
     req: Request,
-    { context, js: jsContext }: {
+    { context, build }: {
       context?: JSXContextInit<unknown>[] | JSXContextAPI | undefined;
-      js: ServedJSContext;
+      build: AppBuild;
     },
   ): Promise<Response | void> {
     const use = initContext(context);
     use.provide($initResponse, {});
-    use.provide($served, jsContext);
+    use.provide($served, build.deferred);
 
-    const acceptsHtml = req.method === "GET" &&
-      accepts(req).includes("text/html");
-
+    const isGET = req.method === "GET";
+    const reqAccepts = accepts(req);
     const { pathname, searchParams } = new URL(req.url);
+
+    if (
+      isGET && pathname === globalCssPath && reqAccepts.includes("text/css")
+    ) {
+      const css = await build.critical.css;
+      return css && new Response(css, {
+        headers: { "Content-Type": "text/css; charset=UTF-8" },
+      });
+    }
+
     const segments = pathname === "/" ? [] : pathname.slice(1).split("/");
 
     const layouts = await this.#matchRoutes(segments);
     if (!layouts) return;
     const [lastSegment, , , partParams] = layouts[layouts.length - 1];
 
-    const reqFrom = req.method === "GET" &&
-      searchParams.get("cc-from")?.split("/");
+    const reqFrom = isGET && searchParams.get("cc-from")?.split("/");
+    const acceptsHtml = isGET && reqAccepts.includes("text/html");
 
     if (reqFrom || acceptsHtml) {
       const part = jsx(lastSegment.part() ?? NotFound, partParams);
@@ -257,8 +268,14 @@ class Segment<
       const segments = reqFrom ? layouts.slice(resFromIndex + 1) : layouts;
       let stream = render(
         jsx("cc-route", {
-          children: jsx(Html, {
-            contents: render(part, { context: initContext(use) }),
+          children: jsx("template", {
+            shadowrootmode: "open",
+            children: [
+              jsx("link", { rel: "stylesheet", href: globalCssPath }),
+              jsx(Html, {
+                contents: render(part, { context: initContext(use) }),
+              }),
+            ],
           }),
         }),
       );
@@ -333,7 +350,13 @@ const layout = <Params extends string>(
   jsx("cc-route", {
     path,
     children: [
-      jsx(Layout, { ...params, children: jsx("slot") }),
+      jsx("template", {
+        shadowrootmode: "open",
+        children: [
+          jsx("link", { rel: "stylesheet", href: globalCssPath }),
+          jsx(Layout, { ...params, children: jsx("slot") }),
+        ],
+      }),
       jsx(Html, { contents: stream }),
     ],
   });

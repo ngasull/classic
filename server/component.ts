@@ -7,7 +7,7 @@ export const Bundle: JSXComponent<BundleType> = async (bundle) => {
   const decoder = new TextDecoder();
   return Fragment({
     children: [
-      css ? jsx("style", { children: decoder.decode(css) }) : null,
+      css ? jsx("link", { rel: "stylesheet", href:"/global.css" }) : null,
       jsx("script", { children: decoder.decode(js) }),
     ],
   });
