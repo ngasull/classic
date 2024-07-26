@@ -1,3 +1,4 @@
+import { define, element } from "@classic/element";
 import {
   adoptNode,
   call,
@@ -144,31 +145,42 @@ const isLocal = (href: string) => {
   return new URL(href, origin).origin == origin;
 };
 
-export const init = (): () => void => {
-  let t: EventTarget | null,
-    subs: Array<() => void> = [
-      listen(
-        document.body,
-        "click",
-        (e) =>
-          !e.ctrlKey &&
-          !e.shiftKey &&
-          (t = e.target) instanceof HTMLAnchorElement &&
-          isLocal(t.href) && (preventDefault(e), navigate(t.href)),
-      ),
+const initRoot = (target: EventTarget | null) => {
+  if (target) {
+    let t: EventTarget | null;
+    listen(
+      target,
+      "click",
+      (e) =>
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        (t = e.target) instanceof HTMLAnchorElement &&
+        isLocal(t.href) && (preventDefault(e), navigate(t.href)),
+    );
 
-      listen(
-        document.body,
-        "submit",
-        (e) =>
-          (t = e.target) instanceof HTMLFormElement &&
-          t.method == "get" &&
-          !e.defaultPrevented &&
-          isLocal(t.action) && (preventDefault(e), navigate(t.action)),
-      ),
-
-      listen(window, "popstate", () => navigate(location.href)),
-    ];
-
-  return () => subs.map(call);
+    listen(
+      target,
+      "submit",
+      (e) =>
+        (t = e.target) instanceof HTMLFormElement &&
+        t.method == "get" &&
+        !e.defaultPrevented &&
+        isLocal(t.action) && (preventDefault(e), navigate(t.action)),
+    );
+  }
 };
+
+export const init = () => {
+  initRoot(document.body);
+  listen(window, "popstate", () => navigate(location.href));
+};
+
+define(
+  ccRoute,
+  element({
+    defer: TRUE,
+    js(dom) {
+      initRoot(dom().shadowRoot);
+    },
+  }),
+);

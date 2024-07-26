@@ -1,4 +1,5 @@
 import {
+  call,
   deepMap,
   defineProperties,
   defineProperty,
@@ -8,12 +9,14 @@ import {
   hyphenize,
   keys,
   length,
+  listen,
   NULL,
   UNDEFINED,
 } from "@classic/util";
 import { callOrReturn, onChange, signal } from "./signal.ts";
 
-const { CSSStyleSheet: CSSStyleSheet_, Symbol: Symbol_ } = globalThis;
+const { CSSStyleSheet: CSSStyleSheet_, document: document_, Symbol: Symbol_ } =
+  globalThis;
 
 const $disconnectCallbacks: unique symbol = Symbol_() as never;
 export const $extends: unique symbol = Symbol_() as never;
@@ -79,12 +82,20 @@ export const element = <
     & Props
     & (ReturnType<Def> extends {} ? ReturnType<Def> : unknown),
 >(
-  { props: propTypes = {} as PropTypes, extends: extendsTag, form, js, css }: {
+  {
+    props: propTypes = {} as PropTypes,
+    extends: extendsTag,
+    form,
+    js,
+    css,
+    defer,
+  }: {
     readonly props?: PropTypes;
     readonly extends?: string;
     readonly form?: Form;
     readonly css?: string | CSSStyleSheet | (string | CSSStyleSheet)[];
     readonly js?: Def;
+    readonly defer?: boolean;
   },
 ): CustomElement<Props, Ref> => {
   let definedStyleSheets: CSSStyleSheet[] | null = NULL;
@@ -111,10 +122,17 @@ export const element = <
     static observedAttributes: string[];
     static readonly formAssociated = !!form;
 
-    connectedCallback(): void {
+    connectedCallback() {
       // deno-lint-ignore no-this-alias
       let self = this;
       let root = self.shadowRoot;
+
+      if (defer) {
+        if (isLoading()) {
+          return onLoaded(() => this.connectedCallback());
+        }
+        if (!self.shadowRoot) attachShadowTemplate(self);
+      }
 
       let api = js?.(
         ((...args: [] | [Children | ShadowRoot]) => (
@@ -131,7 +149,7 @@ export const element = <
 
       if (css) {
         if (!js) root ??= attachShadow(self);
-        adoptedStyleSheets(root!).push(
+        root!.adoptedStyleSheets.push(
           ...definedStyleSheets ??= deepMap(
             css,
             (v) => v instanceof CSSStyleSheet_ ? v : constructCSS(v),
@@ -141,7 +159,7 @@ export const element = <
     }
 
     disconnectedCallback() {
-      this[$disconnectCallbacks].forEach((cb) => cb());
+      this[$disconnectCallbacks].map(call);
     }
 
     attributeChangedCallback(
@@ -240,9 +258,6 @@ const nativePropTypes = new Map<PropType, (attr: string | null) => any>([
   ),
 ]);
 
-export const adoptedStyleSheets = (shadow: ShadowRoot): CSSStyleSheet[] =>
-  shadow.adoptedStyleSheets;
-
 export const cloneStyleSheet = (styleSheet: CSSStyleSheet): CSSStyleSheet => {
   let cssRules: string[] = [], r;
   for (r of styleSheet.cssRules) cssRules.push(r.cssText);
@@ -258,7 +273,7 @@ export const renderChildren = (el: ParentNode, children: Children) =>
           node = (callOrReturn(c) ?? "") as Node;
           return node = node instanceof Node
             ? node
-            : document.createTextNode(node as string);
+            : document_.createTextNode(node as string);
         },
         (current, prev) => el.replaceChild(current, prev),
       );
@@ -274,3 +289,18 @@ const constructCSS = (
 ) => (styleSheet.replace(css), styleSheet);
 
 const attachShadow = (host: HTMLElement) => host.attachShadow({ mode: "open" });
+
+// Makes shadowrootmode work for older browsers and dynamic content (like router)
+const attachShadowTemplate = (host: HTMLElement) => {
+  let tpl = host.querySelector<HTMLTemplateElement>(
+    "template[shadowrootmode=open]",
+  );
+  let root = tpl && attachShadow(host);
+  root?.append(tpl!.content);
+  return root;
+};
+
+const isLoading = () => document_.readyState == "loading";
+
+const onLoaded = (cb: () => void) =>
+  isLoading() ? listen(document_, "DOMContentLoaded", cb) : cb();
