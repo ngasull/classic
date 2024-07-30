@@ -1,8 +1,8 @@
-import { type JSable, type ServedJSContext } from "@classic/js";
+import type { AppBuild } from "@classic/build";
+import { js, type JSable } from "@classic/js";
 import { accepts } from "@std/http";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import {
-  $client,
   $effects,
   $served,
   createContext,
@@ -17,7 +17,27 @@ import type {
   JSXContextInit,
 } from "./types.ts";
 
-const globalCssPath = "/global.css";
+export const $build = createContext<AppBuild>();
+
+type SubSegment<Params extends string, P extends string> = Segment<
+  Params,
+  Params | (P extends `:${infer Param}` ? Param : never),
+  never
+>;
+
+type CSSTemplate = (tpl: TemplateStringsArray) => string;
+
+let encoder: TextEncoder | null = null;
+
+const css: CSSTemplate = (tpl, ...args) => {
+  if (args.length) {
+    throw Error(
+      `Don't do replacements in CSS template as it prevents minification`,
+    );
+  }
+  encoder ??= new TextEncoder();
+  return tpl[0];
+};
 
 type LayoutComponent<Params extends string> = JSXComponent<
   { [P in Params]: string } & { readonly children?: JSX.Element }
@@ -41,54 +61,56 @@ type Handler<Params extends string> = (
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+export const router = (): Router => new Router();
+
 export const route = <T extends string = never>(): Segment<T, T, undefined> =>
   new Segment();
 
-export type { Segment };
+export type { Router, Segment };
 
 class Segment<
   ParentParams extends Params,
   Params extends string,
   PComponent extends PartComponent<Params> | undefined,
 > {
+  #style?: string | Promise<Uint8Array>;
+  #userStyle?: string | ((css: CSSTemplate) => string | Promise<Uint8Array>);
   #Layout?: LayoutComponent<ParentParams>;
   #Part?: PComponent;
   #Action?: PComponent extends PartComponent<Params> ? Action<PComponent>
     : never;
   #apiHandlers: Map<Method, Handler<Params>> = new Map();
 
-  #segments: Record<
-    string,
-    (
-      // deno-lint-ignore no-explicit-any
-      | Segment<any, any, any>
-      | ((
-        // deno-lint-ignore no-explicit-any
-        segment: Segment<any, any, any>,
-        // deno-lint-ignore no-explicit-any
-      ) => Segment<any, any, any> | PromiseLike<Segment<any, any, any>>)
-    )[]
-  > = {};
+  #segments: {
+    [P in string]: (
+      | SubSegment<Params, P>
+      | ((segment: SubSegment<Params, P>) => PromiseLike<SubSegment<Params, P>>)
+    )[];
+  } = {};
   #param?: string;
 
-  route<
-    P extends string,
-    SubSegment extends Segment<
-      Params,
-      Params | (P extends `:${infer Param}` ? Param : never),
-      any
-    >,
-  >(
+  route<P extends string>(
     segment: P,
     sub:
-      | SubSegment
-      | ((segment: SubSegment) => SubSegment | PromiseLike<SubSegment>),
+      | SubSegment<Params, P>
+      | (
+        (segment: SubSegment<Params, P>) =>
+          | SubSegment<Params, P>
+          | PromiseLike<
+            SubSegment<Params, P> | { readonly default: SubSegment<Params, P> }
+          >
+      ),
   ): Segment<ParentParams, Params, PComponent> {
     if (!segment) throw Error(`Route segment name can't be empty`);
 
     const subs = this.#segments[segment] ??= [];
-    // @ts-ignore dynamism is protected by `segment` signature
-    if (!subs.includes(sub)) subs.push(sub);
+    subs.push(
+      // @ts-ignore dynamism is protected by `segment` signature
+      sub instanceof Segment ? sub : async (segment: SubSegment<Params, P>) => {
+        const res = await sub(segment);
+        return res instanceof Segment ? res : res.default;
+      },
+    );
 
     const wildMatch = segment.match(wildcardRegExp);
     if (wildMatch) {
@@ -100,6 +122,23 @@ class Segment<
       this.#param = wildMatch[1] ?? "*";
     }
 
+    return this;
+  }
+
+  style(
+    path: string | ((css: CSSTemplate) => string | Promise<Uint8Array>),
+  ): this;
+  style(): string | Promise<Uint8Array> | undefined;
+  style(
+    path?: string | ((css: CSSTemplate) => string | Promise<Uint8Array>),
+  ): unknown {
+    if (!path) {
+      return this.#style ??= typeof this.#userStyle === "string"
+        ? Deno.readFile(this.#userStyle)
+        : this.#userStyle?.(css);
+    }
+    if (this.#userStyle) throw Error(`style is already set`);
+    this.#userStyle = path;
     return this;
   }
 
@@ -150,7 +189,7 @@ class Segment<
     return this as any;
   }
 
-  async #matchRoutes(
+  protected async matchRoutes(
     [candidate, ...nextSegments]: string[],
     parentSegment: string = "",
     parentParams: Record<ParentParams, string> = {} as Record<
@@ -177,7 +216,7 @@ class Segment<
             this.#segments[candidate][i] = subRouter;
           }
 
-          const match = await subRouter.#matchRoutes(
+          const match = await subRouter.matchRoutes(
             nextSegments,
             candidate,
             params,
@@ -201,7 +240,7 @@ class Segment<
             this.#segments[wildcard][i] = subRouter;
           }
 
-          const match = await subRouter.#matchRoutes(
+          const match = await subRouter.matchRoutes(
             nextSegments,
             wildcard,
             params,
@@ -217,7 +256,9 @@ class Segment<
       return [[this, parentSegment, parentParams, params]];
     }
   }
+}
 
+class Router extends Segment<never, never, undefined> {
   async fetch(
     req: Request,
     { context, build }: {
@@ -225,26 +266,38 @@ class Segment<
       build: AppBuild;
     },
   ): Promise<Response | void> {
-    const use = initContext(context);
-    use.provide($initResponse, {});
-    use.provide($served, build.deferred);
+    const moduleRes = build.deferred.fetch(req);
+    if (moduleRes) return moduleRes;
 
     const isGET = req.method === "GET";
     const reqAccepts = accepts(req);
     const { pathname, searchParams } = new URL(req.url);
 
-    if (
-      isGET && pathname === globalCssPath && reqAccepts.includes("text/css")
-    ) {
-      const css = await build.critical.css;
-      return css && new Response(css, {
-        headers: { "Content-Type": "text/css; charset=UTF-8" },
-      });
+    if (build.dev && pathname === "/.hmr") {
+      let cancel: () => void;
+      return new Response(
+        new ReadableStream<string>({
+          start(controller) {
+            cancel = build.deferred.watch(() => {
+              controller.enqueue(`event: change\r\n\r\n`);
+            });
+          },
+          cancel() {
+            cancel();
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
     }
+
+    const use = initContext(context);
+    use.provide($initResponse, {});
+    use.provide($build, build);
+    use.provide($served, build.deferred);
 
     const segments = pathname === "/" ? [] : pathname.slice(1).split("/");
 
-    const layouts = await this.#matchRoutes(segments);
+    const layouts = await this.matchRoutes(segments);
     if (!layouts) return;
     const [lastSegment, , , partParams] = layouts[layouts.length - 1];
 
@@ -271,7 +324,9 @@ class Segment<
           children: jsx("template", {
             shadowrootmode: "open",
             children: [
-              jsx("link", { rel: "stylesheet", href: globalCssPath }),
+              build.globalCss
+                ? jsx("link", { rel: "stylesheet", href: build.globalCss })
+                : null,
               jsx(Html, {
                 contents: render(part, { context: initContext(use) }),
               }),
@@ -290,10 +345,8 @@ class Segment<
         const context = initContext(use);
         if (i === 0 && !reqFrom) {
           context.provide($effects, [
-            use(
-              $client<typeof import("./client-router.ts")>(
-                "@classic/server/client/router",
-              ),
+            js.module<typeof import("./client-router.ts")>(
+              "@classic/server/client/router",
             ).init() as JSable<void>,
           ]);
         }
@@ -304,6 +357,7 @@ class Segment<
               ? jsx("html", {
                 children: jsx("body", {
                   children: layout(
+                    build,
                     path,
                     layoutParams,
                     segment.layout(),
@@ -311,7 +365,7 @@ class Segment<
                   ),
                 }),
               })
-              : layout(path, layoutParams, segment.layout(), stream)
+              : layout(build, path, layoutParams, segment.layout(), stream)
             : laidout,
           { context },
         );
@@ -342,6 +396,7 @@ class Segment<
 }
 
 const layout = <Params extends string>(
+  build: AppBuild,
   path: string | undefined,
   params: Record<Params, string>,
   Layout: LayoutComponent<Params> = Fragment,
@@ -353,7 +408,9 @@ const layout = <Params extends string>(
       jsx("template", {
         shadowrootmode: "open",
         children: [
-          jsx("link", { rel: "stylesheet", href: globalCssPath }),
+          build.globalCss
+            ? jsx("link", { rel: "stylesheet", href: build.globalCss })
+            : null,
           jsx(Layout, { ...params, children: jsx("slot") }),
         ],
       }),

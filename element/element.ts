@@ -70,7 +70,7 @@ export const element = <
   Def extends (
     dom: {
       (): TypedHost<Props, Form>;
-      (children: Children | ShadowRoot):
+      (children: Children):
         & TypedHost<Props, Form>
         & { readonly shadowRoot: ShadowRoot };
     },

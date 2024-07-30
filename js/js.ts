@@ -616,7 +616,7 @@ const jsUtils = {
       jsable(
         new JSMetaVar((context) => {
           if (!context.served) throw Error(`Must configure JS modules`);
-          const module = context.served.getModule(name);
+          const module = context.served.js(name);
           if (!module) {
             throw Error(
               `${name} needs to be added to your client modules configuration`,
@@ -628,6 +628,20 @@ const jsUtils = {
     )) as {
       <M extends keyof Module>(name: M): JS<Module[M]>;
       <T = never>(name: string): T extends never ? never : JS<T>;
+    },
+
+  resolve: ((name: string) =>
+    makeConvenient(
+      jsable(
+        new JSMetaVar((context) => {
+          if (!context.served) throw Error(`Must configure JS modules`);
+          const r = context.served.resolve(name);
+          return [r ? JSON.stringify(r) : "void 0"];
+        }),
+      )<string>(),
+    )) as {
+      (name: keyof Module): JS<string>;
+      (name: string): JS<string | undefined>;
     },
 
   optional: <T>(expr: JSable<T>): JS<NonNullable<T>> => {
@@ -863,19 +877,37 @@ const contentTypes = {
 
 export type ServedMeta = {
   base: string;
-  modules: Array<{
-    name: string;
-    src: string;
-    pub: string;
-  }>;
+  modules: Array<ServedMetaModule>;
 };
 
-export class ServedJSContext {
-  readonly #byName: Record<string, { [jsSymbol]: JSMetaModule }> = {};
-  readonly #byPublic: Record<string, string> = {};
+type ServedMetaModule = {
+  name: string;
+  src: string;
+  pub: string;
+};
 
-  constructor() {
-    this.base = "/.js/";
+type ModuleLoader = (
+  publicPath: string,
+) => Promise<Uint8Array | ReadableStream<Uint8Array> | null | undefined>;
+
+export class ServedJSContext {
+  readonly #bySrc: Record<
+    string,
+    { name: string; src: string; pub: string; js: { [jsSymbol]: JSMetaModule } }
+  > = {};
+  readonly #byName: Record<string, string> = {};
+  readonly #byPublic: Record<string, string> = {};
+  readonly #watchers: Set<() => void> = new Set();
+  readonly #load: ModuleLoader;
+
+  constructor(
+    load: ModuleLoader = (url) =>
+      fetch(url)
+        .then((res) => res.ok ? res.body : null)
+        .catch(() => null),
+  ) {
+    this.base = "/.defer/";
+    this.#load = load;
   }
 
   #base!: string;
@@ -884,74 +916,95 @@ export class ServedJSContext {
     return this.#base;
   }
   set base(base: string) {
-    this.#base = base;
-    const path = new URL(base, "http://x").pathname;
+    const path = new URL(this.#base = base, "http://x").pathname;
     this.#servedPathRegExp = new RegExp(
       `^${
         path.replaceAll(/[.\\[\]()]/g, (m) => "\\" + m)
-      }\.((?:js|css)(?:\.map)?|json)$`,
+      }(.+\.((?:js|css)(?:\.map)?|json))$`,
     );
   }
 
-  meta(): string {
-    const meta: ServedMeta = {
+  meta(): ServedMeta {
+    return {
       base: this.base,
-      modules: Object.entries(this.#byName).map(([name, m]) => ({
-        name,
-        src: m[jsSymbol].localUrl,
-        pub: m[jsSymbol].publicUrl,
-      })),
+      modules: Object.entries(this.#bySrc)
+        .map(([name, { src, pub }]) => ({ name, src, pub })),
     };
-    return JSON.stringify(meta);
   }
 
-  add<M>(name: string, localUrl: string, publicUrl: string): JS<M> {
+  add(name: string, srcUrl: string, publicPath: string): void {
     const moduleMemo: Record<string | symbol, JSable<unknown>> = {};
-    const m = this.#byName[name] ??= new Proxy(
-      makeConvenient(jsable(new JSMetaModule(this, localUrl, publicUrl))<M>()),
-      {
-        get(target, p) {
-          if (p in target) return target[p as keyof typeof target];
-          if (p in moduleMemo) return moduleMemo[p];
-          moduleMemo[p] = target[p as never];
-          // Module exports can be mutable
-          moduleMemo[p][jsSymbol].isntAssignable = true;
-          return moduleMemo[p];
+    this.#bySrc[srcUrl] ??= {
+      name,
+      src: srcUrl,
+      pub: publicPath,
+      js: new Proxy(
+        makeConvenient(jsable(new JSMetaModule(this, srcUrl, publicPath))()),
+        {
+          get(target, p) {
+            if (p in target) return target[p as keyof typeof target];
+            if (p in moduleMemo) return moduleMemo[p];
+            moduleMemo[p] = target[p as never];
+            // Module exports can be mutable
+            moduleMemo[p][jsSymbol].isntAssignable = true;
+            return moduleMemo[p];
+          },
         },
-      },
-    );
-    this.#byPublic[publicUrl] = localUrl;
-    return m as JS<M>;
+      ),
+    };
+    this.#bySrc[srcUrl].pub = publicPath;
+    this.#byName[name] = srcUrl;
+    this.#byPublic[publicPath] = srcUrl;
   }
 
-  getModule<M>(name: string): JS<M> | undefined {
-    return this.#byName[name] as JS<M> | undefined;
+  js<M>(name: string): JS<M> | undefined {
+    const src = this.#byName[name];
+    return src != null ? this.#bySrc[src]?.js as JS<M> | undefined : undefined;
   }
 
-  async fetch(req: Request): Promise<Response | void> {
+  resolve(name: string): string | undefined {
+    const srcUrl = this.#byName[name] ?? name;
+    return this.#bySrc[srcUrl]
+      ? this.#base + this.#bySrc[srcUrl].pub
+      : undefined;
+  }
+
+  watch(cb: () => void): () => void {
+    this.#watchers.add(cb);
+    return () => {
+      this.#watchers.delete(cb);
+    };
+  }
+
+  notify(): void {
+    for (const watcher of this.#watchers) watcher();
+  }
+
+  fetch(req: Request): void | Promise<Response> {
     const { pathname } = new URL(req.url);
     const match = pathname.match(this.#servedPathRegExp);
     if (!match) return;
     const [, module, ext] = match;
-
-    const res = this.#byPublic[module] && await fetch(this.#byPublic[module])
-      .then((res) => res.ok ? res.body : null)
-      .catch(() => null);
-
-    return res
-      ? new Response(res, {
-        headers: {
-          "Content-Type": contentTypes[ext as keyof typeof contentTypes],
-        },
-      })
-      : new Response("Module not found", { status: 404 });
+    return (async () => {
+      const res = this.#byPublic[module] && await this.#load(module);
+      return res
+        ? new Response(res, {
+          headers: {
+            "Content-Type": contentTypes[ext as keyof typeof contentTypes],
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
+        })
+        : new Response("Module not found", { status: 404 });
+    })();
   }
 }
 
-export const createServedContext = (): ServedJSContext => new ServedJSContext();
+export const createServedContext = (load?: ModuleLoader): ServedJSContext =>
+  new ServedJSContext(load);
 
-export const loadServedContext = (meta: string): ServedJSContext => {
-  const { base, modules }: ServedMeta = JSON.parse(meta);
+export const loadServedContext = (
+  { base, modules }: ServedMeta,
+): ServedJSContext => {
   const served = new ServedJSContext();
   served.base = base;
 

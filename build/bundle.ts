@@ -133,10 +133,7 @@ export const devBundle = async (
     denoJsonPath,
     host = "localhost",
     port,
-  }: BundleOpts & {
-    readonly host?: string;
-    readonly port?: number;
-  },
+  }: Readonly<BundleOpts & { host?: string; port?: number }>,
 ): Promise<{
   stop: () => Promise<void>;
   bundle: Bundle;
@@ -147,7 +144,14 @@ export const devBundle = async (
   let next = Promise.withResolvers<Result>();
 
   const opts = {
-    entryPoints: [...extraModules, "@classic/element", join(elementsDir, "*")],
+    entryPoints: [
+      ...extraModules,
+      "@classic/element",
+      join(elementsDir, "*.ts"),
+      join(elementsDir, "*.tsx"),
+      join(elementsDir, "*.css"),
+    ],
+    logOverride: { "empty-glob": "silent" },
     external,
     outbase: elementsDir,
     outdir: ".",
@@ -159,11 +163,10 @@ export const devBundle = async (
     charset: "utf8",
     jsx: "automatic",
     jsxImportSource: "@classic/element",
-    logOverride: { "empty-glob": "silent" },
     plugins: [
       ...await resolvePlugins(elementsDir, denoJsonPath, transformCss),
       {
-        name: "watch-meta",
+        name: "classic-watch",
         setup(build) {
           build.onEnd((result) => {
             last = result;
@@ -227,7 +230,8 @@ export const devBundle = async (
                 const { entryPoint } = result.metafile.outputs[outPath]!;
                 if (ext === "js" && entryPoint) {
                   if (
-                    toFileUrl(resolve(entryPoint)).href === classicElementEntry
+                    toFileUrl(resolve(entryPoint)).href ===
+                      classicElementEntry
                   ) {
                     return [outFile.text, `const { define } = exports;`];
                   } else if (elementNameByPath[entryPoint]) {

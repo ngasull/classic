@@ -1,6 +1,13 @@
-import { createServedContext, ServedJSContext } from "@classic/js";
+import { createServedContext, ServedJSContext, ServedMeta } from "@classic/js";
 import { denoPlugins } from "@luca/esbuild-deno-loader";
-import { dirname, join, resolve, SEPARATOR } from "@std/path";
+import {
+  dirname,
+  join,
+  relative,
+  resolve,
+  SEPARATOR,
+  toFileUrl,
+} from "@std/path";
 import {
   fromFileUrl as posixFromFileUrl,
   relative as posixRelative,
@@ -23,12 +30,18 @@ export type ModulesOpts = {
 
 export const buildModules = async (
   opts: Readonly<ModulesOpts & { outDir: string }>,
-): Promise<string> => {
-  const [context, served] = await mkContext(opts);
+): Promise<ServedMeta> => {
+  const [context, cssContext, served] = await mkContext(opts);
   try {
-    const result = await context.rebuild();
-    if (result.errors.length) {
-      throw Error(result.errors.map((e) => e.text).join("\n"));
+    const [result, cssResult] = await Promise.all([
+      context.rebuild(),
+      cssContext.rebuild(),
+    ]);
+    if (result.errors.length + cssResult.errors.length) {
+      throw Error(
+        [...result.errors, ...cssResult.errors]
+          .map((e) => e.text).join("\n"),
+      );
     }
     return served.meta();
   } finally {
@@ -37,45 +50,97 @@ export const buildModules = async (
 };
 
 export const devModules = async (
-  { host = "127.0.0.1", port, ...opts }: Readonly<
-    ModulesOpts & { host?: string; port?: number }
-  >,
+  opts: Readonly<ModulesOpts>,
 ): Promise<{
   served: ServedJSContext;
-  host: string;
-  port: number;
-  hmr: string;
   stop: () => Promise<void>;
 }> => {
-  const [context, served] = await mkContext(opts);
+  const [context, cssContext, served] = await mkContext(opts);
   await context.watch();
-  const server = await context.serve({ host, port });
-
   await context.rebuild();
-  served.base = `http://${server.host}:${server.port}/`;
+  await cssContext.watch();
+  await cssContext.rebuild();
 
   return {
-    ...server,
     served,
-    get hmr() {
-      return `new EventSource("http://${server.host}:${server.port}/esbuild").addEventListener("change", () => location.reload());`;
-    },
     stop: async () => {
       await context.dispose();
+      await cssContext.dispose();
       await esbuild.stop();
     },
   };
 };
 
 const mkContext = async (
-  opts: Readonly<ModulesOpts & { outDir?: string }>,
+  {
+    denoJsonPath,
+    modules,
+    external,
+    clientDir,
+    clientFile,
+    outDir,
+  }: Readonly<ModulesOpts & { outDir?: string }>,
 ) => {
-  const { denoJsonPath, modules, external, clientDir, clientFile, outDir } =
-    opts;
-  const served = createServedContext();
+  let lastResult: esbuild.BuildResult<{ write: false }>;
+  let lastCssResult: esbuild.BuildResult<{ write: false }>;
+  const served = createServedContext(
+    outDir
+      ? undefined
+      // deno-lint-ignore require-await
+      : async (publicPath) =>
+        (/\.css(?:\.map)?$/.test(publicPath) ? lastCssResult : lastResult)
+          .outputFiles
+          .find((f) => relative(Deno.cwd(), f.path) === publicPath)
+          ?.contents,
+  );
+
+  const cssEntry: string[] = [join(clientDir, "*.css")];
+  for (let i = modules.length - 1; i >= 0; i--) {
+    if (modules[i].endsWith(".css")) cssEntry.unshift(modules.splice(i, 1)[0]);
+  }
+
+  const cssContext = await esbuild.context({
+    entryPoints: cssEntry,
+    logOverride: { "empty-glob": "silent" },
+    outbase: clientDir,
+    outdir: outDir ?? ".",
+    write: !!outDir,
+    format: "esm",
+    bundle: true,
+    splitting: true,
+    minify: true,
+    sourcemap: true,
+    metafile: true,
+    plugins: [{
+      name: "serve",
+      setup(build) {
+        build.onEnd((result) => {
+          lastCssResult = result;
+          if (result.metafile) {
+            for (
+              let [outPath, { entryPoint }] of Object.entries(
+                result.metafile.outputs,
+              )
+            ) {
+              served.add(
+                entryPoint ? `./${entryPoint}` : outPath,
+                toFileUrl(resolve(entryPoint ?? outPath)).href,
+                outPath,
+              );
+            }
+          }
+        });
+      },
+    }],
+  });
 
   const context = await esbuild.context({
-    entryPoints: [...modules, join(clientDir, "*")],
+    entryPoints: [
+      ...modules,
+      join(clientDir, "*.ts"),
+      join(clientDir, "*.tsx"),
+    ],
+    logOverride: { "empty-glob": "silent" },
     external,
     outbase: clientDir,
     outdir: outDir ?? ".",
@@ -124,8 +189,9 @@ const mkContext = async (
               moduleName: string;
             }[] = [];
 
-            for (const [outPath, { entryPoint }] of outputEntries) {
-              if (outPath.endsWith(".js") && entryPoint) {
+            for (let [outPath, { entryPoint }] of outputEntries) {
+              if (entryPoint) {
+                entryPoint = entryPoint.replace(/^[A-z-]+:/, "");
                 const rel = posixRelative(posixClientDir, entryPoint);
                 const [moduleName, modulePath] = rel.startsWith(externalPrefix)
                   ? [
@@ -137,13 +203,21 @@ const mkContext = async (
                     "./" + posixRelative(posixDir, entryPoint),
                   ];
 
-                served.add(moduleName, entryPoint, outPath);
-
-                outs.push({
-                  entryPoint,
+                served.add(
                   moduleName,
-                  modulePath,
-                });
+                  toFileUrl(resolve(entryPoint)).href,
+                  outPath,
+                );
+
+                if (outPath.endsWith(".js")) {
+                  outs.push({
+                    entryPoint,
+                    moduleName,
+                    modulePath,
+                  });
+                }
+              } else {
+                served.add(outPath, toFileUrl(resolve(outPath)).href, outPath);
               }
             }
 
@@ -168,8 +242,18 @@ declare module "@classic/js" {
           });
         },
       } satisfies esbuild.Plugin,
+
+      {
+        name: "classic-watch",
+        setup(build) {
+          build.onEnd((result) => {
+            lastResult = result;
+            served.notify();
+          });
+        },
+      } satisfies esbuild.Plugin,
     ],
   });
 
-  return [context, served] as const;
+  return [context, cssContext, served] as const;
 };

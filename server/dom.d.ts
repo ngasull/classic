@@ -2015,6 +2015,7 @@ export namespace JSXInternal {
     scrolling?: string | undefined;
     seamless?: boolean | undefined;
     selected?: boolean | undefined;
+    shadowrootmode?: "open" | "closed" | undefined;
     shape?: string | undefined;
     size?: number | undefined;
     sizes?: string | undefined;

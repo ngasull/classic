@@ -1,4 +1,4 @@
-import type { ServedJSContext } from "@classic/js";
+import type { AppBuild } from "@classic/build";
 import type { Context } from "hono";
 import type { Env, Input, MiddlewareHandler } from "hono/types";
 import { createContext } from "./render.ts";
@@ -10,9 +10,9 @@ const honoContext = createContext<Context>("hono");
 export const $hono = (use: JSXContextAPI): Context => use(honoContext);
 
 export const classicRouter = <E extends Env, P extends string, I extends Input>(
-  router: Segment<never, never, undefined>,
+  router: Segment<never, never, any>,
   { context = () => [], ...opts }: {
-    js: ServedJSContext;
+    build: AppBuild;
     context?: (c: Context<E, P, I>) => JSXContextInit<unknown>[];
   },
 ): MiddlewareHandler<E, P, I> =>

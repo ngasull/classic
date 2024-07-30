@@ -149,16 +149,6 @@ export const $effects = createContext<JSable<void>[]>("effect");
 
 export const $served = createContext<ServedJSContext>("served");
 
-export const $client = <T>(name: string) => (use: JSXContextAPI): JS<T> => {
-  const module = use($served).getModule(name);
-  if (!module) {
-    throw Error(
-      `${name} needs to be added to your client modules configuration`,
-    );
-  }
-  return module as JS<T>;
-};
-
 const activate = async (
   refs: RefTree,
   opts: {
@@ -264,13 +254,17 @@ const writeDOMTree = async (
 
         if (!voidElements.has(node.tag)) {
           if (node.tag === "script") {
+            const scriptChildren: DOMNode[] = [];
             for await (const c of node.children) {
-              if (c.kind === DOMNodeKind.Text) {
-                writeStr(escapeScriptContent(c.text));
+              if (
+                c.kind === DOMNodeKind.Text || c.kind === DOMNodeKind.HTMLNode
+              ) {
+                scriptChildren.push(c);
               } else {
-                console.warn(`<script> received non-text child: ${c}`);
+                console.warn(`Ignoring <script>'s non-text child: ${c}`);
               }
             }
+            await writeDOMTree(scriptChildren, opts);
           } else {
             // Write any global initializing effect that may use document.body
             if (node.tag === "body") await activate([], opts);

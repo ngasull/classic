@@ -1,24 +1,27 @@
 import { loadServedContext, ServedJSContext } from "@classic/js";
-import { join } from "@std/path";
+import { join, resolve } from "@std/path";
 import { buildBundle, Bundle, CSSTransformer, devBundle } from "./bundle.ts";
 import { buildModules, devModules } from "./modules.ts";
 
 export type AppBuild = {
   critical: Bundle;
   deferred: ServedJSContext;
+  globalCss?: string;
+  dev?: true;
 };
 
 export type BuildOpts = {
-  readonly outDir?: string;
-  readonly elementsDir: string;
-  readonly elementsDeclarationFile?: string;
-  readonly clientDir: string;
-  readonly clientFile: string;
-  readonly criticalModules?: string[];
-  readonly deferredModules: string[];
-  readonly external?: string[];
-  readonly transformCss?: CSSTransformer;
-  readonly denoJsonPath?: string;
+  outDir?: string;
+  elementsDir: string;
+  elementsDeclarationFile?: string;
+  clientDir: string;
+  clientFile: string;
+  globalCss?: string;
+  criticalModules?: string[];
+  deferredModules: string[];
+  external?: string[];
+  transformCss?: CSSTransformer;
+  denoJsonPath?: string;
 };
 
 export const devApp = async ({
@@ -26,12 +29,13 @@ export const devApp = async ({
   elementsDeclarationFile,
   clientDir,
   clientFile,
+  globalCss,
   criticalModules,
   deferredModules,
   external,
   transformCss,
   denoJsonPath,
-}: BuildOpts): Promise<AppBuild> => {
+}: Readonly<BuildOpts>): Promise<AppBuild> => {
   const [{ bundle }, { served }] = await Promise.all([
     devBundle({
       elementsDir,
@@ -44,13 +48,18 @@ export const devApp = async ({
     devModules({
       clientDir,
       clientFile,
-      modules: deferredModules,
+      modules: globalCss ? [globalCss, ...deferredModules] : deferredModules,
       external,
       denoJsonPath,
     }),
   ]);
 
-  return { critical: bundle, deferred: served };
+  return {
+    critical: bundle,
+    deferred: served,
+    globalCss: globalCss && served.resolve(globalCss),
+    dev: true,
+  };
 };
 
 export const buildApp = async ({
@@ -60,12 +69,13 @@ export const buildApp = async ({
   clientDir,
   clientFile,
   criticalModules,
+  globalCss,
   deferredModules,
   external,
   transformCss,
   denoJsonPath,
-}: BuildOpts & { readonly outDir: string }): Promise<void> => {
-  const [{ js, css }, meta] = await Promise.all([
+}: Readonly<BuildOpts> & { readonly outDir: string }): Promise<void> => {
+  const [{ js, css }, deferredMeta] = await Promise.all([
     buildBundle({
       elementsDir,
       elementsDeclarationFile,
@@ -79,31 +89,37 @@ export const buildApp = async ({
       outDir: join(outDir, "defer"),
       clientDir,
       clientFile,
-      modules: deferredModules,
+      modules: globalCss ? [globalCss, ...deferredModules] : deferredModules,
       external,
       denoJsonPath,
     }),
   ]);
 
   await Promise.all([
-    Deno.writeTextFile(join(outDir, "meta.json"), meta),
+    Deno.writeTextFile(
+      join(outDir, "meta.json"),
+      JSON.stringify({ globalCss, deferred: deferredMeta }),
+    ),
     Deno.writeFile(join(outDir, "critical.js"), js),
     css && Deno.writeFile(join(outDir, "critical.css"), css),
   ]);
 };
 
-export const loadApp = async (
-  { outDir }: Pick<BuildOpts, "clientFile"> & {
-    readonly outDir: string;
-  },
-): Promise<AppBuild> => {
+export const loadApp = async ({
+  outDir,
+  globalCss,
+}: Readonly<
+  & Pick<BuildOpts, "clientFile" | "globalCss">
+  & { outDir: string }
+>): Promise<AppBuild> => {
+  const meta = JSON.parse(await Deno.readTextFile(join(outDir, "meta.json")));
+  const deferred = loadServedContext(meta.deferred);
   return {
     critical: {
       js: Deno.readFile(join(outDir, "critical.js")),
       css: Deno.readFile(join(outDir, "critical.css")).catch((_) => undefined),
     },
-    deferred: loadServedContext(
-      await Deno.readTextFile(join(outDir, "meta.json")),
-    ),
+    globalCss: globalCss && deferred.resolve(resolve(globalCss)),
+    deferred,
   };
 };
