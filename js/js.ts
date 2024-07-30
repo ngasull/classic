@@ -1,3 +1,5 @@
+import { relative, resolve, toFileUrl } from "@std/path";
+import { fromFileUrl as posixFromFileUrl } from "@std/path";
 import type {
   Activation,
   Fn,
@@ -882,32 +884,30 @@ export type ServedMeta = {
 
 type ServedMetaModule = {
   name: string;
+  spec: string | null;
   src: string;
   pub: string;
 };
 
-type ModuleLoader = (
+export type ModuleLoader = (
   publicPath: string,
-) => Promise<Uint8Array | ReadableStream<Uint8Array> | null | undefined>;
+) => Uint8Array | null | undefined | Promise<Uint8Array | null | undefined>;
 
 export class ServedJSContext {
-  readonly #bySrc: Record<
-    string,
-    { name: string; src: string; pub: string; js: { [jsSymbol]: JSMetaModule } }
-  > = {};
+  readonly #bySrc: Record<string, {
+    name: string;
+    spec: string | null;
+    src: string;
+    pub: string;
+    js: { [jsSymbol]: JSMetaModule };
+    load: ModuleLoader;
+  }> = {};
   readonly #byName: Record<string, string> = {};
   readonly #byPublic: Record<string, string> = {};
   readonly #watchers: Set<() => void> = new Set();
-  readonly #load: ModuleLoader;
 
-  constructor(
-    load: ModuleLoader = (url) =>
-      fetch(url)
-        .then((res) => res.ok ? res.body : null)
-        .catch(() => null),
-  ) {
+  constructor() {
     this.base = "/.defer/";
-    this.#load = load;
   }
 
   #base!: string;
@@ -927,15 +927,22 @@ export class ServedJSContext {
   meta(): ServedMeta {
     return {
       base: this.base,
-      modules: Object.entries(this.#bySrc)
-        .map(([name, { src, pub }]) => ({ name, src, pub })),
+      modules: Object.values(this.#bySrc)
+        .map(({ js: _, ...meta }) => meta),
     };
   }
 
-  add(name: string, srcUrl: string, publicPath: string): void {
+  add(
+    name: string,
+    spec: string | null,
+    srcUrl: string,
+    publicPath: string,
+    load: ModuleLoader,
+  ): void {
     const moduleMemo: Record<string | symbol, JSable<unknown>> = {};
     this.#bySrc[srcUrl] ??= {
       name,
+      spec,
       src: srcUrl,
       pub: publicPath,
       js: new Proxy(
@@ -951,6 +958,7 @@ export class ServedJSContext {
           },
         },
       ),
+      load,
     };
     this.#bySrc[srcUrl].pub = publicPath;
     this.#byName[name] = srcUrl;
@@ -969,6 +977,11 @@ export class ServedJSContext {
       : undefined;
   }
 
+  async load(name: string): Promise<Uint8Array | null | undefined> {
+    const mod = this.#bySrc[this.#byName[name] ?? name];
+    return mod ? await mod.load(mod.pub) : undefined;
+  }
+
   watch(cb: () => void): () => void {
     this.#watchers.add(cb);
     return () => {
@@ -980,13 +993,40 @@ export class ServedJSContext {
     for (const watcher of this.#watchers) watcher();
   }
 
+  async generateBindings(bindingsFile: string): Promise<void> {
+    const dir = posixFromFileUrl(toFileUrl(resolve(bindingsFile, "..")));
+    const newClient = `import "@classic/js";
+
+declare module "@classic/js" {
+  interface Module {${
+      Object.values(this.#bySrc).map(({ name, spec, src, pub }) =>
+        pub.endsWith(".js")
+          ? `\n    ${JSON.stringify(name)}: typeof import(${
+            JSON.stringify(spec ?? relative(dir, posixFromFileUrl(src)))
+          });`
+          : ""
+      ).join("")
+    }
+  }
+}
+`;
+
+    const prevClient: string | Promise<string> = await Deno
+      .readTextFile(bindingsFile).catch((_) => "");
+
+    if (newClient !== prevClient) {
+      await Deno.writeTextFile(bindingsFile, newClient);
+    }
+  }
+
   fetch(req: Request): void | Promise<Response> {
     const { pathname } = new URL(req.url);
     const match = pathname.match(this.#servedPathRegExp);
     if (!match) return;
     const [, module, ext] = match;
     return (async () => {
-      const res = this.#byPublic[module] && await this.#load(module);
+      const res = this.#byPublic[module] &&
+        await this.#bySrc[this.#byPublic[module]].load(module);
       return res
         ? new Response(res, {
           headers: {
@@ -999,17 +1039,17 @@ export class ServedJSContext {
   }
 }
 
-export const createServedContext = (load?: ModuleLoader): ServedJSContext =>
-  new ServedJSContext(load);
+export const createServedContext = (): ServedJSContext => new ServedJSContext();
 
 export const loadServedContext = (
   { base, modules }: ServedMeta,
+  load: ModuleLoader,
 ): ServedJSContext => {
   const served = new ServedJSContext();
   served.base = base;
 
-  for (const { name, src, pub } of modules) {
-    served.add(name, src, pub);
+  for (const { name, spec, src, pub } of modules) {
+    served.add(name, spec, src, pub, load);
   }
 
   return served;

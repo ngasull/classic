@@ -1,19 +1,13 @@
-import { createServedContext, ServedJSContext, ServedMeta } from "@classic/js";
+import { createServedContext, ServedJSContext } from "@classic/js";
 import { denoPlugins } from "@luca/esbuild-deno-loader";
-import {
-  dirname,
-  join,
-  relative,
-  resolve,
-  SEPARATOR,
-  toFileUrl,
-} from "@std/path";
+import { relative, resolve, SEPARATOR, toFileUrl } from "@std/path";
 import {
   fromFileUrl as posixFromFileUrl,
   relative as posixRelative,
 } from "@std/path/posix";
 import { exists } from "@std/fs";
 import * as esbuild from "esbuild";
+import { CSSTransformer } from "./bundle.ts";
 
 const externalPrefix = `..${SEPARATOR}`;
 const toPosix = SEPARATOR === "/"
@@ -22,28 +16,23 @@ const toPosix = SEPARATOR === "/"
 
 export type ModulesOpts = {
   modules: string[];
-  clientDir: string;
-  clientFile: string;
+  moduleBase: string;
   external?: string[];
   denoJsonPath?: string;
+  transformCss?: CSSTransformer;
+  context?: ServedJSContext;
 };
 
 export const buildModules = async (
-  opts: Readonly<ModulesOpts & { outDir: string }>,
-): Promise<ServedMeta> => {
-  const [context, cssContext, served] = await mkContext(opts);
+  opts: Readonly<ModulesOpts>,
+): Promise<ServedJSContext> => {
+  const [context, served] = await mkContext(opts);
   try {
-    const [result, cssResult] = await Promise.all([
-      context.rebuild(),
-      cssContext.rebuild(),
-    ]);
-    if (result.errors.length + cssResult.errors.length) {
-      throw Error(
-        [...result.errors, ...cssResult.errors]
-          .map((e) => e.text).join("\n"),
-      );
+    const result = await context.rebuild();
+    if (result.errors.length) {
+      throw Error(result.errors.map((e) => e.text).join("\n"));
     }
-    return served.meta();
+    return served;
   } finally {
     await context.dispose();
   }
@@ -55,97 +44,41 @@ export const devModules = async (
   served: ServedJSContext;
   stop: () => Promise<void>;
 }> => {
-  const [context, cssContext, served] = await mkContext(opts);
+  const [context, served] = await mkContext(opts);
   await context.watch();
   await context.rebuild();
-  await cssContext.watch();
-  await cssContext.rebuild();
 
   return {
     served,
-    stop: async () => {
-      await context.dispose();
-      await cssContext.dispose();
-      await esbuild.stop();
-    },
+    stop: () => context.dispose(),
   };
 };
 
-const mkContext = async (
-  {
-    denoJsonPath,
-    modules,
-    external,
-    clientDir,
-    clientFile,
-    outDir,
-  }: Readonly<ModulesOpts & { outDir?: string }>,
-) => {
+const mkContext = async ({
+  modules,
+  external,
+  moduleBase,
+  denoJsonPath,
+  transformCss,
+  context: providedContext,
+}: Readonly<ModulesOpts>) => {
   let lastResult: esbuild.BuildResult<{ write: false }>;
-  let lastCssResult: esbuild.BuildResult<{ write: false }>;
-  const served = createServedContext(
-    outDir
-      ? undefined
-      // deno-lint-ignore require-await
-      : async (publicPath) =>
-        (/\.css(?:\.map)?$/.test(publicPath) ? lastCssResult : lastResult)
-          .outputFiles
-          .find((f) => relative(Deno.cwd(), f.path) === publicPath)
-          ?.contents,
-  );
+  const loadModule = (publicPath: string) =>
+    lastResult
+      .outputFiles
+      .find((f) => relative(Deno.cwd(), f.path) === publicPath)
+      ?.contents;
 
-  const cssEntry: string[] = [join(clientDir, "*.css")];
-  for (let i = modules.length - 1; i >= 0; i--) {
-    if (modules[i].endsWith(".css")) cssEntry.unshift(modules.splice(i, 1)[0]);
-  }
+  const context = providedContext ?? createServedContext();
 
-  const cssContext = await esbuild.context({
-    entryPoints: cssEntry,
-    logOverride: { "empty-glob": "silent" },
-    outbase: clientDir,
-    outdir: outDir ?? ".",
-    write: !!outDir,
-    format: "esm",
-    bundle: true,
-    splitting: true,
-    minify: true,
-    sourcemap: true,
-    metafile: true,
-    plugins: [{
-      name: "serve",
-      setup(build) {
-        build.onEnd((result) => {
-          lastCssResult = result;
-          if (result.metafile) {
-            for (
-              let [outPath, { entryPoint }] of Object.entries(
-                result.metafile.outputs,
-              )
-            ) {
-              served.add(
-                entryPoint ? `./${entryPoint}` : outPath,
-                toFileUrl(resolve(entryPoint ?? outPath)).href,
-                outPath,
-              );
-            }
-          }
-        });
-      },
-    }],
-  });
-
-  const context = await esbuild.context({
-    entryPoints: [
-      ...modules,
-      join(clientDir, "*.ts"),
-      join(clientDir, "*.tsx"),
-    ],
+  const buildContext = await esbuild.context({
+    entryPoints: modules,
     logOverride: { "empty-glob": "silent" },
     external,
-    outbase: clientDir,
-    outdir: outDir ?? ".",
+    outbase: moduleBase,
+    outdir: ".",
     entryNames: "[dir]/[name]-[hash]",
-    write: !!outDir,
+    write: false,
     bundle: true,
     splitting: true,
     minify: true,
@@ -153,107 +86,90 @@ const mkContext = async (
     metafile: true,
     format: "esm",
     charset: "utf8",
+    jsx: "automatic",
+    jsxImportSource: "@classic/element",
     plugins: [
-      ...denoPlugins({
-        configPath: resolve(
-          denoJsonPath ??
-            (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
-        ),
-      }),
+      ...transformCss
+        ? [
+          {
+            name: "transform-css",
+            setup(build) {
+              build.onLoad(
+                { filter: /\.css$/ },
+                async ({ path }) => ({
+                  loader: "css",
+                  contents: await transformCss(
+                    await Deno.readTextFile(path),
+                    path,
+                  ),
+                }),
+              );
+            },
+          } satisfies esbuild.Plugin,
+        ]
+        : denoPlugins({
+          configPath: resolve(
+            denoJsonPath ??
+              (await exists("deno.jsonc") ? "deno.jsonc" : "deno.json"),
+          ),
+        }),
       {
-        name: "generate-ts-bindings",
+        name: "sync-served",
         setup(build) {
-          let prevClient: string | Promise<string> = Deno
-            .readTextFile(clientFile).catch((_) => "");
-          build.onEnd(async (result) => {
+          build.onEnd((result) => {
             if (!result.metafile) return;
 
-            const dir = dirname(clientFile);
-
-            const posixDir = toPosix(dir);
-            const posixClientDir = toPosix(clientDir);
+            const posixBase = toPosix(moduleBase);
 
             const moduleByItsPath = Object.fromEntries(
-              modules.map((m) => [
-                posixRelative(
-                  Deno.cwd(),
-                  posixFromFileUrl(import.meta.resolve(m)),
-                ),
-                m,
-              ]),
+              modules.flatMap((m) =>
+                m.includes("*") ? [] : [[
+                  posixRelative(
+                    Deno.cwd(),
+                    posixFromFileUrl(import.meta.resolve(m)),
+                  ),
+                  m,
+                ]]
+              ),
             );
             const outputEntries = Object.entries(result.metafile!.outputs);
-            const outs: {
-              entryPoint: string;
-              modulePath: string;
-              moduleName: string;
-            }[] = [];
 
             for (let [outPath, { entryPoint }] of outputEntries) {
               if (entryPoint) {
                 entryPoint = entryPoint.replace(/^[A-z-]+:/, "");
-                const rel = posixRelative(posixClientDir, entryPoint);
+                const rel = posixRelative(posixBase, entryPoint);
                 const [moduleName, modulePath] = rel.startsWith(externalPrefix)
                   ? [
                     moduleByItsPath[entryPoint] ?? entryPoint,
                     moduleByItsPath[entryPoint] ?? entryPoint,
                   ]
-                  : [
-                    rel.replace(/\.[jt]sx?$/, ""),
-                    "./" + posixRelative(posixDir, entryPoint),
-                  ];
+                  : [rel, null];
 
-                served.add(
+                context.add(
                   moduleName,
+                  modulePath,
                   toFileUrl(resolve(entryPoint)).href,
                   outPath,
+                  loadModule,
                 );
-
-                if (outPath.endsWith(".js")) {
-                  outs.push({
-                    entryPoint,
-                    moduleName,
-                    modulePath,
-                  });
-                }
               } else {
-                served.add(outPath, toFileUrl(resolve(outPath)).href, outPath);
+                context.add(
+                  outPath,
+                  null,
+                  toFileUrl(resolve(outPath)).href,
+                  outPath,
+                  loadModule,
+                );
               }
             }
 
-            const newClient = `import "@classic/js";
-
-declare module "@classic/js" {
-  interface Module {${
-              outs.map(({ moduleName, modulePath }) =>
-                `\n    ${JSON.stringify(moduleName)}: typeof import(${
-                  JSON.stringify(modulePath)
-                });`
-              ).join("")
-            }
-  }
-}
-`;
-
-            if (newClient !== await prevClient) {
-              await Deno.writeTextFile(clientFile, newClient);
-              prevClient = newClient;
-            }
-          });
-        },
-      } satisfies esbuild.Plugin,
-
-      {
-        name: "classic-watch",
-        setup(build) {
-          build.onEnd((result) => {
             lastResult = result;
-            served.notify();
+            context.notify();
           });
         },
       } satisfies esbuild.Plugin,
     ],
   });
 
-  return [context, cssContext, served] as const;
+  return [buildContext, context] as const;
 };

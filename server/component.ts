@@ -5,11 +5,13 @@ import { $build } from "./router.ts";
 import { Html } from "./render.ts";
 
 export const Bundle: JSXComponent<BundleType> = async (_, use) => {
-  const { globalCss, critical, dev } = use($build);
+  const { globalCssPublic, critical, dev } = use($build);
   const [js, css] = await Promise.all([critical.js, critical.css]);
   return Fragment({
     children: [
-      globalCss ? jsx("link", { rel: "stylesheet", href: globalCss }) : null,
+      globalCssPublic
+        ? jsx("link", { rel: "stylesheet", href: globalCssPublic })
+        : null,
       css ? jsx("style", { children: jsx(Html, { contents: css }) }) : null,
       jsx("script", { children: jsx(Html, { contents: js }) }),
       dev

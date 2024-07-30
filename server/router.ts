@@ -324,8 +324,11 @@ class Router extends Segment<never, never, undefined> {
           children: jsx("template", {
             shadowrootmode: "open",
             children: [
-              build.globalCss
-                ? jsx("link", { rel: "stylesheet", href: build.globalCss })
+              build.globalCssPublic
+                ? jsx("link", {
+                  rel: "stylesheet",
+                  href: build.globalCssPublic,
+                })
                 : null,
               jsx(Html, {
                 contents: render(part, { context: initContext(use) }),
@@ -408,8 +411,8 @@ const layout = <Params extends string>(
       jsx("template", {
         shadowrootmode: "open",
         children: [
-          build.globalCss
-            ? jsx("link", { rel: "stylesheet", href: build.globalCss })
+          build.globalCssPublic
+            ? jsx("link", { rel: "stylesheet", href: build.globalCssPublic })
             : null,
           jsx(Layout, { ...params, children: jsx("slot") }),
         ],
