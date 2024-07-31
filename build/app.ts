@@ -2,10 +2,11 @@ import {
   basename,
   dirname,
   join,
+  relative,
   resolve,
   SEPARATOR,
-  toFileUrl,
 } from "@std/path";
+import { join as posixJoin } from "@std/path/posix";
 import {
   Bundle,
   bundleCss,
@@ -32,7 +33,7 @@ export type BuildOpts = {
   criticalStyleSheets?: string[];
   criticalModules?: string[];
   styleSheets?: string[];
-  deferredModules: string[];
+  modules: string[];
   external?: string[];
   transformCss?: CSSTransformer;
   denoJsonPath?: string;
@@ -46,22 +47,22 @@ export const devApp = async ({
   criticalStyleSheets = [],
   criticalModules = [],
   styleSheets = [],
-  deferredModules,
+  modules,
   external,
   transformCss,
   denoJsonPath,
 }: Readonly<BuildOpts>): Promise<AppBuild> => {
-  const context = new BuildContext();
+  const context = new BuildContext(clientDir);
   await Promise.all([
     devModules({
       modules: [
         ...criticalModules,
         "@classic/element",
-        join(elementsDir, "*.ts"),
-        join(elementsDir, "*.tsx"),
-        ...deferredModules,
-        join(clientDir, "*.ts"),
-        join(clientDir, "*.tsx"),
+        "/" + posixJoin(elementsDir, "*.ts"),
+        "/" + posixJoin(elementsDir, "*.tsx"),
+        ...modules,
+        "/" + posixJoin(clientDir, "*.ts"),
+        "/" + posixJoin(clientDir, "*.tsx"),
       ],
       moduleBase: clientDir,
       external,
@@ -72,7 +73,7 @@ export const devApp = async ({
       modules: [
         ...criticalStyleSheets,
         ...styleSheets,
-        join(clientDir, "*.css"),
+        "/" + posixJoin(clientDir, "*.css"),
       ],
       moduleBase: clientDir,
       external,
@@ -92,20 +93,20 @@ export const devApp = async ({
   });
 
   const absCriticalCSS = new Set(
-    criticalStyleSheets.map((path) => resolve(path)),
+    criticalStyleSheets.map((path) => "/" + path),
   );
   context.add(
-    ".dev/global.css",
-    null,
-    "memory://.dev/global.css",
+    "//.dev/global.css",
     ".dev/global.css",
     () =>
       new TextEncoder().encode(
-        context.meta().modules.flatMap(({ name, src, pub }) =>
-          name !== ".dev/global.css" &&
-            !absCriticalCSS.has(resolve(name)) &&
-            pub.endsWith(".css")
-            ? `@import url(${JSON.stringify(context.resolve(src)!)});`
+        context.meta().modules.flatMap(({ name, outPath }) =>
+          name !== "//.dev/global.css" &&
+            !absCriticalCSS.has(name) &&
+            outPath.endsWith(".css")
+            ? `@import url(${
+              JSON.stringify(context.resolve(name)!.publicPath)
+            });`
             : []
         ).join("\n"),
       ),
@@ -118,10 +119,12 @@ export const devApp = async ({
           const elements: [string, string][] = [];
           for await (const { name, isFile } of Deno.readDir(elementsDir)) {
             if (isFile && /\.tsx?$/.test(name)) {
-              const pub = context.resolve(
-                toFileUrl(resolve(elementsDir, name)).href,
+              const mod = context.resolve(
+                "/" + toPosix(relative(clientDir, resolve(elementsDir, name))),
               );
-              if (pub) elements.push([name.replace(/\.[^.]+$/, ""), pub]);
+              if (mod) {
+                elements.push([name.replace(/\.[^.]+$/, ""), mod.publicPath]);
+              }
             }
           }
 
@@ -129,11 +132,13 @@ export const devApp = async ({
             `(async () => {
             ${
               criticalModules
-                .map((m) => `import(${JSON.stringify(context.resolve(m))});`)
+                .map((m) =>
+                  `import(${JSON.stringify(context.resolve(m)!.publicPath)});`
+                )
                 .join("\n")
             }
             const { define } = await import(${
-              JSON.stringify(context.resolve("@classic/element"))
+              JSON.stringify(context.resolve("@classic/element")!.publicPath)
             });
             ${JSON.stringify(elements)}.forEach(async ([name, src]) => {
               const el = await import(src);
@@ -148,9 +153,7 @@ export const devApp = async ({
           if (!criticalStyleSheets.length) return;
 
           const contents = (await Promise.all(
-            criticalStyleSheets.map((s) =>
-              context.load(toFileUrl(resolve(s)).href)
-            ),
+            criticalStyleSheets.map((s) => context.resolve(s)?.load()),
           )) as Uint8Array[];
 
           const merged = new Uint8Array(
@@ -167,7 +170,7 @@ export const devApp = async ({
       },
     },
     context: context,
-    globalCssPublic: context.resolve(".dev/global.css"),
+    globalCssPublic: context.resolve("//.dev/global.css")?.publicPath,
     dev: true,
   };
 };
@@ -181,7 +184,7 @@ export const buildApp = async ({
   criticalStyleSheets = [],
   criticalModules = [],
   styleSheets = [],
-  deferredModules,
+  modules,
   external,
   transformCss,
   denoJsonPath,
@@ -232,16 +235,14 @@ export const buildApp = async ({
       }),
 
       buildModules({
-        modules: deferredModules,
+        modules: modules,
         moduleBase: clientDir,
         external,
         denoJsonPath,
       }),
     ]).then(async ([globalCss, deferred]) => {
       deferred.add(
-        "global.css",
-        null,
-        "memory://global.css",
+        "/global.css",
         "global.css",
         () => globalCss,
       );
@@ -252,10 +253,10 @@ export const buildApp = async ({
 
       const dir = join(outDir, "defer");
       await Promise.all([
-        ...meta.modules.map(async ({ src, pub }) => {
-          const path = join(dir, pub);
+        ...meta.modules.map(async ({ name, outPath }) => {
+          const path = join(dir, outPath);
           await Deno.mkdir(dirname(path), { recursive: true });
-          await Deno.writeFile(path, (await deferred.load(src))!);
+          await Deno.writeFile(path, await deferred.resolve(name)!.load());
         }),
         Deno.writeTextFile(
           join(outDir, "meta.json"),
@@ -273,22 +274,18 @@ export const loadApp = async ({
   & { outDir: string }
 >): Promise<AppBuild> => {
   const meta = JSON.parse(await Deno.readTextFile(join(outDir, "meta.json")));
-  const context = BuildContext.load(
-    meta.deferred,
-    fileLoader(join(outDir, "defer")),
-  );
+  const context = BuildContext.load(meta.deferred, fileLoader);
   return {
     critical: {
       js: Deno.readFile(join(outDir, "critical.js")),
       css: Deno.readFile(join(outDir, "critical.css")).catch((_) => undefined),
     },
-    globalCssPublic: context.resolve("memory://global.css"),
+    globalCssPublic: context.resolve("memory://global.css")?.publicPath,
     context,
   };
 };
 
-const fileLoader: (base: string) => ModuleLoader = (base) => (url) =>
-  Deno.readFile(join(base, url));
+const fileLoader: ModuleLoader = (path) => Deno.readFile(path);
 
 const elementTransformCss = (
   elementsDir: string,

@@ -619,13 +619,18 @@ const jsUtils = {
       jsable(
         new JSMetaVar((context) => {
           if (!context.build) throw Error(`Must configure JS modules`);
-          const pub = context.build.resolve(name);
-          if (pub == null) {
+          const mod = context.build.resolve(name);
+          if (mod == null) {
             throw Error(
               `${name} needs to be added to your client modules configuration`,
             );
           }
-          return [context.moduleCache[pub] ??= new JSMetaModule(name, pub)];
+          return [
+            context.moduleCache[name] ??= new JSMetaModule(
+              name,
+              mod.publicPath,
+            ),
+          ];
         }, { isntAssignable: true }),
       )(),
     )) as {
@@ -638,7 +643,7 @@ const jsUtils = {
       jsable(
         new JSMetaVar((context) => {
           if (!context.build) throw Error(`Must configure JS modules`);
-          const r = context.build.resolve(name);
+          const r = context.build.resolve(name)?.publicPath;
           return [r ? JSON.stringify(r) : "void 0"];
         }),
       )<string>(),

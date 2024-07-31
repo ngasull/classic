@@ -1,15 +1,15 @@
 import { denoPlugins } from "@luca/esbuild-deno-loader";
-import { relative, resolve, SEPARATOR, toFileUrl } from "@std/path";
+import { resolve, SEPARATOR } from "@std/path";
 import {
   fromFileUrl as posixFromFileUrl,
   relative as posixRelative,
+  resolve as posixResolve,
 } from "@std/path/posix";
 import { exists } from "@std/fs";
 import * as esbuild from "esbuild";
 import { CSSTransformer } from "./bundle.ts";
 import { BuildContext } from "./context.ts";
 
-const externalPrefix = `..${SEPARATOR}`;
 const toPosix = SEPARATOR === "/"
   ? (p: string) => p
   : (p: string) => p.replaceAll(SEPARATOR, "/");
@@ -62,17 +62,25 @@ const mkContext = async ({
   transformCss,
   context: providedContext,
 }: Readonly<ModulesOpts>) => {
-  let lastResult: esbuild.BuildResult<{ write: false }>;
-  const loadModule = (publicPath: string) =>
-    lastResult
-      .outputFiles
-      .find((f) => relative(Deno.cwd(), f.path) === publicPath)
-      ?.contents;
+  const context = providedContext ?? new BuildContext(moduleBase);
 
-  const context = providedContext ?? new BuildContext();
+  const entryPoints = modules.map((m) =>
+    m[0] === "/" ? posixResolve(m.slice(1)) : m
+  );
+
+  const moduleByItsPath = Object.fromEntries(
+    modules.flatMap((m, i) =>
+      m.includes("*") ? [] : [[
+        m[0] === "/"
+          ? entryPoints[i]
+          : posixFromFileUrl(import.meta.resolve(m)),
+        m,
+      ]]
+    ),
+  );
 
   const buildContext = await esbuild.context({
-    entryPoints: modules,
+    entryPoints,
     logOverride: { "empty-glob": "silent" },
     external,
     outbase: moduleBase,
@@ -121,49 +129,31 @@ const mkContext = async ({
 
             const posixBase = toPosix(moduleBase);
 
-            const moduleByItsPath = Object.fromEntries(
-              modules.flatMap((m) =>
-                m.includes("*") ? [] : [[
-                  posixRelative(
-                    Deno.cwd(),
-                    posixFromFileUrl(import.meta.resolve(m)),
-                  ),
-                  m,
-                ]]
-              ),
-            );
             const outputEntries = Object.entries(result.metafile!.outputs);
+
+            const loadModule = (_name: string, pub: string) =>
+              result.outputFiles!
+                .find((f) => f.path === posixResolve(pub))!
+                .contents;
 
             for (let [outPath, { entryPoint }] of outputEntries) {
               if (entryPoint) {
-                entryPoint = entryPoint.replace(/^[A-z-]+:/, "");
-                const rel = posixRelative(posixBase, entryPoint);
-                const [moduleName, modulePath] = rel.startsWith(externalPrefix)
-                  ? [
-                    moduleByItsPath[entryPoint] ?? entryPoint,
-                    moduleByItsPath[entryPoint] ?? entryPoint,
-                  ]
-                  : [rel, null];
-
+                const absEntryPoint = posixResolve(entryPoint);
                 context.add(
-                  moduleName,
-                  modulePath,
-                  toFileUrl(resolve(entryPoint)).href,
+                  moduleByItsPath[absEntryPoint] ??
+                    "/" + posixRelative(posixBase, absEntryPoint),
                   outPath,
                   loadModule,
                 );
               } else {
                 context.add(
-                  outPath,
-                  null,
-                  toFileUrl(resolve(outPath)).href,
+                  "/" + outPath,
                   outPath,
                   loadModule,
                 );
               }
             }
 
-            lastResult = result;
             context.notify();
           });
         },

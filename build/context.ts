@@ -1,28 +1,31 @@
-import { relative, resolve, toFileUrl } from "@std/path";
-import { fromFileUrl as posixFromFileUrl } from "@std/path/posix";
+import { resolve, SEPARATOR, toFileUrl } from "@std/path";
+import {
+  fromFileUrl as posixFromFileUrl,
+  relative as posixRelative,
+  resolve as posixResolve,
+} from "@std/path/posix";
 
 export class BuildContext {
-  readonly #bySrc: Record<string, {
+  readonly #moduleBase: string;
+  readonly #byName: Record<string, {
     name: string;
-    spec: string | null;
-    src: string;
-    pub: string;
+    outPath: string;
     load: ModuleLoader;
   }> = {};
-  readonly #byName: Record<string, string> = {};
-  readonly #byPublic: Record<string, string> = {};
+  readonly #byPath: Record<string, string> = {};
   readonly #watchers: Set<() => void> = new Set();
 
-  constructor() {
-    this.base = "/.defer/";
+  constructor(moduleBase: string) {
+    this.#moduleBase = posixFromFileUrl(toFileUrl(resolve(moduleBase)));
+    this.publicBase = "/.defer/";
   }
 
   #base!: string;
   #servedPathRegExp!: RegExp;
-  get base(): string {
+  get publicBase(): string {
     return this.#base;
   }
-  set base(base: string) {
+  set publicBase(base: string) {
     const path = new URL(this.#base = base, "http://x").pathname;
     this.#servedPathRegExp = new RegExp(
       `^${
@@ -33,40 +36,36 @@ export class BuildContext {
 
   meta(): BuildMeta {
     return {
-      base: this.base,
-      modules: Object.values(this.#bySrc),
+      moduleBase: this.#moduleBase,
+      publicBase: this.publicBase,
+      modules: Object.values(this.#byName),
     };
   }
 
   add(
     name: string,
-    spec: string | null,
-    srcUrl: string,
-    publicPath: string,
+    outPath: string,
     load: ModuleLoader,
   ): void {
-    this.#bySrc[srcUrl] ??= {
-      name,
-      spec,
-      src: srcUrl,
-      pub: publicPath,
-      load,
+    this.#byName[name] ??= { name, outPath, load };
+    this.#byName[name].outPath = outPath;
+    this.#byPath[outPath] = name;
+  }
+
+  resolve(name: string): undefined | {
+    name: string;
+    outPath: string;
+    publicPath: string;
+    load(): Promise<Uint8Array>;
+  } {
+    const mod = this.#byName[name];
+    if (!mod) return;
+    return {
+      name: mod.name,
+      outPath: mod.outPath,
+      publicPath: this.#base + mod.outPath,
+      load: () => Promise.resolve(mod.load(mod.name, mod.outPath)),
     };
-    this.#bySrc[srcUrl].pub = publicPath;
-    this.#byName[name] = srcUrl;
-    this.#byPublic[publicPath] = srcUrl;
-  }
-
-  resolve(name: string): string | undefined {
-    const srcUrl = this.#byName[name] ?? name;
-    return this.#bySrc[srcUrl]
-      ? this.#base + this.#bySrc[srcUrl].pub
-      : undefined;
-  }
-
-  async load(name: string): Promise<Uint8Array | null | undefined> {
-    const mod = this.#bySrc[this.#byName[name] ?? name];
-    return mod ? await mod.load(mod.pub) : undefined;
   }
 
   watch(cb: () => void): () => void {
@@ -81,15 +80,23 @@ export class BuildContext {
   }
 
   async generateBindings(bindingsFile: string): Promise<void> {
-    const dir = posixFromFileUrl(toFileUrl(resolve(bindingsFile, "..")));
+    const dir = toPosix(resolve(bindingsFile, ".."));
     const newClient = `import "@classic/js";
 
 declare module "@classic/js" {
   interface Module {${
-      Object.values(this.#bySrc).map(({ name, spec, src, pub }) =>
-        pub.endsWith(".js")
+      Object.values(this.#byName).map(({ name, outPath }) =>
+        outPath.endsWith(".js")
           ? `\n    ${JSON.stringify(name)}: typeof import(${
-            JSON.stringify(spec ?? relative(dir, posixFromFileUrl(src)))
+            JSON.stringify(
+              name[0] === "/"
+                ? "./" +
+                  posixRelative(
+                    dir,
+                    posixResolve(this.#moduleBase, name.slice(1)),
+                  )
+                : name,
+            )
           });`
           : ""
       ).join("")
@@ -112,8 +119,8 @@ declare module "@classic/js" {
     if (!match) return;
     const [, module, ext] = match;
     return (async () => {
-      const res = this.#byPublic[module] &&
-        await this.#bySrc[this.#byPublic[module]].load(module);
+      const res = this.#byPath[module] &&
+        await this.resolve(this.#byPath[module])!.load();
       return res
         ? new Response(res, {
           headers: {
@@ -126,14 +133,14 @@ declare module "@classic/js" {
   }
 
   static load = (
-    { base, modules }: BuildMeta,
+    { moduleBase, publicBase, modules }: BuildMeta,
     load: ModuleLoader,
   ): BuildContext => {
-    const served = new BuildContext();
-    served.base = base;
+    const served = new BuildContext(moduleBase);
+    served.publicBase = publicBase;
 
-    for (const { name, spec, src, pub } of modules) {
-      served.add(name, spec, src, pub, load);
+    for (const { name, outPath } of modules) {
+      served.add(name, outPath, load);
     }
 
     return served;
@@ -148,17 +155,21 @@ const contentTypes = {
 } as const;
 
 export type BuildMeta = {
-  base: string;
+  moduleBase: string;
+  publicBase: string;
   modules: Array<BuildModule>;
 };
 
-type BuildModule = {
+export type BuildModule = {
   name: string;
-  spec: string | null;
-  src: string;
-  pub: string;
+  outPath: string;
 };
 
 export type ModuleLoader = (
-  publicPath: string,
-) => Uint8Array | null | undefined | Promise<Uint8Array | null | undefined>;
+  name: string,
+  outPath: string,
+) => Uint8Array | Promise<Uint8Array>;
+
+const toPosix: (p: string) => string = SEPARATOR === "/"
+  ? (p) => p
+  : (p) => p.replaceAll(SEPARATOR, "/");
