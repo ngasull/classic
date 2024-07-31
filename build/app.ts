@@ -1,10 +1,4 @@
 import {
-  createServedContext,
-  loadServedContext,
-  ModuleLoader,
-  ServedJSContext,
-} from "@classic/js";
-import {
   basename,
   dirname,
   join,
@@ -12,13 +6,19 @@ import {
   SEPARATOR,
   toFileUrl,
 } from "@std/path";
-import { Bundle, bundleCss, bundleJs, CSSTransformer } from "./bundle.ts";
+import {
+  Bundle,
+  bundleCss,
+  bundleJs,
+  CSSTransformer,
+  generateBindings,
+} from "./bundle.ts";
+import { BuildContext, ModuleLoader } from "./context.ts";
 import { buildModules, devModules } from "./modules.ts";
-import { generateBindings } from "./bundle.ts";
 
 export type AppBuild = {
   critical: Bundle;
-  deferred: ServedJSContext;
+  context: BuildContext;
   globalCssPublic?: string;
   dev?: true;
 };
@@ -51,7 +51,7 @@ export const devApp = async ({
   transformCss,
   denoJsonPath,
 }: Readonly<BuildOpts>): Promise<AppBuild> => {
-  const context = createServedContext();
+  const context = new BuildContext();
   await Promise.all([
     devModules({
       modules: [
@@ -166,7 +166,7 @@ export const devApp = async ({
         })();
       },
     },
-    deferred: context,
+    context: context,
     globalCssPublic: context.resolve(".dev/global.css"),
     dev: true,
   };
@@ -273,7 +273,7 @@ export const loadApp = async ({
   & { outDir: string }
 >): Promise<AppBuild> => {
   const meta = JSON.parse(await Deno.readTextFile(join(outDir, "meta.json")));
-  const deferred = loadServedContext(
+  const context = BuildContext.load(
     meta.deferred,
     fileLoader(join(outDir, "defer")),
   );
@@ -282,8 +282,8 @@ export const loadApp = async ({
       js: Deno.readFile(join(outDir, "critical.js")),
       css: Deno.readFile(join(outDir, "critical.css")).catch((_) => undefined),
     },
-    globalCssPublic: deferred.resolve("memory://global.css"),
-    deferred,
+    globalCssPublic: context.resolve("memory://global.css"),
+    context,
   };
 };
 

@@ -1,3 +1,4 @@
+import type { BuildContext } from "@classic/build";
 import {
   client,
   type Fn,
@@ -10,7 +11,6 @@ import {
   jsResources,
   mkRef,
   type RefTree,
-  type ServedJSContext,
   toJS,
   unsafe,
 } from "@classic/js";
@@ -76,12 +76,12 @@ export const render = (
 
       if (!ctx.get($effects)) ctx.provide($effects, []);
       const effects = ctx($effects);
-      const served = ctx.get($served);
+      const build = ctx.get($buildContext);
 
       const write = (chunk: Uint8Array) => controller.enqueue(chunk);
       const tree = domNodes(root, ctx);
 
-      writeDOMTree(tree, { served, effects, write, ...opts }, true)
+      writeDOMTree(tree, { build, effects, write, ...opts }, true)
         .finally(() => {
           controller.close();
         });
@@ -147,28 +147,28 @@ const contextProto = {
 
 export const $effects = createContext<JSable<void>[]>("effect");
 
-export const $served = createContext<ServedJSContext>("served");
+export const $buildContext = createContext<BuildContext>("build context");
 
 const activate = async (
   refs: RefTree,
   opts: {
-    served?: ServedJSContext;
+    build?: BuildContext;
     effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },
 ): Promise<DOMNode | void> => {
-  const { effects, served } = opts;
+  const { effects, build } = opts;
   if (effects.length) {
-    if (!served) {
+    if (!build) {
       effects.splice(0, effects.length);
       return console.error(
-        `Can't attach JS to refs: no served JS context is provided`,
+        `Can't attach JS to refs: no build context is provided`,
       );
     }
 
     const [activationScript] = await toJS(
       () => effects,
-      { served, refs: refs.length ? ["$", refs] : true },
+      { build, refs: refs.length ? ["$", refs] : true },
     );
 
     effects.splice(0, effects.length);
@@ -193,7 +193,7 @@ const writeDOMTree = async (
   tree: Iterable<DOMNode> | AsyncIterable<DOMNode>,
   opts: {
     doctype?: boolean;
-    served?: ServedJSContext;
+    build?: BuildContext;
     effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },

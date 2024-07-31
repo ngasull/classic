@@ -3,8 +3,8 @@ import { js, type JSable } from "@classic/js";
 import { accepts } from "@std/http";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import {
+  $buildContext,
   $effects,
-  $served,
   createContext,
   Html,
   initContext,
@@ -266,7 +266,7 @@ class Router extends Segment<never, never, undefined> {
       build: AppBuild;
     },
   ): Promise<Response | void> {
-    const moduleRes = build.deferred.fetch(req);
+    const moduleRes = build.context.fetch(req);
     if (moduleRes) return moduleRes;
 
     const isGET = req.method === "GET";
@@ -278,7 +278,7 @@ class Router extends Segment<never, never, undefined> {
       return new Response(
         new ReadableStream<string>({
           start(controller) {
-            cancel = build.deferred.watch(() => {
+            cancel = build.context.watch(() => {
               controller.enqueue(`event: change\r\n\r\n`);
             });
           },
@@ -293,7 +293,7 @@ class Router extends Segment<never, never, undefined> {
     const use = initContext(context);
     use.provide($initResponse, {});
     use.provide($build, build);
-    use.provide($served, build.deferred);
+    use.provide($buildContext, build.context);
 
     const segments = pathname === "/" ? [] : pathname.slice(1).split("/");
 

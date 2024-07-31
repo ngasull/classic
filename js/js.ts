@@ -1,5 +1,4 @@
-import { relative, resolve, toFileUrl } from "@std/path";
-import { fromFileUrl as posixFromFileUrl } from "@std/path";
+import type { BuildContext } from "@classic/build";
 import type {
   Activation,
   Fn,
@@ -55,7 +54,8 @@ type JSMetaContext = {
   modules: JSMetaModuleStore;
   refs?: JSMetaRefStore;
   resources?: JSMetaResources;
-  served?: ServedJSContext;
+  build?: BuildContext;
+  moduleCache: Record<string, JSMetaModule>;
 };
 
 const targetSymbol = Symbol("target");
@@ -372,8 +372,8 @@ class JSMetaAwait extends JSMeta {
 
 export const toJS = async <A extends readonly unknown[]>(
   f: Fn<A, unknown>,
-  { served, refs }: {
-    served?: ServedJSContext;
+  { build, refs }: {
+    build?: BuildContext;
     refs?: true | [string, RefTree];
   } = {},
 ): Promise<[string, ...{ -readonly [I in keyof A]: string }]> => {
@@ -383,7 +383,7 @@ export const toJS = async <A extends readonly unknown[]>(
   const globalBody = globalFn.body;
 
   let lastVarId = -1;
-  const context: JSMetaContext = mkMetaContext(!refs, served);
+  const context: JSMetaContext = mkMetaContext(!refs, build);
 
   if (refs && refs !== true) {
     context.refs = new JSMetaRefStore(...refs);
@@ -522,7 +522,7 @@ export const toJS = async <A extends readonly unknown[]>(
 
 const mkMetaContext = (
   isServer = true,
-  served?: ServedJSContext,
+  build?: BuildContext,
 ): JSMetaContext => ({
   isServer,
   argn: -1,
@@ -532,7 +532,8 @@ const mkMetaContext = (
   implicitRefs: new Map(),
   asyncScopes: new Set(),
   modules: new JSMetaModuleStore(isServer),
-  served,
+  moduleCache: {},
+  build,
 });
 
 const metaToJS = async (
@@ -617,14 +618,14 @@ const jsUtils = {
     makeConvenient(
       jsable(
         new JSMetaVar((context) => {
-          if (!context.served) throw Error(`Must configure JS modules`);
-          const module = context.served.js(name);
-          if (!module) {
+          if (!context.build) throw Error(`Must configure JS modules`);
+          const pub = context.build.resolve(name);
+          if (pub == null) {
             throw Error(
               `${name} needs to be added to your client modules configuration`,
             );
           }
-          return [module[jsSymbol]];
+          return [context.moduleCache[pub] ??= new JSMetaModule(name, pub)];
         }, { isntAssignable: true }),
       )(),
     )) as {
@@ -636,8 +637,8 @@ const jsUtils = {
     makeConvenient(
       jsable(
         new JSMetaVar((context) => {
-          if (!context.served) throw Error(`Must configure JS modules`);
-          const r = context.served.resolve(name);
+          if (!context.build) throw Error(`Must configure JS modules`);
+          const r = context.build.resolve(name);
           return [r ? JSON.stringify(r) : "void 0"];
         }),
       )<string>(),
@@ -870,194 +871,8 @@ class JSMetaArgument extends JSMeta {
   }
 }
 
-const contentTypes = {
-  css: "text/css; charset=utf-8",
-  js: "text/javascript; charset=utf-8",
-  json: "application/json; charset=utf-8",
-  map: "application/json; charset=utf-8",
-} as const;
-
-export type ServedMeta = {
-  base: string;
-  modules: Array<ServedMetaModule>;
-};
-
-type ServedMetaModule = {
-  name: string;
-  spec: string | null;
-  src: string;
-  pub: string;
-};
-
-export type ModuleLoader = (
-  publicPath: string,
-) => Uint8Array | null | undefined | Promise<Uint8Array | null | undefined>;
-
-export class ServedJSContext {
-  readonly #bySrc: Record<string, {
-    name: string;
-    spec: string | null;
-    src: string;
-    pub: string;
-    js: { [jsSymbol]: JSMetaModule };
-    load: ModuleLoader;
-  }> = {};
-  readonly #byName: Record<string, string> = {};
-  readonly #byPublic: Record<string, string> = {};
-  readonly #watchers: Set<() => void> = new Set();
-
-  constructor() {
-    this.base = "/.defer/";
-  }
-
-  #base!: string;
-  #servedPathRegExp!: RegExp;
-  get base(): string {
-    return this.#base;
-  }
-  set base(base: string) {
-    const path = new URL(this.#base = base, "http://x").pathname;
-    this.#servedPathRegExp = new RegExp(
-      `^${
-        path.replaceAll(/[.\\[\]()]/g, (m) => "\\" + m)
-      }(.+\.((?:js|css)(?:\.map)?|json))$`,
-    );
-  }
-
-  meta(): ServedMeta {
-    return {
-      base: this.base,
-      modules: Object.values(this.#bySrc)
-        .map(({ js: _, ...meta }) => meta),
-    };
-  }
-
-  add(
-    name: string,
-    spec: string | null,
-    srcUrl: string,
-    publicPath: string,
-    load: ModuleLoader,
-  ): void {
-    const moduleMemo: Record<string | symbol, JSable<unknown>> = {};
-    this.#bySrc[srcUrl] ??= {
-      name,
-      spec,
-      src: srcUrl,
-      pub: publicPath,
-      js: new Proxy(
-        makeConvenient(jsable(new JSMetaModule(this, srcUrl, publicPath))()),
-        {
-          get(target, p) {
-            if (p in target) return target[p as keyof typeof target];
-            if (p in moduleMemo) return moduleMemo[p];
-            moduleMemo[p] = target[p as never];
-            // Module exports can be mutable
-            moduleMemo[p][jsSymbol].isntAssignable = true;
-            return moduleMemo[p];
-          },
-        },
-      ),
-      load,
-    };
-    this.#bySrc[srcUrl].pub = publicPath;
-    this.#byName[name] = srcUrl;
-    this.#byPublic[publicPath] = srcUrl;
-  }
-
-  js<M>(name: string): JS<M> | undefined {
-    const src = this.#byName[name];
-    return src != null ? this.#bySrc[src]?.js as JS<M> | undefined : undefined;
-  }
-
-  resolve(name: string): string | undefined {
-    const srcUrl = this.#byName[name] ?? name;
-    return this.#bySrc[srcUrl]
-      ? this.#base + this.#bySrc[srcUrl].pub
-      : undefined;
-  }
-
-  async load(name: string): Promise<Uint8Array | null | undefined> {
-    const mod = this.#bySrc[this.#byName[name] ?? name];
-    return mod ? await mod.load(mod.pub) : undefined;
-  }
-
-  watch(cb: () => void): () => void {
-    this.#watchers.add(cb);
-    return () => {
-      this.#watchers.delete(cb);
-    };
-  }
-
-  notify(): void {
-    for (const watcher of this.#watchers) watcher();
-  }
-
-  async generateBindings(bindingsFile: string): Promise<void> {
-    const dir = posixFromFileUrl(toFileUrl(resolve(bindingsFile, "..")));
-    const newClient = `import "@classic/js";
-
-declare module "@classic/js" {
-  interface Module {${
-      Object.values(this.#bySrc).map(({ name, spec, src, pub }) =>
-        pub.endsWith(".js")
-          ? `\n    ${JSON.stringify(name)}: typeof import(${
-            JSON.stringify(spec ?? relative(dir, posixFromFileUrl(src)))
-          });`
-          : ""
-      ).join("")
-    }
-  }
-}
-`;
-
-    const prevClient: string | Promise<string> = await Deno
-      .readTextFile(bindingsFile).catch((_) => "");
-
-    if (newClient !== prevClient) {
-      await Deno.writeTextFile(bindingsFile, newClient);
-    }
-  }
-
-  fetch(req: Request): void | Promise<Response> {
-    const { pathname } = new URL(req.url);
-    const match = pathname.match(this.#servedPathRegExp);
-    if (!match) return;
-    const [, module, ext] = match;
-    return (async () => {
-      const res = this.#byPublic[module] &&
-        await this.#bySrc[this.#byPublic[module]].load(module);
-      return res
-        ? new Response(res, {
-          headers: {
-            "Content-Type": contentTypes[ext as keyof typeof contentTypes],
-            "Cache-Control": "public, max-age=31536000, immutable",
-          },
-        })
-        : new Response("Module not found", { status: 404 });
-    })();
-  }
-}
-
-export const createServedContext = (): ServedJSContext => new ServedJSContext();
-
-export const loadServedContext = (
-  { base, modules }: ServedMeta,
-  load: ModuleLoader,
-): ServedJSContext => {
-  const served = new ServedJSContext();
-  served.base = base;
-
-  for (const { name, spec, src, pub } of modules) {
-    served.add(name, spec, src, pub, load);
-  }
-
-  return served;
-};
-
 class JSMetaModule extends JSMeta {
   constructor(
-    private readonly context: ServedJSContext,
     readonly localUrl: string,
     readonly publicUrl: string,
   ) {
@@ -1070,7 +885,7 @@ class JSMetaModule extends JSMeta {
       `[${
         context.modules.index(
           this.localUrl,
-          this.context.base + this.publicUrl,
+          this.publicUrl,
         )
       }]`,
     ];

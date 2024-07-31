@@ -1,4 +1,3 @@
-import { createServedContext, ServedJSContext } from "@classic/js";
 import { denoPlugins } from "@luca/esbuild-deno-loader";
 import { relative, resolve, SEPARATOR, toFileUrl } from "@std/path";
 import {
@@ -8,6 +7,7 @@ import {
 import { exists } from "@std/fs";
 import * as esbuild from "esbuild";
 import { CSSTransformer } from "./bundle.ts";
+import { BuildContext } from "./context.ts";
 
 const externalPrefix = `..${SEPARATOR}`;
 const toPosix = SEPARATOR === "/"
@@ -20,19 +20,19 @@ export type ModulesOpts = {
   external?: string[];
   denoJsonPath?: string;
   transformCss?: CSSTransformer;
-  context?: ServedJSContext;
+  context?: BuildContext;
 };
 
 export const buildModules = async (
   opts: Readonly<ModulesOpts>,
-): Promise<ServedJSContext> => {
-  const [context, served] = await mkContext(opts);
+): Promise<BuildContext> => {
+  const [context, buildContext] = await mkContext(opts);
   try {
     const result = await context.rebuild();
     if (result.errors.length) {
       throw Error(result.errors.map((e) => e.text).join("\n"));
     }
-    return served;
+    return buildContext;
   } finally {
     await context.dispose();
   }
@@ -41,15 +41,15 @@ export const buildModules = async (
 export const devModules = async (
   opts: Readonly<ModulesOpts>,
 ): Promise<{
-  served: ServedJSContext;
+  context: BuildContext;
   stop: () => Promise<void>;
 }> => {
-  const [context, served] = await mkContext(opts);
+  const [context, buildContext] = await mkContext(opts);
   await context.watch();
   await context.rebuild();
 
   return {
-    served,
+    context: buildContext,
     stop: () => context.dispose(),
   };
 };
@@ -69,7 +69,7 @@ const mkContext = async ({
       .find((f) => relative(Deno.cwd(), f.path) === publicPath)
       ?.contents;
 
-  const context = providedContext ?? createServedContext();
+  const context = providedContext ?? new BuildContext();
 
   const buildContext = await esbuild.context({
     entryPoints: modules,
