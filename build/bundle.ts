@@ -1,6 +1,6 @@
 import { denoPlugins } from "@luca/esbuild-deno-loader";
 import { exists } from "@std/fs";
-import { resolve, SEPARATOR } from "@std/path";
+import { dirname, relative, resolve, SEPARATOR } from "@std/path";
 import cssnano from "cssnano";
 import * as esbuild from "esbuild";
 import postcss from "postcss";
@@ -53,16 +53,21 @@ export const bundleJs = async ({
   return result.outputFiles[0]?.contents;
 };
 
-export const generateBindings = async (elementsDir: string) => {
+export const writeElementBindings = async (
+  elementsDir: string,
+  outputFile: string,
+) => {
+  const relativeBase = "./" +
+    toPosix(relative(dirname(outputFile), elementsDir));
   const elementToSrc: [string, string][] = [];
   for await (const { name, isFile } of Deno.readDir(elementsDir)) {
     const match = name.match(tsRegExp);
     if (isFile && match) {
-      elementToSrc.push([match[1], `./${toPosix(elementsDir)}/${name}`]);
+      elementToSrc.push([match[1], `${relativeBase}/${name}`]);
     }
   }
 
-  return `import "@classic/element";
+  const newBindings = `import "@classic/element";
 
 declare module "@classic/element" {
   interface CustomElements {
@@ -76,6 +81,10 @@ ${
   }
 }
 `;
+
+  if (newBindings !== await Deno.readTextFile(outputFile).catch(() => null)) {
+    return Deno.writeTextFile(outputFile, newBindings);
+  }
 };
 
 export const bundleCss = async ({
@@ -90,7 +99,9 @@ export const bundleCss = async ({
   const result = await esbuild.build({
     stdin: {
       contents: styleSheets
-        .map((s) => `@import url(${JSON.stringify(s)});`)
+        .map((s) =>
+          `@import url(${JSON.stringify(s[0] === "/" ? s.slice(1) : s)});`
+        )
         .join("\n"),
       loader: "css",
       sourcefile: "__in.css",

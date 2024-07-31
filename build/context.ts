@@ -1,32 +1,27 @@
-import { resolve, SEPARATOR, toFileUrl } from "@std/path";
-import {
-  fromFileUrl as posixFromFileUrl,
-  relative as posixRelative,
-  resolve as posixResolve,
-} from "@std/path/posix";
+import { dirname, join, SEPARATOR } from "@std/path";
 
 export class BuildContext {
-  readonly #moduleBase: string;
-  readonly #byName: Record<string, {
-    name: string;
-    outPath: string;
+  readonly moduleBase: string;
+  readonly #byPath: Record<string, {
+    name?: string;
+    path: string;
     load: ModuleLoader;
   }> = {};
-  readonly #byPath: Record<string, string> = {};
+  readonly #byName: Record<string, string> = {};
   readonly #watchers: Set<() => void> = new Set();
 
   constructor(moduleBase: string) {
-    this.#moduleBase = posixFromFileUrl(toFileUrl(resolve(moduleBase)));
-    this.publicBase = "/.defer/";
+    this.moduleBase = toPosix(moduleBase);
+    this.#publicBase = "/.defer/";
   }
 
-  #base!: string;
+  #_publicBase!: string;
   #servedPathRegExp!: RegExp;
-  get publicBase(): string {
-    return this.#base;
+  get #publicBase(): string {
+    return this.#_publicBase;
   }
-  set publicBase(base: string) {
-    const path = new URL(this.#base = base, "http://x").pathname;
+  set #publicBase(base: string) {
+    const path = new URL(this.#_publicBase = base, "http://x").pathname;
     this.#servedPathRegExp = new RegExp(
       `^${
         path.replaceAll(/[.\\[\]()]/g, (m) => "\\" + m)
@@ -34,38 +29,77 @@ export class BuildContext {
     );
   }
 
-  meta(): BuildMeta {
-    return {
-      moduleBase: this.#moduleBase,
-      publicBase: this.publicBase,
-      modules: Object.values(this.#byName),
-    };
+  modules(): BuildModuleMeta[] {
+    return Object.values(this.#byPath);
   }
+
+  async save(outDir: string): Promise<void> {
+    const dir = join(outDir, "defer");
+    const modules = await Promise.all(
+      Object.values(this.#byPath).map(async (m) => {
+        const path = join(dir, m.path);
+        await Deno.mkdir(dirname(path), { recursive: true });
+        await Deno.writeFile(path, await this.get(m.path)!.load());
+        return {
+          name: m.name,
+          path: m.path,
+        } satisfies BuildModuleMeta;
+      }),
+    );
+
+    Deno.writeTextFile(
+      join(outDir, "meta.json"),
+      JSON.stringify({
+        moduleBase: this.moduleBase,
+        publicBase: this.#publicBase,
+        modules,
+      }),
+    );
+  }
+
+  static load = async (outDir: string): Promise<BuildContext> => {
+    const { moduleBase, publicBase, modules }: BuildMeta = JSON.parse(
+      await Deno.readTextFile(join(outDir, "meta.json")),
+    );
+    const loadFile: ModuleLoader = ({ outPath }) =>
+      Deno.readFile(join(outDir, "defer", outPath));
+
+    const served = new BuildContext(moduleBase);
+    served.#publicBase = publicBase;
+
+    for (const { path, name } of modules) {
+      served.add(path, name, loadFile);
+    }
+
+    return served;
+  };
 
   add(
-    name: string,
-    outPath: string,
+    path: string,
+    name: string | undefined | null,
     load: ModuleLoader,
   ): void {
-    this.#byName[name] ??= { name, outPath, load };
-    this.#byName[name].outPath = outPath;
-    this.#byPath[outPath] = name;
+    this.#byPath[path] ??= { name: name ?? undefined, path, load };
+    if (name) {
+      this.#byName[name] = path;
+    }
   }
 
-  resolve(name: string): undefined | {
-    name: string;
-    outPath: string;
-    publicPath: string;
-    load(): Promise<Uint8Array>;
-  } {
-    const mod = this.#byName[name];
+  get(path: string): ModuleApi | undefined {
+    const mod = this.#byPath[path];
     if (!mod) return;
-    return {
+    const api = {
       name: mod.name,
-      outPath: mod.outPath,
-      publicPath: this.#base + mod.outPath,
-      load: () => Promise.resolve(mod.load(mod.name, mod.outPath)),
+      outPath: path,
+      publicPath: this.#_publicBase + path,
+      load: () => Promise.resolve(mod.load(api)),
     };
+    return api;
+  }
+
+  resolve(name: string): ModuleApi | undefined {
+    const path = this.#byName[name];
+    return path == null ? undefined : this.get(path);
   }
 
   watch(cb: () => void): () => void {
@@ -79,48 +113,13 @@ export class BuildContext {
     for (const watcher of this.#watchers) watcher();
   }
 
-  async generateBindings(bindingsFile: string): Promise<void> {
-    const dir = toPosix(resolve(bindingsFile, ".."));
-    const newClient = `import "@classic/js";
-
-declare module "@classic/js" {
-  interface Module {${
-      Object.values(this.#byName).map(({ name, outPath }) =>
-        outPath.endsWith(".js")
-          ? `\n    ${JSON.stringify(name)}: typeof import(${
-            JSON.stringify(
-              name[0] === "/"
-                ? "./" +
-                  posixRelative(
-                    dir,
-                    posixResolve(this.#moduleBase, name.slice(1)),
-                  )
-                : name,
-            )
-          });`
-          : ""
-      ).join("")
-    }
-  }
-}
-`;
-
-    const prevClient: string | Promise<string> = await Deno
-      .readTextFile(bindingsFile).catch((_) => "");
-
-    if (newClient !== prevClient) {
-      await Deno.writeTextFile(bindingsFile, newClient);
-    }
-  }
-
   fetch(req: Request): void | Promise<Response> {
     const { pathname } = new URL(req.url);
     const match = pathname.match(this.#servedPathRegExp);
     if (!match) return;
-    const [, module, ext] = match;
+    const [, path, ext] = match;
     return (async () => {
-      const res = this.#byPath[module] &&
-        await this.resolve(this.#byPath[module])!.load();
+      const res = await this.get(path)?.load();
       return res
         ? new Response(res, {
           headers: {
@@ -131,20 +130,6 @@ declare module "@classic/js" {
         : new Response("Module not found", { status: 404 });
     })();
   }
-
-  static load = (
-    { moduleBase, publicBase, modules }: BuildMeta,
-    load: ModuleLoader,
-  ): BuildContext => {
-    const served = new BuildContext(moduleBase);
-    served.publicBase = publicBase;
-
-    for (const { name, outPath } of modules) {
-      served.add(name, outPath, load);
-    }
-
-    return served;
-  };
 }
 
 const contentTypes = {
@@ -154,21 +139,25 @@ const contentTypes = {
   map: "application/json; charset=utf-8",
 } as const;
 
+export type ModuleApi = {
+  name?: string;
+  outPath: string;
+  publicPath: string;
+  load(): Promise<Uint8Array>;
+};
+
 export type BuildMeta = {
   moduleBase: string;
   publicBase: string;
-  modules: Array<BuildModule>;
+  modules: Array<BuildModuleMeta>;
 };
 
-export type BuildModule = {
-  name: string;
-  outPath: string;
+export type BuildModuleMeta = {
+  name?: string;
+  path: string;
 };
 
-export type ModuleLoader = (
-  name: string,
-  outPath: string,
-) => Uint8Array | Promise<Uint8Array>;
+export type ModuleLoader = (mod: ModuleApi) => Uint8Array | Promise<Uint8Array>;
 
 const toPosix: (p: string) => string = SEPARATOR === "/"
   ? (p) => p

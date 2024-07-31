@@ -12,10 +12,10 @@ import {
   bundleCss,
   bundleJs,
   CSSTransformer,
-  generateBindings,
+  writeElementBindings,
 } from "./bundle.ts";
-import { BuildContext, ModuleLoader } from "./context.ts";
-import { buildModules, devModules } from "./modules.ts";
+import { BuildContext } from "./context.ts";
+import { buildModules, devModules, writeClientBindings } from "./modules.ts";
 
 export type AppBuild = {
   critical: Bundle;
@@ -82,28 +82,28 @@ export const devApp = async ({
     }),
   ]);
 
-  context.generateBindings(clientFile);
-  context.watch(() => {
-    context.generateBindings(clientFile);
+  const writeBindings = () => {
+    writeClientBindings(context, clientFile);
     if (elementsDeclarationFile) {
-      generateBindings(elementsDir).then((bindings) =>
-        Deno.writeTextFile(elementsDeclarationFile, bindings)
-      );
+      writeElementBindings(elementsDir, elementsDeclarationFile);
     }
-  });
+  };
+  writeBindings();
+  context.watch(writeBindings);
 
   const absCriticalCSS = new Set(
     criticalStyleSheets.map((path) => "/" + path),
   );
   context.add(
-    "//.dev/global.css",
     ".dev/global.css",
+    "//.dev/global.css",
     () =>
       new TextEncoder().encode(
-        context.meta().modules.flatMap(({ name, outPath }) =>
-          name !== "//.dev/global.css" &&
+        context.modules().flatMap(({ name, path }) =>
+          name &&
+            name !== "//.dev/global.css" &&
             !absCriticalCSS.has(name) &&
-            outPath.endsWith(".css")
+            path.endsWith(".css")
             ? `@import url(${
               JSON.stringify(context.resolve(name)!.publicPath)
             });`
@@ -214,10 +214,8 @@ export const buildApp = async ({
       Deno.writeFile(join(outDir, "critical.js"), criticalJs)
     ),
 
-    elementsDeclarationFile && generateBindings(elementsDir)
-      .then((bindings) =>
-        Deno.writeTextFile(elementsDeclarationFile, bindings)
-      ),
+    elementsDeclarationFile &&
+    writeElementBindings(elementsDir, elementsDeclarationFile),
 
     bundleCss({
       styleSheets: criticalStyleSheets,
@@ -242,27 +240,13 @@ export const buildApp = async ({
       }),
     ]).then(async ([globalCss, deferred]) => {
       deferred.add(
-        "/global.css",
         "global.css",
+        "//global.css",
         () => globalCss,
       );
 
-      await deferred.generateBindings(clientFile);
-
-      const meta = deferred.meta();
-
-      const dir = join(outDir, "defer");
-      await Promise.all([
-        ...meta.modules.map(async ({ name, outPath }) => {
-          const path = join(dir, outPath);
-          await Deno.mkdir(dirname(path), { recursive: true });
-          await Deno.writeFile(path, await deferred.resolve(name)!.load());
-        }),
-        Deno.writeTextFile(
-          join(outDir, "meta.json"),
-          JSON.stringify({ deferred: meta }),
-        ),
-      ]);
+      await writeClientBindings(deferred, clientFile);
+      await deferred.save(outDir);
     }),
   ]);
 };
@@ -273,19 +257,16 @@ export const loadApp = async ({
   & Pick<BuildOpts, "clientFile">
   & { outDir: string }
 >): Promise<AppBuild> => {
-  const meta = JSON.parse(await Deno.readTextFile(join(outDir, "meta.json")));
-  const context = BuildContext.load(meta.deferred, fileLoader);
+  const context = await BuildContext.load(outDir);
   return {
     critical: {
       js: Deno.readFile(join(outDir, "critical.js")),
       css: Deno.readFile(join(outDir, "critical.css")).catch((_) => undefined),
     },
-    globalCssPublic: context.resolve("memory://global.css")?.publicPath,
+    globalCssPublic: context.resolve("//global.css")?.publicPath,
     context,
   };
 };
-
-const fileLoader: ModuleLoader = (path) => Deno.readFile(path);
 
 const elementTransformCss = (
   elementsDir: string,

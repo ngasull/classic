@@ -8,7 +8,7 @@ import {
 import { exists } from "@std/fs";
 import * as esbuild from "esbuild";
 import { CSSTransformer } from "./bundle.ts";
-import { BuildContext } from "./context.ts";
+import { BuildContext, ModuleLoader } from "./context.ts";
 
 const toPosix = SEPARATOR === "/"
   ? (p: string) => p
@@ -131,24 +131,24 @@ const mkContext = async ({
 
             const outputEntries = Object.entries(result.metafile!.outputs);
 
-            const loadModule = (_name: string, pub: string) =>
+            const loadModule: ModuleLoader = ({ outPath }) =>
               result.outputFiles!
-                .find((f) => f.path === posixResolve(pub))!
+                .find((f) => f.path === posixResolve(outPath))!
                 .contents;
 
             for (let [outPath, { entryPoint }] of outputEntries) {
               if (entryPoint) {
                 const absEntryPoint = posixResolve(entryPoint);
                 context.add(
+                  outPath,
                   moduleByItsPath[absEntryPoint] ??
                     "/" + posixRelative(posixBase, absEntryPoint),
-                  outPath,
                   loadModule,
                 );
               } else {
                 context.add(
-                  "/" + outPath,
                   outPath,
+                  null,
                   loadModule,
                 );
               }
@@ -162,4 +162,38 @@ const mkContext = async ({
   });
 
   return [buildContext, context] as const;
+};
+
+export const writeClientBindings = async (
+  context: BuildContext,
+  bindingsFile: string,
+): Promise<void> => {
+  const dir = toPosix(resolve(bindingsFile, ".."));
+  const newClient = `import "@classic/js";
+
+declare module "@classic/js" {
+  interface Module {${
+    context.modules().map(({ name, path }) =>
+      name && path.endsWith(".js")
+        ? `\n    ${JSON.stringify(name)}: typeof import(${
+          JSON.stringify(
+            name[0] === "/"
+              ? "./" +
+                posixRelative(
+                  dir,
+                  posixResolve(context.moduleBase, name.slice(1)),
+                )
+              : name,
+          )
+        });`
+        : ""
+    ).join("")
+  }
+  }
+}
+`;
+
+  if (newClient !== await Deno.readTextFile(bindingsFile).catch((_) => "")) {
+    await Deno.writeTextFile(bindingsFile, newClient);
+  }
 };
