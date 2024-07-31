@@ -57,8 +57,21 @@ export const writeElementBindings = async (
   elementsDir: string,
   outputFile: string,
 ) => {
+  const newBindings = await generateElementBindings(
+    elementsDir,
+    dirname(outputFile),
+  );
+  if (newBindings !== await Deno.readTextFile(outputFile).catch(() => null)) {
+    return Deno.writeTextFile(outputFile, newBindings);
+  }
+};
+
+export const generateElementBindings = async (
+  elementsDir: string,
+  outputDir: string,
+) => {
   const relativeBase = "./" +
-    toPosix(relative(dirname(outputFile), elementsDir));
+    toPosix(relative(outputDir, elementsDir));
   const elementToSrc: [string, string][] = [];
   for await (const { name, isFile } of Deno.readDir(elementsDir)) {
     const match = name.match(tsRegExp);
@@ -67,7 +80,7 @@ export const writeElementBindings = async (
     }
   }
 
-  const newBindings = `import "@classic/element";
+  return `import "@classic/element";
 
 declare module "@classic/element" {
   interface CustomElements {
@@ -81,10 +94,6 @@ ${
   }
 }
 `;
-
-  if (newBindings !== await Deno.readTextFile(outputFile).catch(() => null)) {
-    return Deno.writeTextFile(outputFile, newBindings);
-  }
 };
 
 export const bundleCss = async ({

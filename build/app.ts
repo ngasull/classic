@@ -12,10 +12,10 @@ import {
   bundleCss,
   bundleJs,
   CSSTransformer,
-  writeElementBindings,
+  generateElementBindings,
 } from "./bundle.ts";
 import { BuildContext } from "./context.ts";
-import { buildModules, devModules, writeClientBindings } from "./modules.ts";
+import { buildModules, devModules, generateClientBindings } from "./modules.ts";
 
 export type AppBuild = {
   critical: Bundle;
@@ -27,9 +27,8 @@ export type AppBuild = {
 export type BuildOpts = {
   outDir?: string;
   elementsDir: string;
-  elementsDeclarationFile?: string;
   clientDir: string;
-  clientFile: string;
+  generatedTypesFile: string;
   criticalStyleSheets?: string[];
   criticalModules?: string[];
   styleSheets?: string[];
@@ -39,19 +38,18 @@ export type BuildOpts = {
   denoJsonPath?: string;
 };
 
-export const devApp = async ({
-  elementsDir,
-  elementsDeclarationFile,
-  clientDir,
-  clientFile,
-  criticalStyleSheets = [],
-  criticalModules = [],
-  styleSheets = [],
-  modules,
-  external,
-  transformCss,
-  denoJsonPath,
-}: Readonly<BuildOpts>): Promise<AppBuild> => {
+export const devApp = async (opts: Readonly<BuildOpts>): Promise<AppBuild> => {
+  const {
+    elementsDir,
+    clientDir,
+    criticalStyleSheets = [],
+    criticalModules = [],
+    styleSheets = [],
+    modules,
+    external,
+    transformCss,
+    denoJsonPath,
+  } = opts;
   const context = new BuildContext(clientDir);
   await Promise.all([
     devModules({
@@ -82,14 +80,8 @@ export const devApp = async ({
     }),
   ]);
 
-  const writeBindings = () => {
-    writeClientBindings(context, clientFile);
-    if (elementsDeclarationFile) {
-      writeElementBindings(elementsDir, elementsDeclarationFile);
-    }
-  };
-  writeBindings();
-  context.watch(writeBindings);
+  writeBindings(context, opts);
+  context.watch(() => writeBindings(context, opts));
 
   const absCriticalCSS = new Set(
     criticalStyleSheets.map((path) => "/" + path),
@@ -175,20 +167,21 @@ export const devApp = async ({
   };
 };
 
-export const buildApp = async ({
-  outDir,
-  elementsDir,
-  elementsDeclarationFile,
-  clientDir,
-  clientFile,
-  criticalStyleSheets = [],
-  criticalModules = [],
-  styleSheets = [],
-  modules,
-  external,
-  transformCss,
-  denoJsonPath,
-}: Readonly<BuildOpts> & { readonly outDir: string }): Promise<void> => {
+export const buildApp = async (
+  opts: Readonly<BuildOpts> & { readonly outDir: string },
+): Promise<void> => {
+  const {
+    outDir,
+    elementsDir,
+    clientDir,
+    criticalStyleSheets = [],
+    criticalModules = [],
+    styleSheets = [],
+    modules,
+    external,
+    transformCss,
+    denoJsonPath,
+  } = opts;
   const [elements, elementsCss] = await Promise.all([
     readElements(elementsDir),
     readGlobalCSS(elementsDir),
@@ -214,9 +207,6 @@ export const buildApp = async ({
       Deno.writeFile(join(outDir, "critical.js"), criticalJs)
     ),
 
-    elementsDeclarationFile &&
-    writeElementBindings(elementsDir, elementsDeclarationFile),
-
     bundleCss({
       styleSheets: criticalStyleSheets,
       external,
@@ -233,7 +223,11 @@ export const buildApp = async ({
       }),
 
       buildModules({
-        modules: modules,
+        modules: [
+          ...modules,
+          "/" + posixJoin(clientDir, "*.ts"),
+          "/" + posixJoin(clientDir, "*.tsx"),
+        ],
         moduleBase: clientDir,
         external,
         denoJsonPath,
@@ -245,18 +239,15 @@ export const buildApp = async ({
         () => globalCss,
       );
 
-      await writeClientBindings(deferred, clientFile);
+      await writeBindings(deferred, opts);
       await deferred.save(outDir);
     }),
   ]);
 };
 
-export const loadApp = async ({
-  outDir,
-}: Readonly<
-  & Pick<BuildOpts, "clientFile">
-  & { outDir: string }
->): Promise<AppBuild> => {
+export const loadApp = async (
+  { outDir }: Readonly<{ outDir: string }>,
+): Promise<AppBuild> => {
   const context = await BuildContext.load(outDir);
   return {
     critical: {
@@ -309,4 +300,21 @@ const readGlobalCSS = async (elementsDir: string) => {
     }
   }
   return cssFiles;
+};
+
+const writeBindings = async (
+  context: BuildContext,
+  { elementsDir, generatedTypesFile }: Readonly<BuildOpts>,
+) => {
+  const dir = dirname(generatedTypesFile);
+  const bindings = [
+    generateClientBindings(context, dir),
+    await generateElementBindings(elementsDir, dir),
+  ].join("\n");
+
+  if (
+    bindings !== await Deno.readTextFile(generatedTypesFile).catch(() => null)
+  ) {
+    return Deno.writeTextFile(generatedTypesFile, bindings);
+  }
 };

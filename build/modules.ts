@@ -1,5 +1,5 @@
 import { denoPlugins } from "@luca/esbuild-deno-loader";
-import { resolve, SEPARATOR } from "@std/path";
+import { dirname, resolve, SEPARATOR } from "@std/path";
 import {
   fromFileUrl as posixFromFileUrl,
   relative as posixRelative,
@@ -168,8 +168,21 @@ export const writeClientBindings = async (
   context: BuildContext,
   bindingsFile: string,
 ): Promise<void> => {
-  const dir = toPosix(resolve(bindingsFile, ".."));
-  const newClient = `import "@classic/js";
+  const newClient = generateClientBindings(
+    context,
+    dirname(bindingsFile),
+  );
+  if (newClient !== await Deno.readTextFile(bindingsFile).catch((_) => "")) {
+    await Deno.writeTextFile(bindingsFile, newClient);
+  }
+};
+
+export const generateClientBindings = (
+  context: BuildContext,
+  outputDir: string,
+) => {
+  const dir = toPosix(outputDir);
+  return `import "@classic/js";
 
 declare module "@classic/js" {
   interface Module {${
@@ -192,8 +205,4 @@ declare module "@classic/js" {
   }
 }
 `;
-
-  if (newClient !== await Deno.readTextFile(bindingsFile).catch((_) => "")) {
-    await Deno.writeTextFile(bindingsFile, newClient);
-  }
 };
