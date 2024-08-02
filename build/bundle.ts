@@ -1,9 +1,11 @@
 import { denoPlugins } from "@luca/esbuild-deno-loader";
 import { exists } from "@std/fs";
 import { dirname, relative, resolve, SEPARATOR } from "@std/path";
-import cssnano from "cssnano";
 import * as esbuild from "esbuild";
-import postcss from "postcss";
+import { transform } from "lightningcss";
+
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 
 export type Bundle = {
   // **Not** readonly (dev mode)
@@ -15,7 +17,7 @@ export const bundleJs = async ({
   input,
   external,
   denoJsonPath,
-  transformCss = minifyCss(),
+  transformCss = minifyCss,
 }: Readonly<{
   input: string;
   external?: string[];
@@ -99,7 +101,7 @@ ${
 export const bundleCss = async ({
   styleSheets,
   external,
-  transformCss = minifyCss(),
+  transformCss = minifyCss,
 }: Readonly<{
   styleSheets: string[];
   external?: string[];
@@ -127,7 +129,7 @@ export const bundleCss = async ({
       name: "transform-css",
       setup(build) {
         build.onLoad({ filter: /\.css$/ }, async ({ path }) => ({
-          contents: await transformCss(await Deno.readTextFile(path), path),
+          contents: transformCss(await Deno.readFile(path), path),
           loader: "css",
         }));
       },
@@ -143,7 +145,7 @@ const taggedCssRegExp = /\bcss(`(?:[^\\]\\`|[^`])+`)/g;
 
 const extensionRegExp = /\.([^.]+)$/;
 
-export type CSSTransformer = (css: string, from: string) => Promise<string>;
+export type CSSTransformer = (css: Uint8Array, filename: string) => Uint8Array;
 
 const transformCssPlugin = (transformCss: CSSTransformer) => ({
   name: "transform-tagged-css",
@@ -154,9 +156,11 @@ const transformCssPlugin = (transformCss: CSSTransformer) => ({
       const source = await Deno.readTextFile(args.path);
       for (const match of source.matchAll(taggedCssRegExp)) {
         try {
-          const css = await transformCss(
-            new Function(`return ${match[1]}`)(),
-            args.path,
+          const css = decoder.decode(
+            transformCss(
+              encoder.encode(new Function(`return ${match[1]}`)()),
+              args.path,
+            ),
           );
           parts.push(
             source.slice(prevIndex, match.index),
@@ -216,21 +220,22 @@ class TransformCSSError {
   }
 }
 
-const minifyCss = () => {
-  let build: postcss.Processor | null = null;
-  return async (css: string, from: string) => {
-    build ??= postcss([cssnano({ preset: "default" })]);
-    try {
-      const result = await build.process(css, { from });
-      return result.css;
-    } catch (e) {
-      throw new TransformCSSError(e.toString(), {
-        lineText: e.source.split("\n")[e.line - 1],
-        line: e.line,
-        column: e.column,
-      });
-    }
-  };
+const minifyCss: CSSTransformer = (css, filename) => {
+  try {
+    const { code } = transform({
+      filename,
+      code: css,
+      minify: true,
+      sourceMap: true,
+    });
+    return code;
+  } catch (e) {
+    throw new TransformCSSError(e.toString(), {
+      lineText: e.source.split("\n")[e.loc.line - 1],
+      line: e.loc.line,
+      column: e.loc.column,
+    });
+  }
 };
 
 const toPosix: (p: string) => string = SEPARATOR === "/"

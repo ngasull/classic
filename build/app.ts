@@ -17,6 +17,9 @@ import {
 import { BuildContext } from "./context.ts";
 import { buildModules, devModules, generateClientBindings } from "./modules.ts";
 
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+
 export type AppBuild = {
   critical: Bundle;
   context: BuildContext;
@@ -90,7 +93,7 @@ export const devApp = async (opts: Readonly<BuildOpts>): Promise<AppBuild> => {
     ".dev/global.css",
     "//.dev/global.css",
     () =>
-      new TextEncoder().encode(
+      encoder.encode(
         context.modules().flatMap(({ name, path }) =>
           name &&
             name !== "//.dev/global.css" &&
@@ -120,7 +123,7 @@ export const devApp = async (opts: Readonly<BuildOpts>): Promise<AppBuild> => {
             }
           }
 
-          return new TextEncoder().encode(
+          return encoder.encode(
             `(async () => {
             ${
               criticalModules
@@ -264,12 +267,14 @@ const elementTransformCss = (
   transformCss?: CSSTransformer,
 ): CSSTransformer => {
   const absElementsDir = resolve(elementsDir);
-  return async (css, from) => {
+  return (css, from) => {
     if (dirname(resolve(from)) === absElementsDir) {
-      css = css.replaceAll(/:element\b/g, basename(from, ".css"));
+      css = encoder.encode(
+        decoder.decode(css).replaceAll(/:element\b/g, basename(from, ".css")),
+      );
     }
     if (transformCss) {
-      css = await transformCss(css, from);
+      css = transformCss(css, from);
     }
     return css;
   };
