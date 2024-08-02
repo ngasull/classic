@@ -11,16 +11,15 @@ import {
   length,
   listen,
   NULL,
-  UNDEFINED,
 } from "@classic/util";
 import { callOrReturn, onChange, signal } from "./signal.ts";
+import { PropType } from "./props.ts";
 
 const { CSSStyleSheet: CSSStyleSheet_, document: document_, Symbol: Symbol_ } =
   globalThis;
 
 const $disconnectCallbacks: unique symbol = Symbol_() as never;
 export const $extends: unique symbol = Symbol_() as never;
-const $internals: unique symbol = Symbol_() as never;
 export const $props: unique symbol = Symbol_() as never;
 const $propsSet: unique symbol = Symbol_() as never;
 declare const $ref: unique symbol;
@@ -38,13 +37,10 @@ export type CustomElement<
   };
 };
 
-export type TypedHost<Public, Form extends boolean | undefined> =
+type TypedHost<Public> =
   & Public
   & HTMLElement
-  & {
-    readonly [$internals]: Form extends true ? ElementInternals : never;
-    readonly [$disconnectCallbacks]: Array<() => void>;
-  };
+  & { readonly [$disconnectCallbacks]: Array<() => void> };
 
 export type ElementProps<T> = T extends CustomElement<infer Props, infer Ref>
   ? Partial<Props> & { readonly ref?: (el: Ref) => void }
@@ -65,18 +61,17 @@ type SignalsSet<Props> = { [K in keyof Props]: (v: Props[K]) => void };
 type Reactive<Props> = { [K in keyof Props]: () => Props[K] };
 
 export const element = <
-  PropTypes extends Record<string, PropType>,
-  Form extends boolean | undefined,
+  PropTypes extends Record<string, PropType<unknown>>,
   Def extends (
     dom: {
-      (): TypedHost<Props, Form>;
+      (): TypedHost<Props>;
       (children: Children):
-        & TypedHost<Props, Form>
+        & TypedHost<Props>
         & { readonly shadowRoot: ShadowRoot };
     },
     props: Reactive<Props>,
   ) => unknown,
-  Props extends PropTypesProps<PropTypes>,
+  Props extends { [P in keyof PropTypes]: ReturnType<PropTypes[P]> },
   Ref extends
     & HTMLElement
     & Props
@@ -85,14 +80,14 @@ export const element = <
   {
     props: propTypes = {} as PropTypes,
     extends: extendsTag,
-    form,
+    class: decorateClass,
     js,
     css,
     defer,
   }: {
     readonly props?: PropTypes;
     readonly extends?: string;
-    readonly form?: Form;
+    readonly class?: (clazz: { new (): HTMLElement }) => void;
     readonly css?: string | CSSStyleSheet | (string | CSSStyleSheet)[];
     readonly js?: Def;
     readonly defer?: boolean;
@@ -106,55 +101,48 @@ export const element = <
     [$propsSet]: SignalsSet<Props> = {} as never;
     [$props]: Reactive<Props> = fromEntries(
       entries(propTypes).map(([prop, type]) => {
-        let [get, set] = signal(() =>
-          nativePropTypes.get(type)!(this.getAttribute(hyphenize(prop)))
-        );
+        let [get, set] = signal(() => type(this.getAttribute(hyphenize(prop))));
         this[$propsSet][prop as keyof Props] = set;
         return [prop, get];
       }),
     ) as never;
     static [$extends] = extendsTag;
-    [$internals] = (form && this.attachInternals()) as Form extends true
-      ? ElementInternals
-      : never;
     [$disconnectCallbacks]: Array<() => void> = [];
 
     static observedAttributes: string[];
-    static readonly formAssociated = !!form;
 
     connectedCallback() {
       // deno-lint-ignore no-this-alias
-      let self = this;
-      let root = self.shadowRoot;
+      let THIS = this;
+      let root = THIS.shadowRoot;
 
-      if (defer) {
-        if (isLoading()) {
-          return onLoaded(() => this.connectedCallback());
-        }
-        if (!self.shadowRoot) attachShadowTemplate(self);
-      }
+      if (defer && isLoading()) {
+        onLoaded(() => THIS.connectedCallback());
+      } else {
+        if (defer && !THIS.shadowRoot) attachShadowTemplate(THIS);
 
-      let api = js?.(
-        ((...args: [] | [Children | ShadowRoot]) => (
-          length(args) &&
-          renderChildren(root ??= attachShadow(self), args[0] as Children),
-            self as unknown as TypedHost<Props, Form>
-        )) as Parameters<NonNullable<typeof js>>[0],
-        self[$props],
-      );
-
-      if (api) {
-        defineProperties(self, getOwnPropertyDescriptors(api));
-      }
-
-      if (css) {
-        if (!js) root ??= attachShadow(self);
-        root!.adoptedStyleSheets.push(
-          ...definedStyleSheets ??= deepMap(
-            css,
-            (v) => v instanceof CSSStyleSheet_ ? v : constructCSS(v),
-          ),
+        let api = js?.(
+          ((...args: [] | [Children | ShadowRoot]) => (
+            length(args) &&
+            renderChildren(root ??= attachShadow(THIS), args[0] as Children),
+              THIS as unknown as TypedHost<Props>
+          )) as Parameters<NonNullable<typeof js>>[0],
+          THIS[$props],
         );
+
+        if (api) {
+          defineProperties(THIS, getOwnPropertyDescriptors(api));
+        }
+
+        if (css) {
+          if (!js) root ??= attachShadow(THIS);
+          root!.adoptedStyleSheets.push(
+            ...definedStyleSheets ??= deepMap(
+              css,
+              (v) => v instanceof CSSStyleSheet_ ? v : constructCSS(v),
+            ),
+          );
+        }
       }
     }
 
@@ -168,7 +156,9 @@ export const element = <
       next: string | null,
     ) {
       let prop = attrToProp[name];
-      this[$propsSet][prop](nativePropTypes.get(propTypes[prop])!(next));
+      this[$propsSet][prop](
+        propTypes[prop as keyof PropTypes](next) as Props[typeof prop],
+      );
     }
   }
 
@@ -192,6 +182,8 @@ export const element = <
 
   ElementClass.observedAttributes = keys(attrToProp);
 
+  decorateClass?.(ElementClass);
+
   return ElementClass as unknown as CustomElement<Props, Ref>;
 };
 
@@ -205,29 +197,21 @@ export const define = <Props, Ref extends HTMLElement>(
   });
 };
 
-export const declareTag = (): CustomElement<
+export const bare = (): CustomElement<
   Record<never, never>,
   HTMLElement
 > => (() => {}) as never;
 
 export const onDisconnect = (
-  host: TypedHost<any, boolean>,
+  host: TypedHost<any>,
   cb: () => void,
 ): void => {
   host[$disconnectCallbacks].push(cb);
 };
 
-export const useInternals = (host: TypedHost<any, true>): ElementInternals =>
-  host[$internals];
-
 type MakeUndefinedOptional<T> =
   & { [K in keyof T as undefined extends T[K] ? K : never]?: T[K] }
   & { [K in keyof T as undefined extends T[K] ? never : K]: T[K] };
-
-export type PropTypesProps<PropTypes extends Record<string, PropType>> =
-  MakeUndefinedOptional<
-    { [K in keyof PropTypes]: PropTypePrimitive<PropTypes[K]> }
-  >;
 
 export type PropPrimitive =
   | boolean
@@ -236,27 +220,6 @@ export type PropPrimitive =
   | string
   | Date
   | undefined;
-
-type PropTypePrimitive<T extends PropType> = T extends typeof Boolean ? boolean
-  : T extends typeof Number ? number | undefined
-  : T extends typeof BigInt ? bigint | undefined
-  : T extends typeof String ? string | undefined
-  : T extends typeof Date ? Date | undefined
-  : never;
-
-export type PropType =
-  | typeof Boolean
-  | typeof Number
-  | typeof BigInt
-  | typeof String
-  | typeof Date;
-
-const nativePropTypes = new Map<PropType, (attr: string | null) => any>([
-  [Boolean, (attr: string | null) => attr != null],
-  ...[Number, BigInt, String, Date].map((decode: PropType) =>
-    [decode, (v: string | null) => v == NULL ? UNDEFINED : decode(v)] as const
-  ),
-]);
 
 export const cloneStyleSheet = (styleSheet: CSSStyleSheet): CSSStyleSheet => {
   let cssRules: string[] = [], r;

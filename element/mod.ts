@@ -1,13 +1,10 @@
-export {
-  css,
-  declareTag,
-  define,
-  element,
-  onDisconnect,
-  useInternals,
-} from "./element.ts";
+export { bare, css, define, element, onDisconnect } from "./element.ts";
 
-export type { CustomElement, ElementProps, PropTypesProps } from "./element.ts";
+export * from "./props.ts";
+
+export type * from "./props.ts";
+
+export type { CustomElement, ElementProps } from "./element.ts";
 
 export { onChange, signal, track } from "./signal.ts";
 
