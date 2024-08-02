@@ -1,6 +1,7 @@
 import type { AppBuild } from "@classic/build";
 import { js, type JSable } from "@classic/js";
 import { accepts } from "@std/http";
+import { transform as transformCss } from "lightningcss";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import {
   $buildContext,
@@ -15,6 +16,7 @@ import type {
   JSXComponent,
   JSXContextAPI,
   JSXContextInit,
+  JSXElement,
 } from "./types.ts";
 
 export const $build = createContext<AppBuild>();
@@ -22,21 +24,20 @@ export const $build = createContext<AppBuild>();
 type SubSegment<Params extends string, P extends string> = Segment<
   Params,
   Params | (P extends `:${infer Param}` ? Param : never),
-  never
+  any
 >;
-
-type CSSTemplate = (tpl: TemplateStringsArray) => string;
 
 let encoder: TextEncoder | null = null;
 
-const css: CSSTemplate = (tpl, ...args) => {
-  if (args.length) {
-    throw Error(
-      `Don't do replacements in CSS template as it prevents minification`,
-    );
-  }
+const minifyCss = (filename: string, css: string) => {
   encoder ??= new TextEncoder();
-  return tpl[0];
+  const { code } = transformCss({
+    filename,
+    code: encoder.encode(css),
+    minify: true,
+    sourceMap: false,
+  });
+  return code;
 };
 
 type LayoutComponent<Params extends string> = JSXComponent<
@@ -73,8 +74,8 @@ class Segment<
   Params extends string,
   PComponent extends PartComponent<Params> | undefined,
 > {
-  #style?: string | Promise<Uint8Array>;
-  #userStyle?: string | ((css: CSSTemplate) => string | Promise<Uint8Array>);
+  #style?: JSXElement;
+  #userStyle?: string | TemplateStringsArray;
   #Layout?: LayoutComponent<ParentParams>;
   #Part?: PComponent;
   #Action?: PComponent extends PartComponent<Params> ? Action<PComponent>
@@ -125,27 +126,65 @@ class Segment<
     return this;
   }
 
-  style(
-    path: string | ((css: CSSTemplate) => string | Promise<Uint8Array>),
-  ): this;
-  style(): string | Promise<Uint8Array> | undefined;
-  style(
-    path?: string | ((css: CSSTemplate) => string | Promise<Uint8Array>),
+  css(tpl: TemplateStringsArray): this;
+  css(path: string): this;
+  css(): Promise<JSXElement> | undefined;
+  css(
+    path?: string | TemplateStringsArray,
+    ...args: readonly unknown[]
   ): unknown {
     if (!path) {
-      return this.#style ??= typeof this.#userStyle === "string"
-        ? Deno.readFile(this.#userStyle)
-        : this.#userStyle?.(css);
+      if (this.#style == null && this.#userStyle) {
+        let style: string | Uint8Array | Promise<Uint8Array> | null = null;
+        this.#style = jsx(async (_, use) => {
+          if (use($build).dev) {
+            style = typeof this.#userStyle === "string"
+              ? Deno.readFile(this.#userStyle)
+              : this.#userStyle![0];
+          } else {
+            style ??= typeof this.#userStyle === "string"
+              ? Deno.readFile(this.#userStyle)
+              : minifyCss(Deno.cwd(), this.#userStyle![0]);
+          }
+          return jsx("style", {
+            children: [
+              typeof style === "string"
+                ? style
+                : jsx(Html, { contents: await style }),
+            ],
+          });
+        });
+      }
+      return this.#style;
     }
     if (this.#userStyle) throw Error(`style is already set`);
+    if (args.length) {
+      throw Error(
+        `Don't do replacements in CSS template as it prevents minification`,
+      );
+    }
     this.#userStyle = path;
     return this;
   }
 
   layout(Layout: LayoutComponent<ParentParams>): this;
-  layout(): LayoutComponent<ParentParams> | undefined;
+  layout(): LayoutComponent<ParentParams>;
   layout(Layout?: LayoutComponent<ParentParams>) {
-    if (!Layout) return this.#Layout;
+    if (!Layout) {
+      return (async (params, use) =>
+        jsx(Fragment, {
+          children: [
+            use($build).globalCssPublic
+              ? jsx("link", {
+                rel: "stylesheet",
+                href: use($build).globalCssPublic,
+              })
+              : null,
+            await this.css(),
+            this.#Layout ? jsx(this.#Layout, params) : params.children,
+          ],
+        })) as LayoutComponent<ParentParams>;
+    }
     if (this.#Layout) throw Error(`Layout is already set`);
     this.#Layout = Layout;
     return this;
@@ -189,7 +228,8 @@ class Segment<
     return this as any;
   }
 
-  protected async matchRoutes(
+  /* @internal */
+  async matchRoutes(
     [candidate, ...nextSegments]: string[],
     parentSegment: string = "",
     parentParams: Record<ParentParams, string> = {} as Record<
@@ -197,15 +237,7 @@ class Segment<
       string
     >,
     params: Record<Params, string> = parentParams as Record<Params, string>,
-  ): Promise<
-    | void
-    | (readonly [
-      Segment<ParentParams, Params, PComponent>,
-      string,
-      Record<ParentParams, string>,
-      Record<Params, string>,
-    ])[]
-  > {
+  ): Promise<void | RouteMatch<ParentParams, Params, PComponent>> {
     if (candidate) {
       if (this.#segments[candidate]) {
         let i = -1;
@@ -216,12 +248,12 @@ class Segment<
             this.#segments[candidate][i] = subRouter;
           }
 
-          const match = await subRouter.matchRoutes(
+          const match = (await subRouter.matchRoutes(
             nextSegments,
             candidate,
             params,
             params,
-          );
+          )) as RouteMatch<ParentParams, Params, PComponent> | void;
           if (match) {
             match.unshift([this, parentSegment, parentParams, params]);
             return match;
@@ -240,12 +272,12 @@ class Segment<
             this.#segments[wildcard][i] = subRouter;
           }
 
-          const match = await subRouter.matchRoutes(
+          const match = (await subRouter.matchRoutes(
             nextSegments,
             wildcard,
             params,
             nextParams,
-          );
+          )) as RouteMatch<ParentParams, Params, PComponent> | void;
           if (match) {
             match.unshift([this, parentSegment, parentParams, params]);
             return match;
@@ -258,7 +290,46 @@ class Segment<
   }
 }
 
-class Router extends Segment<never, never, undefined> {
+type RouteMatch<
+  ParentParams extends Params,
+  Params extends string,
+  PComponent extends PartComponent<Params> | undefined,
+> = (readonly [
+  Segment<ParentParams, Params, PComponent>,
+  string,
+  Record<ParentParams, string>,
+  Record<Params, string>,
+])[];
+
+class Router {
+  #RootLayout?: LayoutComponent<never>;
+  #root?: Promise<Segment<never, never, undefined>>;
+
+  rootLayout(Layout: LayoutComponent<never>): this {
+    if (this.#RootLayout) throw Error(`Layout is already set`);
+    this.#RootLayout = Layout;
+    return this;
+  }
+
+  rootRoute<P extends string>(
+    sub:
+      | SubSegment<never, never>
+      | (
+        (segment: SubSegment<never, never>) =>
+          | SubSegment<never, never>
+          | PromiseLike<
+            SubSegment<never, never> | {
+              readonly default: SubSegment<never, never>;
+            }
+          >
+      ),
+  ): this {
+    this.#root = Promise
+      .resolve(typeof sub === "function" ? sub(new Segment()) : sub)
+      .then((x) => x instanceof Segment ? x : x.default);
+    return this;
+  }
+
   async fetch(
     req: Request,
     { context, build }: {
@@ -297,7 +368,7 @@ class Router extends Segment<never, never, undefined> {
 
     const segments = pathname === "/" ? [] : pathname.slice(1).split("/");
 
-    const layouts = await this.matchRoutes(segments);
+    const layouts = await this.#root?.then((s) => s.matchRoutes(segments));
     if (!layouts) return;
     const [lastSegment, , , partParams] = layouts[layouts.length - 1];
 
@@ -340,39 +411,45 @@ class Router extends Segment<never, never, undefined> {
 
       for (let i = segments.length - 1; i >= 0; i--) {
         const [segment, path, layoutParams] = segments[i];
-        const laidout = jsx(segment.layout() ?? Fragment, {
-          ...layoutParams,
-          children: jsx(Html, { contents: stream }),
-        });
-
-        const context = initContext(use);
-        if (i === 0 && !reqFrom) {
-          context.provide($effects, [
-            js.module<typeof import("./client-router.ts")>(
-              "@classic/server/client/router",
-            ).init() as JSable<void>,
-          ]);
-        }
-
         stream = render(
-          path
-            ? reqFrom && i === 0
-              ? jsx("html", {
-                children: jsx("body", {
-                  children: layout(
-                    build,
-                    path,
-                    layoutParams,
-                    segment.layout(),
-                    stream,
-                  ),
+          jsx("cc-route", {
+            path,
+            children: [
+              jsx("template", {
+                shadowrootmode: "open",
+                children: jsx(segment.layout(), {
+                  ...layoutParams,
+                  children: jsx("slot"),
                 }),
-              })
-              : layout(build, path, layoutParams, segment.layout(), stream)
-            : laidout,
-          { context },
+              }),
+              jsx(Html, { contents: stream }),
+            ],
+          }),
+          { context: initContext(use) },
         );
       }
+
+      const context = initContext(use);
+      if (!reqFrom) {
+        context.provide($effects, [
+          js.module<typeof import("./client-router.ts")>(
+            "@classic/server/client/router",
+          ).init() as JSable<void>,
+        ]);
+      }
+
+      stream = render(
+        reqFrom
+          ? jsx("html", {
+            children: jsx("body", {
+              children: jsx(Html, { contents: stream }),
+            }),
+          })
+          : jsx(this.#RootLayout!, {
+            children: jsx(Html, { contents: stream }),
+          }),
+        { context },
+      );
 
       const { status, headers = {} } = use($initResponse);
       headers["Content-Type"] = "text/html; charset=UTF-8";
@@ -397,29 +474,6 @@ class Router extends Segment<never, never, undefined> {
     }
   }
 }
-
-const layout = <Params extends string>(
-  build: AppBuild,
-  path: string | undefined,
-  params: Record<Params, string>,
-  Layout: LayoutComponent<Params> = Fragment,
-  stream: ReadableStream<Uint8Array>,
-) =>
-  jsx("cc-route", {
-    path,
-    children: [
-      jsx("template", {
-        shadowrootmode: "open",
-        children: [
-          build.globalCssPublic
-            ? jsx("link", { rel: "stylesheet", href: build.globalCssPublic })
-            : null,
-          jsx(Layout, { ...params, children: jsx("slot") }),
-        ],
-      }),
-      jsx(Html, { contents: stream }),
-    ],
-  });
 
 const $initResponse = createContext<{
   status?: number;
