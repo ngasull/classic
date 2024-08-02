@@ -112,15 +112,12 @@ export const element = <
     static observedAttributes: string[];
 
     connectedCallback() {
-      // deno-lint-ignore no-this-alias
-      let THIS = this;
-      let root = THIS.shadowRoot;
-
-      if (defer && isLoading()) {
-        onLoaded(() => THIS.connectedCallback());
+      if (defer && document_.readyState == "loading") {
+        listen(document_, "DOMContentLoaded", () => this.connectedCallback());
       } else {
-        if (defer && !THIS.shadowRoot) attachShadowTemplate(THIS);
-
+        // deno-lint-ignore no-this-alias
+        let THIS = this;
+        let root = THIS.shadowRoot;
         let api = js?.(
           ((...args: [] | [Children | ShadowRoot]) => (
             length(args) &&
@@ -135,8 +132,7 @@ export const element = <
         }
 
         if (css) {
-          if (!js) root ??= attachShadow(THIS);
-          root!.adoptedStyleSheets.push(
+          (root ?? attachShadow(THIS))!.adoptedStyleSheets.push(
             ...definedStyleSheets ??= deepMap(
               css,
               (v) => v instanceof CSSStyleSheet_ ? v : constructCSS(v),
@@ -221,12 +217,6 @@ export type PropPrimitive =
   | Date
   | undefined;
 
-export const cloneStyleSheet = (styleSheet: CSSStyleSheet): CSSStyleSheet => {
-  let cssRules: string[] = [], r;
-  for (r of styleSheet.cssRules) cssRules.push(r.cssText);
-  return constructCSS(cssRules.join(""));
-};
-
 export const renderChildren = (el: ParentNode, children: Children) =>
   el.replaceChildren(
     ...deepMap(children, (c) => {
@@ -252,18 +242,3 @@ const constructCSS = (
 ) => (styleSheet.replace(css), styleSheet);
 
 const attachShadow = (host: HTMLElement) => host.attachShadow({ mode: "open" });
-
-// Makes shadowrootmode work for older browsers and dynamic content (like router)
-const attachShadowTemplate = (host: HTMLElement) => {
-  let tpl = host.querySelector<HTMLTemplateElement>(
-    "template[shadowrootmode=open]",
-  );
-  let root = tpl && attachShadow(host);
-  root?.append(tpl!.content);
-  return root;
-};
-
-const isLoading = () => document_.readyState == "loading";
-
-const onLoaded = (cb: () => void) =>
-  isLoading() ? listen(document_, "DOMContentLoaded", cb) : cb();

@@ -1,7 +1,6 @@
 import { define, element } from "@classic/element";
 import {
   adoptNode,
-  call,
   domParse,
   forEach,
   listen,
@@ -180,7 +179,13 @@ define(
   element({
     defer: TRUE,
     js(dom) {
-      initRoot(dom().shadowRoot);
+      let host = dom();
+      let shadow = host.shadowRoot ?? dom(
+        host.querySelector<HTMLTemplateElement>(
+          "template[shadowrootmode=open]",
+        )!.content,
+      ).shadowRoot;
+      initRoot(shadow);
     },
   }),
 );
