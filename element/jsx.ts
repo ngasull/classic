@@ -8,7 +8,7 @@ import {
 } from "@classic/util";
 import {
   $extends,
-  $props,
+  type $props,
   type Children,
   type CustomElement,
   renderChildren,
@@ -48,7 +48,7 @@ export interface CustomElements {}
 export type { JSX };
 
 export const jsx = ((
-  type: string | CustomElement<unknown, HTMLElement>,
+  type: string | CustomElement<Record<string, unknown>, HTMLElement>,
   { children, xmlns: _, ...props }: Record<string, unknown> & {
     readonly children?: Children;
   } = {},
@@ -107,7 +107,7 @@ export const jsx = ((
       readonly xmlns?: never;
     },
   ): ChildNode;
-  <T extends CustomElement<unknown, HTMLElement>>(
+  <T extends CustomElement<Record<string, unknown>, HTMLElement>>(
     type: T,
     opts: ClassicElementJSXProps<T>,
   ): ChildNode;

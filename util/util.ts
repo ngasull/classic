@@ -3,7 +3,6 @@
 const globalThis_ = globalThis;
 const Object_ = Object;
 
-export const TRUE: boolean = !0;
 export const NULL: null = null;
 export const UNDEFINED: undefined = void 0;
 
@@ -76,7 +75,7 @@ export const adoptNode = <T extends Node>(node: T): T =>
   document.adoptNode(node);
 
 export const cloneNode = <T extends Node>(node: T): T =>
-  node.cloneNode(TRUE) as T;
+  node.cloneNode(true) as T;
 
 export const dataset = (el: HTMLElement | SVGElement): DOMStringMap =>
   el.dataset;
@@ -161,7 +160,7 @@ export const eventType = <T = undefined>(
     factory: ((detail: T) => CustomEvent<T>) & { type?: string } = (
       detail: T,
     ) =>
-      new CustomEvent(t, { bubbles: TRUE, cancelable: TRUE, detail, ...opts });
+      new CustomEvent(t, { bubbles: true, cancelable: true, detail, ...opts });
   factory.type = t;
   return factory as EventType<T>;
 };

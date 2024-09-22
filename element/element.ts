@@ -10,10 +10,9 @@ import {
   keys,
   length,
   listen,
-  NULL,
 } from "@classic/util";
 import { callOrReturn, onChange, signal } from "./signal.ts";
-import { PropType } from "./props.ts";
+import type { PropType } from "./props.ts";
 
 const { CSSStyleSheet: CSSStyleSheet_, document: document_, Symbol: Symbol_ } =
   globalThis;
@@ -22,16 +21,14 @@ const $disconnectCallbacks: unique symbol = Symbol_() as never;
 export const $extends: unique symbol = Symbol_() as never;
 export const $props: unique symbol = Symbol_() as never;
 const $propsSet: unique symbol = Symbol_() as never;
-declare const $ref: unique symbol;
+const $setUp: unique symbol = Symbol_() as never;
 
 export type CustomElement<
-  Props,
+  Props extends Record<string, unknown> = Record<never, never>,
   Ref extends HTMLElement = HTMLElement,
 > = {
   tag: string;
   readonly [$extends]?: string;
-  readonly [$ref]: Ref;
-  readonly [$props]: Props;
   new (): Ref & {
     readonly [$props]: Props;
   };
@@ -93,7 +90,7 @@ export const element = <
     readonly defer?: boolean;
   },
 ): CustomElement<Props, Ref> => {
-  let definedStyleSheets: CSSStyleSheet[] | null = NULL;
+  let definedStyleSheets: CSSStyleSheet[] | undefined;
   let attrToProp: Record<string, keyof Props> = {};
   let propToAttr = {} as Record<keyof Props, string>;
 
@@ -108,7 +105,7 @@ export const element = <
     ) as never;
     static [$extends] = extendsTag;
     [$disconnectCallbacks]: Array<() => void> = [];
-
+    [$setUp]?: boolean;
     static observedAttributes: string[];
 
     connectedCallback() {
@@ -126,6 +123,7 @@ export const element = <
           )) as Parameters<NonNullable<typeof js>>[0],
           THIS[$props],
         );
+        THIS[$setUp] = true;
 
         if (api) {
           defineProperties(THIS, getOwnPropertyDescriptors(api));
@@ -183,7 +181,10 @@ export const element = <
   return ElementClass as unknown as CustomElement<Props, Ref>;
 };
 
-export const define = <Props, Ref extends HTMLElement>(
+export const define = <
+  Props extends Record<string, unknown>,
+  Ref extends HTMLElement,
+>(
   name: `${string}-${string}`,
   ElementClass: CustomElement<Props, Ref>,
 ): void => {
@@ -202,7 +203,7 @@ export const onDisconnect = (
   host: TypedHost<any>,
   cb: () => void,
 ): void => {
-  host[$disconnectCallbacks].push(cb);
+  !host[$setUp] && host[$disconnectCallbacks].push(cb);
 };
 
 type MakeUndefinedOptional<T> =

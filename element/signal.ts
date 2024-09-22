@@ -17,7 +17,7 @@ export const onChange = <T>(
   s: () => T,
   listener: (v: T, prev: T) => void,
 ): void => {
-  let isInit = 0, prev: T;
+  let isInit: 1 | undefined, prev: T;
   track(() => {
     let v = s(); // Eagerly initialize tracking
     isInit ? listener(v, prev) : isInit = 1;
@@ -31,7 +31,7 @@ export const callOrReturn = <T>(v: T): ReturnTypeOr<T> =>
   isFunction(v) ? v() : v;
 
 export const signal = <T>(init: T | (() => T)): Signal<T> => {
-  let isInit = 0, v: T, cbs = new Set<() => void>();
+  let isInit: 1 | undefined, v: T, cbs = new Set<() => void>();
   return [
     () => {
       if (tracked[0]) cbs.add(tracked[0]);
