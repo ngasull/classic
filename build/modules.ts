@@ -7,8 +7,8 @@ import {
 } from "@std/path/posix";
 import { exists } from "@std/fs";
 import * as esbuild from "esbuild";
-import { CSSTransformer } from "./bundle.ts";
-import { BuildContext, ModuleLoader } from "./context.ts";
+import type { CSSTransformer } from "./bundle.ts";
+import { BuildContext, type ModuleLoader } from "./context.ts";
 
 const toPosix = SEPARATOR === "/"
   ? (p: string) => p
@@ -106,10 +106,7 @@ const mkContext = async ({
                 { filter: /\.css$/ },
                 async ({ path }) => ({
                   loader: "css",
-                  contents: await transformCss(
-                    await Deno.readTextFile(path),
-                    path,
-                  ),
+                  contents: transformCss(await Deno.readFile(path), path),
                 }),
               );
             },

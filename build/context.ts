@@ -12,21 +12,25 @@ export class BuildContext {
 
   constructor(moduleBase: string) {
     this.moduleBase = toPosix(moduleBase);
-    this.#publicBase = "/.defer/";
+    this.publicBase = "/.defer/";
   }
 
-  #_publicBase!: string;
-  #servedPathRegExp!: RegExp;
-  get #publicBase(): string {
-    return this.#_publicBase;
+  #publicBase!: string;
+  get publicBase(): string {
+    return this.#publicBase;
   }
-  set #publicBase(base: string) {
-    const path = new URL(this.#_publicBase = base, "http://x").pathname;
+  set publicBase(base: string) {
+    const path = new URL(this.#publicBase = base, "http://x").pathname;
     this.#servedPathRegExp = new RegExp(
       `^${
         path.replaceAll(/[.\\[\]()]/g, (m) => "\\" + m)
       }(.+\.((?:js|css)(?:\.map)?|json))$`,
     );
+  }
+
+  #servedPathRegExp!: RegExp;
+  get servedPathRegExp(): RegExp {
+    return this.#servedPathRegExp;
   }
 
   modules(): BuildModuleMeta[] {
@@ -51,7 +55,7 @@ export class BuildContext {
       join(outDir, "meta.json"),
       JSON.stringify({
         moduleBase: this.moduleBase,
-        publicBase: this.#publicBase,
+        publicBase: this.publicBase,
         modules,
       }),
     );
@@ -65,7 +69,7 @@ export class BuildContext {
       Deno.readFile(join(outDir, "defer", outPath));
 
     const served = new BuildContext(moduleBase);
-    served.#publicBase = publicBase;
+    served.publicBase = publicBase;
 
     for (const { path, name } of modules) {
       served.add(path, name, loadFile);
@@ -91,7 +95,7 @@ export class BuildContext {
     const api = {
       name: mod.name,
       outPath: path,
-      publicPath: this.#_publicBase + path,
+      publicPath: this.#publicBase + path,
       load: () => Promise.resolve(mod.load(api)),
     };
     return api;
@@ -112,32 +116,7 @@ export class BuildContext {
   notify(): void {
     for (const watcher of this.#watchers) watcher();
   }
-
-  fetch(req: Request): void | Promise<Response> {
-    const { pathname } = new URL(req.url);
-    const match = pathname.match(this.#servedPathRegExp);
-    if (!match) return;
-    const [, path, ext] = match;
-    return (async () => {
-      const res = await this.get(path)?.load();
-      return res
-        ? new Response(res, {
-          headers: {
-            "Content-Type": contentTypes[ext as keyof typeof contentTypes],
-            "Cache-Control": "public, max-age=31536000, immutable",
-          },
-        })
-        : new Response("Module not found", { status: 404 });
-    })();
-  }
 }
-
-const contentTypes = {
-  css: "text/css; charset=utf-8",
-  js: "text/javascript; charset=utf-8",
-  json: "application/json; charset=utf-8",
-  map: "application/json; charset=utf-8",
-} as const;
 
 export type ModuleApi = {
   name?: string;

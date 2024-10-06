@@ -8,10 +8,10 @@ import {
 } from "@std/path";
 import { join as posixJoin } from "@std/path/posix";
 import {
-  Bundle,
+  type Bundle,
   bundleCss,
   bundleJs,
-  CSSTransformer,
+  type CSSTransformer,
   generateElementBindings,
 } from "./bundle.ts";
 import { BuildContext } from "./context.ts";
@@ -20,12 +20,54 @@ import { buildModules, devModules, generateClientBindings } from "./modules.ts";
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
-export type AppBuild = {
-  critical: Bundle;
-  context: BuildContext;
-  globalCssPublic?: string;
-  dev?: true;
-};
+class AppBuild {
+  constructor(
+    public dev: boolean,
+    public critical: Bundle,
+    public context: BuildContext,
+    public globalCssPublic: string[],
+  ) {}
+
+  fetch(req: Request): void | Promise<Response> {
+    const { pathname } = new URL(req.url);
+
+    if (this.dev && pathname === "/.hmr" && req.method === "GET") {
+      let cancel: () => void;
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<string>({
+            start: (controller) => {
+              cancel = this.context.watch(() => {
+                controller.enqueue(`event: change\r\n\r\n`);
+              });
+            },
+            cancel: () => {
+              cancel();
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+    }
+
+    const match = pathname.match(this.context.servedPathRegExp);
+    if (!match) return;
+    const [, path, ext] = match;
+    return (async () => {
+      const res = await this.context.get(path)?.load();
+      return res
+        ? new Response(res, {
+          headers: {
+            "Content-Type": contentTypes[ext as keyof typeof contentTypes],
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
+        })
+        : new Response("Module not found", { status: 404 });
+    })();
+  }
+}
+
+export type { AppBuild };
 
 export type BuildOpts = {
   outDir?: string;
@@ -87,28 +129,12 @@ export const devApp = async (opts: Readonly<BuildOpts>): Promise<AppBuild> => {
   context.watch(() => writeBindings(context, opts));
 
   const absCriticalCSS = new Set(
-    criticalStyleSheets.map((path) => "/" + path),
-  );
-  context.add(
-    ".dev/global.css",
-    "//.dev/global.css",
-    () =>
-      encoder.encode(
-        context.modules().flatMap(({ name, path }) =>
-          name &&
-            name !== "//.dev/global.css" &&
-            !absCriticalCSS.has(name) &&
-            path.endsWith(".css")
-            ? `@import url(${
-              JSON.stringify(context.resolve(name)!.publicPath)
-            });`
-            : []
-        ).join("\n"),
-      ),
+    criticalStyleSheets.map((path) => path.replace(/^\/*/, "/")),
   );
 
-  return {
-    critical: {
+  return new AppBuild(
+    true,
+    {
       get js() {
         return (async () => {
           const elements: [string, string][] = [];
@@ -145,30 +171,36 @@ export const devApp = async (opts: Readonly<BuildOpts>): Promise<AppBuild> => {
       },
       get css() {
         return (async () => {
-          if (!criticalStyleSheets.length) return;
-
-          const contents = (await Promise.all(
-            criticalStyleSheets.map((s) => context.resolve(s)?.load()),
-          )) as Uint8Array[];
-
-          const merged = new Uint8Array(
-            contents.reduce((count, c) => count + c.length, 0),
+          const contents = await Promise.all(
+            criticalStyleSheets.flatMap(async (s) => {
+              const cssMod = context.resolve(s);
+              return cssMod
+                // CSS is inlined : source mapping messes with page path
+                ? removeCssSourceMapping(decoder.decode(await cssMod.load()))
+                : [];
+            }),
           );
-          let i = 0;
-          for (const c of contents) {
-            merged.set(c, i);
-            i += c.length;
-          }
-
-          return merged;
+          return encoder.encode(contents.join("\n\n"));
         })();
       },
     },
-    context: context,
-    globalCssPublic: context.resolve("//.dev/global.css")?.publicPath,
-    dev: true,
-  };
+    context,
+    context.modules().flatMap(({ name, path }) =>
+      name &&
+        !absCriticalCSS.has(name) &&
+        path.endsWith(".css")
+        ? context.resolve(name)!.publicPath
+        : []
+    ),
+  );
 };
+
+const contentTypes = {
+  css: "text/css; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  json: "application/json; charset=utf-8",
+  map: "application/json; charset=utf-8",
+} as const;
 
 export const buildApp = async (
   opts: Readonly<BuildOpts> & { readonly outDir: string },
@@ -215,7 +247,10 @@ export const buildApp = async (
       external,
       transformCss,
     }).then((criticalCss) =>
-      Deno.writeFile(join(outDir, "critical.css"), criticalCss)
+      Deno.writeTextFile(
+        join(outDir, "critical.css"),
+        removeCssSourceMapping(decoder.decode(criticalCss)),
+      )
     ),
 
     Promise.all([
@@ -252,15 +287,20 @@ export const loadApp = async (
   { outDir }: Readonly<{ outDir: string }>,
 ): Promise<AppBuild> => {
   const context = await BuildContext.load(outDir);
-  return {
-    critical: {
+  const globalCss = context.resolve("//global.css");
+  return new AppBuild(
+    false,
+    {
       js: Deno.readFile(join(outDir, "critical.js")),
       css: Deno.readFile(join(outDir, "critical.css")).catch((_) => undefined),
     },
-    globalCssPublic: context.resolve("//global.css")?.publicPath,
     context,
-  };
+    globalCss ? [globalCss.publicPath] : [],
+  );
 };
+
+const removeCssSourceMapping = (css: string) =>
+  css.replace(/\/\*# sourceMappingURL=.+ \*\/\n/, "");
 
 const elementTransformCss = (
   elementsDir: string,
