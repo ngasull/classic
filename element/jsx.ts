@@ -11,10 +11,9 @@ import {
   type $props,
   type Children,
   type CustomElement,
-  renderChildren,
 } from "./element.ts";
 import type { JSXInternal } from "./jsx-dom.d.ts";
-import { callOrReturn, track } from "./signal.ts";
+import { callOrReturn, onChange, track } from "./signal.ts";
 
 const doc = document;
 
@@ -46,6 +45,23 @@ declare namespace JSX {
 export interface CustomElements {}
 
 export type { JSX };
+
+export const render = (el: ParentNode, children: Children) =>
+  el.replaceChildren(
+    ...deepMap(children, (c) => {
+      let node: Node;
+      onChange(
+        () => {
+          node = (callOrReturn(c) ?? "") as Node;
+          return node = node instanceof Node
+            ? node
+            : doc.createTextNode(node as string);
+        },
+        (current, prev) => el.replaceChild(current, prev),
+      );
+      return node!;
+    }),
+  );
 
 export const jsx = ((
   type: string | CustomElement<Record<string, unknown>, HTMLElement>,
@@ -97,7 +113,7 @@ export const jsx = ((
   }
 
   ref?.(el);
-  renderChildren(el, children);
+  render(el, children);
   return el;
 }) as {
   <T extends keyof JSX.IntrinsicElements>(
