@@ -1,9 +1,4 @@
-export { Bundle } from "./component.ts";
-export { createContext, Effect, Html, render } from "./render.ts";
-export { $send, route, router } from "./router.ts";
-export type {
-  InferContext,
-  JSXChildren as Children,
-  JSXComponent as FC,
-  JSXContextAPI as Use,
-} from "./types.ts";
+export { Bundle, css, Layout, PageStyle, Shadow } from "./component.ts";
+export { createContext, Effect, render } from "./render.ts";
+export { mutation, route } from "./file-router.ts";
+export type { FCProps, InferContext, JSX } from "./types.ts";

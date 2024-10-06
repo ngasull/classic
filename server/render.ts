@@ -1,4 +1,4 @@
-import type { BuildContext } from "@classic/build";
+import type { AppBuild, BuildContext } from "@classic/build";
 import {
   client,
   type Fn,
@@ -21,9 +21,7 @@ import {
   DOMNodeKind,
   ElementKind,
   type JSX,
-  type JSXComponent,
   type JSXContext,
-  type JSXContextAPI,
   type JSXContextInit,
   type JSXElement,
   type JSXRef,
@@ -50,7 +48,13 @@ const escapeTag = (tag: string) => tag.replaceAll(/[<>"'&]/g, "");
 const zeroWidthSpaceHTML = "&#8203;";
 
 const escapeTextNode = (text: string) =>
-  escapeEscapes(text).replaceAll("<", "&lt;") || zeroWidthSpaceHTML; // Empty would not be parsed as a text node
+  escapeEscapes(text)
+    .replaceAll("<", "&lt;")
+    // Consecutive and first/last white spaces are ignored anyways and can mess with HTML streaming
+    // ... But they mess with inline element spacing!
+    // .replaceAll(/^\s+|\s+$/g, "")
+    .replaceAll(/\s+/g, " ") ||
+  zeroWidthSpaceHTML; // Empty would not be parsed as a text node
 
 const commentEscapeRegExp = /--(#|>)/g;
 
@@ -63,9 +67,9 @@ export const escapeScriptContent = (node: DOMLiteral) =>
 const encoder = new TextEncoder();
 
 export const render = (
-  root: JSXElement | PromiseLike<JSXElement>,
+  root: JSX.Element,
   opts: {
-    context?: JSXContextInit<unknown>[] | JSXContextAPI;
+    context?: JSXContextInit<unknown>[] | JSX.Use;
     doctype?: boolean;
   } = {},
 ): ReadableStream<Uint8Array> =>
@@ -76,7 +80,7 @@ export const render = (
 
       if (!ctx.get($effects)) ctx.provide($effects, []);
       const effects = ctx($effects);
-      const build = ctx.get($buildContext);
+      const build = ctx.get($buildContext) ?? ctx.get($build)?.context;
 
       const write = (chunk: Uint8Array) => controller.enqueue(chunk);
       const tree = domNodes(root, ctx);
@@ -94,13 +98,13 @@ export const createContext = <T>(name?: string): JSXContext<T> => {
   return { init, [contextSymbol]: $ };
 };
 
-type JSXContextInternal = JSXContextAPI & {
+type JSXContextInternal = JSX.Use & {
   [$contextData]: Map<symbol, unknown>;
 };
 
 export const initContext = (
-  init?: JSXContextInit<unknown>[] | JSXContextAPI,
-): JSXContextAPI => {
+  init?: JSXContextInit<unknown>[] | JSX.Use,
+): JSX.Use => {
   if (init && !Array.isArray(init)) {
     const entries: JSXContextInit<unknown>[] = [
       ...(init as JSXContextInternal)[$contextData].entries(),
@@ -109,7 +113,7 @@ export const initContext = (
   }
 
   const use = <T, Args extends any[]>(
-    context: JSXContext<T> | ((use: JSXContextAPI, ...args: Args) => T),
+    context: JSXContext<T> | ((use: JSX.Use, ...args: Args) => T),
     ...args: Args
   ) => {
     if (typeof context === "function") {
@@ -146,6 +150,8 @@ const contextProto = {
 } satisfies ThisType<JSXContextInternal>;
 
 export const $effects = createContext<JSable<void>[]>("effect");
+
+export const $build = createContext<AppBuild>("build");
 
 export const $buildContext = createContext<BuildContext>("build context");
 
@@ -308,7 +314,7 @@ const writeDOMTree = async (
 
 const domNodes = async function* (
   nodeLike: JSX.Element,
-  ctx: JSXContextAPI,
+  ctx: JSX.Use,
 ): AsyncIterable<DOMNode> {
   const node = nodeLike && "then" in nodeLike ? await nodeLike : nodeLike;
   if (!node) return;
@@ -444,7 +450,7 @@ const domNodes = async function* (
 
 async function* disambiguateText(
   children: readonly JSXElement[],
-  ctx: JSXContextAPI,
+  ctx: JSX.Use,
 ): AsyncIterable<DOMNode> {
   let prev: DOMNode | null = null;
 
@@ -504,7 +510,7 @@ const subText = js.fn((
   >`${client.sub}(${node},_=>${node}.textContent=${value}(),${uris})`
 );
 
-export const Effect: JSXComponent<{
+export const Effect: JSX.FC<{
   js: Fn<[], void | (() => void)>;
   uris?:
     | readonly string[]
@@ -528,20 +534,3 @@ export const Effect: JSXComponent<{
     ref,
   };
 };
-
-export const Html: JSXComponent<{
-  contents: string | Uint8Array | ReadableStream<Uint8Array>;
-}> = ({ contents }) => ({
-  kind: ElementKind.HTMLNode,
-  html: contents instanceof ReadableStream
-    ? contents
-    : new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(
-          typeof contents === "string" ? encoder.encode(contents) : contents,
-        );
-        controller.close();
-      },
-    }),
-  ref: mkRef(),
-});

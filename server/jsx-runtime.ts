@@ -3,8 +3,6 @@ import type {
   DOMLiteral,
   IntrinsicElementProps,
   JSX,
-  JSXChildren,
-  JSXComponent,
   JSXElement,
 } from "./types.ts";
 import { ElementKind } from "./types.ts";
@@ -13,15 +11,15 @@ import type { VoidElement } from "./void.ts";
 export type { JSX };
 
 const jsx = ((
-  tag: keyof JSX.IntrinsicElements | JSXComponent<Record<string, unknown>>,
+  tag: keyof JSX.IntrinsicElements | JSX.FC<Record<string, unknown>>,
   props?: Record<string, unknown> | null | undefined,
-  ...children: JSXChildren[]
+  ...children: JSX.Children[]
 ): JSXElement => {
   props ??= {};
   children = flatten(
     children.length
       ? children
-      : props.children as JSXChildren | null | undefined ?? [],
+      : props.children as JSX.Children | null | undefined ?? [],
   );
   delete props.children;
   return typeof tag === "string"
@@ -42,7 +40,7 @@ const jsx = ((
   <Tag extends Exclude<keyof JSX.IntrinsicElements, VoidElement>>(
     tag: Tag,
     props?: JSX.IntrinsicElements[Tag] | null | undefined,
-    ...children: JSXChildren[]
+    ...children: JSX.Children[]
   ): JSXElement;
 
   <Tag extends VoidElement>(
@@ -50,7 +48,7 @@ const jsx = ((
     props?: JSX.IntrinsicElements[Tag] | null | undefined,
   ): JSXElement;
 
-  <Cpt extends JSXComponent<any>, Props extends ComponentProps<Cpt>>(
+  <Cpt extends JSX.FC<any>, Props extends ComponentProps<Cpt>>(
     component: Cpt,
     props?: NullableProps<
       Omit<Props, "children"> & Partial<Pick<Props, "children">>
@@ -59,17 +57,17 @@ const jsx = ((
       ? T extends readonly unknown[] ? T : [T]
       : Props extends { readonly children?: infer T }
         ? T extends readonly unknown[] ? T | [] : [T] | []
-      : JSXChildren[]
+      : JSX.Children[]
   ): JSXElement;
 
-  <Cpt extends JSXComponent<any>>(
+  <Cpt extends JSX.FC<any>>(
     component: Cpt,
     props?: NullableProps<ComponentProps<Cpt>>,
   ): JSXElement;
 };
 
-type ComponentProps<Cpt extends JSXComponent<Record<any, any>>> = Cpt extends
-  JSXComponent<infer O> ? O : never;
+type ComponentProps<Cpt extends JSX.FC<Record<any, any>>> = Cpt extends
+  JSX.FC<infer O> ? O : never;
 
 type NullableProps<Props> =
   | Props
@@ -79,14 +77,14 @@ type NullableProps<Props> =
     : never);
 
 const Fragment = (
-  { children }: { children?: JSXChildren } = {},
+  { children }: { children?: JSX.Children } = {},
 ): JSXElement => ({
   kind: ElementKind.Fragment,
   children: flatten(children),
   ref: mkRef(),
 });
 
-const flatten = (children: JSXChildren): JSXElement[] => {
+const flatten = (children: JSX.Children): JSXElement[] => {
   if (!Array.isArray(children)) children = [children];
 
   const fragment: JSXElement[] = [];
@@ -98,7 +96,24 @@ const flatten = (children: JSXChildren): JSXElement[] => {
         isJSable<DOMLiteral>(child)
           ? { kind: ElementKind.JS, js: child, ref: mkRef() }
           : typeof child === "object"
-          ? (child as JSXElement)
+          ? child instanceof ReadableStream
+            ? {
+              kind: ElementKind.HTMLNode,
+              html: child,
+              ref: mkRef(),
+            }
+            : child instanceof Uint8Array
+            ? {
+              kind: ElementKind.HTMLNode,
+              html: new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(child);
+                  controller.close();
+                },
+              }),
+              ref: mkRef(),
+            }
+            : (child as JSXElement)
           : {
             kind: ElementKind.Text,
             text: child as string | number,

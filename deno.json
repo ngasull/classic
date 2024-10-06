@@ -12,13 +12,16 @@
     "@classic/js": "jsr:@classic/js@0",
     "@classic/server": "jsr:@classic/server@0",
     "@classic/util": "jsr:@classic/util@0",
+    "@jabr/xxhash64": "jsr:@jabr/xxhash64@^2.0.0",
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader@^0.10.3",
+    "@std/encoding": "jsr:@std/encoding@^1.0.4",
     "@std/fs": "jsr:@std/fs@^0.229.3",
     "@std/http": "jsr:@std/http@^0.224.5",
+    "@std/media-types": "jsr:@std/media-types@^1.0.2",
     "@std/path": "jsr:@std/path@^0.225.2",
     "esbuild": "npm:esbuild@^0.23.0",
     "hono": "jsr:@hono/hono@^4.4.8",
-    "hono/types": "jsr:@hono/hono@^4.4.8/types",
+    "idiomorph": "npm:idiomorph@^0.3.0",
     "lightningcss": "npm:lightningcss@^1.25.1"
   },
   "tasks": {
@@ -53,8 +56,9 @@
   "lint": {
     "rules": {
       "exclude": [
+        "no-empty-interface",
         "prefer-const",
-        "no-empty-interface"
+        "require-await"
       ]
     }
   }

@@ -1,12 +1,12 @@
 import type { CustomElement, CustomElements } from "@classic/element";
-import type { JS, JSable } from "@classic/js";
+import { isJSable, type JS, type JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
 import type { VoidElement } from "./void.ts";
 
 type IntrinsicServerElement<
   T,
   Ref extends EventTarget,
-  Children = JSXChildren,
+  Children = JSX.Children,
 > =
   & { [P in keyof T]: T[P] | JSable<T[P]> }
   & {
@@ -15,6 +15,8 @@ type IntrinsicServerElement<
   };
 
 declare namespace JSX {
+  // JSX Spec
+
   type IntrinsicElements =
     & {
       [K in keyof JSXInternal.IntrinsicElements]: IntrinsicServerElement<
@@ -24,7 +26,7 @@ declare namespace JSX {
           : JSXInternal.IntrinsicElements[K] extends
             JSXInternal.SVGAttributes<infer E> ? E
           : never,
-        K extends VoidElement ? never : JSXChildren
+        K extends VoidElement ? never : JSX.Children
       >;
     }
     & {
@@ -37,6 +39,37 @@ declare namespace JSX {
         : never;
     };
   type Element = JSXElement | null | PromiseLike<JSXElement | null>;
+
+  // Classic helpers
+
+  type Children =
+    | JSX.Element
+    | DOMLiteral
+    | Uint8Array
+    | ReadableStream<Uint8Array>
+    | null
+    | undefined
+    | JSable<DOMLiteral | null | undefined>
+    | JSX.Children[];
+
+  type FC<O extends Record<string, unknown> = Record<never, never>> = (
+    props: O,
+    use: JSX.Use,
+  ) => JSX.Element;
+
+  type PFC<
+    O extends Record<string, unknown> = Record<never, never>,
+  > = JSX.FC<O & { readonly children?: JSX.Children }>;
+
+  type Use = {
+    <T>(context: JSXContext<T>): T;
+    <Args extends any[], T>(
+      use: (ctx: JSX.Use, ...args: Args) => T,
+      ...args: Args
+    ): T;
+    readonly get: <T>(context: JSXContext<T>) => T | undefined;
+    readonly provide: <T>(context: JSXContext<T>, value: T) => JSX.Use;
+  };
 }
 
 export type { JSX };
@@ -54,7 +87,7 @@ export type JSXElement =
   }
   | {
     readonly kind: ElementKind.Component;
-    readonly Component: JSXComponent<Record<string, unknown>>;
+    readonly Component: JSX.FC<Record<string, unknown>>;
     readonly props: Record<string, unknown>;
     readonly ref: JS<EventTarget>;
   }
@@ -91,6 +124,9 @@ export enum ElementKind {
   HTMLNode,
 }
 
+export const isJsx = (v: unknown): v is JSXElement =>
+  typeof v === "object" && !!v && isJSable((v as any).ref);
+
 export type IntrinsicElementProps = Readonly<
   Record<
     string,
@@ -103,37 +139,13 @@ export type IntrinsicElementProps = Readonly<
   >
 >;
 
-export type JSXChildren =
-  | JSX.Element
-  | DOMLiteral
-  | null
-  | undefined
-  | JSable<DOMLiteral | null | undefined>
-  | JSXChildren[];
+export type FCProps<C> = C extends JSX.FC<infer P> ? P : never;
 
 export type DOMLiteral = string | number;
 
 export type JSXRef<T extends EventTarget> = (target: JS<T>) => unknown;
 
-export type JSXComponent<
-  O extends Record<string, unknown> = Record<never, never>,
-> = (props: O, use: JSXContextAPI) => JSX.Element;
-
-export type JSXParentComponent<
-  O extends Record<string, unknown> = Record<never, never>,
-> = JSXComponent<O & { readonly children?: JSXChildren }>;
-
 export type JSXContextInit<T> = readonly [symbol, T];
-
-export type JSXContextAPI = {
-  <T>(context: JSXContext<T>): T;
-  <Args extends any[], T>(
-    use: (ctx: JSXContextAPI, ...args: Args) => T,
-    ...args: Args
-  ): T;
-  readonly get: <T>(context: JSXContext<T>) => T | undefined;
-  readonly provide: <T>(context: JSXContext<T>, value: T) => JSXContextAPI;
-};
 
 export type JSXContext<T> = {
   readonly init: (value: T) => JSXContextInit<T>;

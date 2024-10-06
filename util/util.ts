@@ -60,6 +60,9 @@ export const getOwnPropertyDescriptors =
 export const keys = /* @__PURE__ */ Object_.keys;
 export const values = /* @__PURE__ */ Object_.values;
 
+export const timeout = (delay: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, delay));
+
 // DOM
 
 let domParser: DOMParser | null = NULL;

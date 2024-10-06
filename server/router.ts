@@ -4,22 +4,14 @@ import { accepts } from "@std/http";
 import { transform as transformCss } from "lightningcss";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import {
+  $build,
   $buildContext,
   $effects,
   createContext,
-  Html,
   initContext,
   render,
 } from "./render.ts";
-import type {
-  JSX,
-  JSXComponent,
-  JSXContextAPI,
-  JSXContextInit,
-  JSXElement,
-} from "./types.ts";
-
-export const $build = createContext<AppBuild>();
+import type { JSX, JSXContextInit, JSXElement } from "./types.ts";
 
 type SubSegment<Params extends string, P extends string> = Segment<
   Params,
@@ -40,11 +32,11 @@ const minifyCss = (filename: string, css: string) => {
   return code;
 };
 
-type LayoutComponent<Params extends string> = JSXComponent<
-  { [P in Params]: string } & { readonly children?: JSX.Element }
+type LayoutComponent<Params extends string> = JSX.FC<
+  { [P in Params]: string } & { readonly children?: JSX.Children }
 >;
 
-type PartComponent<Params extends string> = JSXComponent<
+type PartComponent<Params extends string> = JSX.FC<
   { [P in Params]: string }
 >;
 
@@ -53,7 +45,7 @@ type Action<PC extends PartComponent<string>> = unknown;
 type RoutedRequest<Params extends string> = {
   readonly req: Request;
   readonly params: { [P in Params]: string };
-  readonly use: JSXContextAPI;
+  readonly use: JSX.Use;
 };
 
 type Handler<Params extends string> = (
@@ -148,9 +140,7 @@ class Segment<
           }
           return jsx("style", {
             children: [
-              typeof style === "string"
-                ? style
-                : jsx(Html, { contents: await style }),
+              typeof style === "string" ? style : await style,
             ],
           });
         });
@@ -333,33 +323,16 @@ class Router {
   async fetch(
     req: Request,
     { context, build }: {
-      context?: JSXContextInit<unknown>[] | JSXContextAPI | undefined;
+      context?: JSXContextInit<unknown>[] | JSX.Use | undefined;
       build: AppBuild;
     },
   ): Promise<Response | void> {
-    const moduleRes = build.context.fetch(req);
+    const moduleRes = build.fetch(req);
     if (moduleRes) return moduleRes;
 
     const isGET = req.method === "GET";
     const reqAccepts = accepts(req);
     const { pathname, searchParams } = new URL(req.url);
-
-    if (build.dev && pathname === "/.hmr") {
-      let cancel: () => void;
-      return new Response(
-        new ReadableStream<string>({
-          start(controller) {
-            cancel = build.context.watch(() => {
-              controller.enqueue(`event: change\r\n\r\n`);
-            });
-          },
-          cancel() {
-            cancel();
-          },
-        }),
-        { headers: { "Content-Type": "text/event-stream" } },
-      );
-    }
 
     const use = initContext(context);
     use.provide($initResponse, {});
@@ -391,39 +364,24 @@ class Router {
 
       const segments = reqFrom ? layouts.slice(resFromIndex + 1) : layouts;
       let stream = render(
-        jsx("cc-route", {
-          children: jsx("template", {
-            shadowrootmode: "open",
-            children: [
-              build.globalCssPublic
-                ? jsx("link", {
-                  rel: "stylesheet",
-                  href: build.globalCssPublic,
-                })
-                : null,
-              jsx(Html, {
-                contents: render(part, { context: initContext(use) }),
-              }),
-            ],
+        jsx(CCRoute, {
+          body: jsx(Fragment, {
+            children: render(part, { context: initContext(use) }),
           }),
         }),
+        { context: initContext(use) },
       );
 
       for (let i = segments.length - 1; i >= 0; i--) {
         const [segment, path, layoutParams] = segments[i];
         stream = render(
-          jsx("cc-route", {
+          jsx(CCRoute, {
             path,
-            children: [
-              jsx("template", {
-                shadowrootmode: "open",
-                children: jsx(segment.layout(), {
-                  ...layoutParams,
-                  children: jsx("slot"),
-                }),
-              }),
-              jsx(Html, { contents: stream }),
-            ],
+            body: jsx(segment.layout(), {
+              ...layoutParams,
+              children: jsx("slot"),
+            }),
+            children: stream,
           }),
           { context: initContext(use) },
         );
@@ -441,13 +399,9 @@ class Router {
       stream = render(
         reqFrom
           ? jsx("html", {
-            children: jsx("body", {
-              children: jsx(Html, { contents: stream }),
-            }),
+            children: jsx("body", { children: stream }),
           })
-          : jsx(this.#RootLayout!, {
-            children: jsx(Html, { contents: stream }),
-          }),
+          : jsx(this.#RootLayout!, { children: stream }),
         { context },
       );
 
@@ -481,7 +435,7 @@ const $initResponse = createContext<{
 }>("initResponse");
 
 export const $send = (
-  use: JSXContextAPI,
+  use: JSX.Use,
   opts: { status?: number; headers?: Record<string, string> },
 ): void => {
   Object.assign(use($initResponse), opts);
@@ -489,7 +443,30 @@ export const $send = (
 
 const wildcardRegExp = /^(?:\*|:(.*))$/;
 
-const NotFound: JSXComponent = (_, use) => {
+const CCRoute: JSX.PFC<{
+  path?: string;
+  body: JSX.Element;
+}> = ({ path, body, children }, use) => {
+  const globalCss = use($build).globalCssPublic;
+
+  return jsx("cc-route", {
+    path,
+    children: [
+      jsx("template", {
+        shadowrootmode: "open",
+        children: [
+          globalCss
+            ? jsx("link", { rel: "stylesheet", href: globalCss })
+            : null,
+          body,
+        ],
+      }),
+      children,
+    ],
+  });
+};
+
+const NotFound: JSX.FC = (_, use) => {
   use($send, { status: 404 });
   return Fragment({ children: ["Not found"] });
 };
