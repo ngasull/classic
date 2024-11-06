@@ -1,5 +1,6 @@
 import { define, element, shadow } from "@classic/element";
 import { render } from "@classic/element/jsx";
+import { morph } from "@classic/morph";
 import {
   domParse,
   listen,
@@ -9,7 +10,6 @@ import {
   replaceWith,
   timeout,
 } from "@classic/util";
-import { Idiomorph } from "idiomorph/dist/idiomorph.esm.js";
 
 const { document, history, location, Promise } = globalThis;
 
@@ -67,7 +67,7 @@ const navigate = async (href: string) => {
 
   if (!await navigateQ) rootClassList.add(fetchingClass);
 
-  morph(document.documentElement, (await resQ).documentElement);
+  morph(document, await resQ);
   // receivedSlot = querySelector(ccRoute, receivedDoc.body),
   // title = receivedDoc.title,
   // currentHead: Record<string, Element> = {},
@@ -157,7 +157,7 @@ const submit = async (
             ? Promise.reject(submit(form, res.url, body))
             : res.text().then((html) => {
               contentLocation = res.headers.get("Content-Location") ??
-                location.pathname;
+                url.pathname;
               if (contentLocation) {
                 if (contentLocation != location.pathname) {
                   history.pushState(0, "", contentLocation);
@@ -171,33 +171,59 @@ const submit = async (
 
   if (res === 0) formClassList.add(fetchingClass);
   if ((receivedDoc = await resQ)) {
-    morph(document.documentElement, receivedDoc.documentElement);
+    morph(document, receivedDoc);
   }
 };
 
-const morph = (
-  src: Node,
-  target: Node,
-): void =>
-  Idiomorph.morph(src, target, {
-    callbacks: {
-      afterNodeAdded(node: Node) {
-        let mode: string | null;
-        if (
-          (node as Element).tagName == "TEMPLATE" &&
-          (mode = getShadowRootMode(node as HTMLTemplateElement))
-        ) {
-          if (!node.parentElement!.shadowRoot) {
-            shadow(node.parentElement!, { mode: mode as ShadowRootMode })
-              .append((node as HTMLTemplateElement).content);
-          }
-          (node as Element).remove();
-        } else if ((node as Element).tagName == "SCRIPT") {
-          reviveScript(node as HTMLScriptElement);
-        }
-      },
-    },
-  });
+// const morph = (
+//   src: Node,
+//   target: Node,
+// ): void =>
+//   morphdom(src, target, {
+//     onBeforeNodeAdded(node): any {
+//       let mode: string | null;
+//       if (
+//         (node as Element).tagName == "TEMPLATE" &&
+//         (mode = getShadowRootMode(node as HTMLTemplateElement))
+//       ) {
+//         morph(
+//           shadow(node.parentElement!, { mode: mode as ShadowRootMode }),
+//           (node as HTMLTemplateElement).content,
+//         );
+//         return false;
+//       }
+//       return node;
+//     },
+//     onNodeAdded(node: Node): any {
+//       if (node.nodeType === Node.ELEMENT_NODE) {
+//         if ((node as Element).tagName == "SCRIPT") {
+//           reviveScript(node as HTMLScriptElement);
+//         }
+//         for (
+//           let script of (node as Element).querySelectorAll<HTMLScriptElement>(
+//             "script",
+//           )
+//         ) {
+//           reviveScript(script);
+//         }
+//         for (
+//           let template of (node as Element).querySelectorAll<
+//             HTMLTemplateElement
+//           >(
+//             "template[shadowrootmode]",
+//           )
+//         ) {
+//           morph(
+//             shadow(template.parentElement!, {
+//               mode: getShadowRootMode(template) as ShadowRootMode,
+//             }),
+//             template.content,
+//           );
+//           template.remove();
+//         }
+//       }
+//     },
+//   });
 
 const reviveScript = (script: HTMLScriptElement) => {
   let copy = document.createElement("script");
@@ -234,10 +260,10 @@ define(
   element({
     defer: true,
     js(host) {
-      if (!host.shadowRoot) {
-        let template = host.querySelector<HTMLTemplateElement>(
-          "template[shadowrootmode]",
-        )!;
+      let template = host.querySelector<HTMLTemplateElement>(
+        "template[shadowrootmode]",
+      );
+      if (template && template.parentNode == host.shadowRoot) {
         render(
           shadow(host, { mode: getShadowRootMode(template) }),
           template.content,
