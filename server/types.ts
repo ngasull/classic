@@ -1,6 +1,7 @@
 import type { CustomElement, CustomElements } from "@classic/element";
 import { isJSable, type JS, type JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
+import type { Use } from "./use.ts";
 import type { VoidElement } from "./void.ts";
 
 type IntrinsicServerElement<
@@ -54,22 +55,12 @@ declare namespace JSX {
 
   type FC<O extends Record<string, unknown> = Record<never, never>> = (
     props: O,
-    use: JSX.Use,
+    use: Use,
   ) => JSX.Element;
 
   type PFC<
     O extends Record<string, unknown> = Record<never, never>,
   > = JSX.FC<O & { readonly children?: JSX.Children }>;
-
-  type Use = {
-    <T>(context: JSXContext<T>): T;
-    <Args extends any[], T>(
-      use: (ctx: JSX.Use, ...args: Args) => T,
-      ...args: Args
-    ): T;
-    readonly get: <T>(context: JSXContext<T>) => T | undefined;
-    readonly provide: <T>(context: JSXContext<T>, value: T) => JSX.Use;
-  };
 }
 
 export type { JSX };
@@ -144,17 +135,6 @@ export type FCProps<C> = C extends JSX.FC<infer P> ? P : never;
 export type DOMLiteral = string | number;
 
 export type JSXRef<T extends EventTarget> = (target: JS<T>) => unknown;
-
-export type JSXContextInit<T> = readonly [symbol, T];
-
-export type JSXContext<T> = {
-  readonly init: (value: T) => JSXContextInit<T>;
-  readonly [contextSymbol]: symbol;
-};
-
-export type InferContext<C> = C extends JSXContext<infer T> ? T : never;
-
-export const contextSymbol = Symbol("context");
 
 export type DOMNode =
   | DOMNodeTag

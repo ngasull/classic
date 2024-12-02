@@ -1,14 +1,14 @@
 import type { AppBuild } from "@classic/build";
 import type { Context } from "hono";
 import type { Env, Input, MiddlewareHandler } from "hono/types";
-import { fileRouter, scanRoutes } from "./file-router.ts";
-import { $build, createContext } from "./render.ts";
+import { fileRouter } from "./file-router.ts";
+import { $build } from "./render.ts";
 import type { Router } from "./router.ts";
-import type { JSX, JSXContextInit } from "./types.ts";
+import { createUseKey, Use } from "./use.ts";
 
-const honoContext = createContext<Context>("hono");
+const honoContext = createUseKey<Context>("hono");
 
-export const $hono = (use: JSX.Use): Context => use(honoContext);
+export const $hono = (use: Use): Context => use(honoContext);
 
 export const classicRouter = <E extends Env, P extends string, I extends Input>(
   router: Router,

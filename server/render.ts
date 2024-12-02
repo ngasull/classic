@@ -15,17 +15,15 @@ import {
   unsafe,
 } from "@classic/js";
 import {
-  contextSymbol,
   type DOMLiteral,
   type DOMNode,
   DOMNodeKind,
   ElementKind,
   type JSX,
-  type JSXContext,
-  type JSXContextInit,
   type JSXElement,
   type JSXRef,
 } from "./types.ts";
+import { createUseKey, initUse, type Use } from "./use.ts";
 import { voidElements } from "./void.ts";
 
 const camelRegExp = /[A-Z]/g;
@@ -69,21 +67,19 @@ const encoder = new TextEncoder();
 export const render = (
   root: JSX.Element,
   opts: {
-    context?: JSXContextInit<unknown>[] | JSX.Use;
+    use?: Use;
     doctype?: boolean;
   } = {},
 ): ReadableStream<Uint8Array> =>
   new ReadableStream<Uint8Array>({
     start(controller) {
-      const { context } = opts;
-      const ctx = initContext(context);
-
-      if (!ctx.get($effects)) ctx.provide($effects, []);
-      const effects = ctx($effects);
-      const build = ctx.get($buildContext) ?? ctx.get($build)?.context;
+      const use = opts.use?.fork() ?? initUse();
+      if (!use.get($effects)) use.provide($effects, []);
+      const effects = use($effects);
+      const build = use.get($buildContext) ?? use.get($build)?.context;
 
       const write = (chunk: Uint8Array) => controller.enqueue(chunk);
-      const tree = domNodes(root, ctx);
+      const tree = domNodes(root, use);
 
       writeDOMTree(tree, { build, effects, write, ...opts }, true)
         .finally(() => {
@@ -92,68 +88,11 @@ export const render = (
     },
   });
 
-export const createContext = <T>(name?: string): JSXContext<T> => {
-  const $ = Symbol(name);
-  const init = (value: T) => [$, value] as const;
-  return { init, [contextSymbol]: $ };
-};
+export const $effects = createUseKey<JSable<void>[]>("effect");
 
-type JSXContextInternal = JSX.Use & {
-  [$contextData]: Map<symbol, unknown>;
-};
+export const $build = createUseKey<AppBuild>("build");
 
-export const initContext = (
-  init?: JSXContextInit<unknown>[] | JSX.Use,
-): JSX.Use => {
-  if (init && !Array.isArray(init)) {
-    const entries: JSXContextInit<unknown>[] = [
-      ...(init as JSXContextInternal)[$contextData].entries(),
-    ];
-    return initContext(entries);
-  }
-
-  const use = <T, Args extends any[]>(
-    context: JSXContext<T> | ((use: JSX.Use, ...args: Args) => T),
-    ...args: Args
-  ) => {
-    if (typeof context === "function") {
-      return context(ctx, ...args);
-    } else {
-      if (!use[$contextData].has(context[contextSymbol])) {
-        throw new Error(
-          `Looking up unset context ${
-            context[contextSymbol].description ?? ""
-          }`,
-        );
-      }
-      return use[$contextData].get(context[contextSymbol]) as T;
-    }
-  };
-
-  use[$contextData] = new Map<symbol, unknown>(init);
-  const ctx = Object.assign(use, contextProto);
-
-  return ctx;
-};
-
-const $contextData = Symbol("data");
-
-const contextProto = {
-  get<T>(context: JSXContext<T>) {
-    return this[$contextData].get(context[contextSymbol]) as T;
-  },
-
-  provide<T>(context: JSXContext<T>, value: T) {
-    this[$contextData].set(context[contextSymbol], value);
-    return this;
-  },
-} satisfies ThisType<JSXContextInternal>;
-
-export const $effects = createContext<JSable<void>[]>("effect");
-
-export const $build = createContext<AppBuild>("build");
-
-export const $buildContext = createContext<BuildContext>("build context");
+export const $buildContext = createUseKey<BuildContext>("build context");
 
 const activate = async (
   refs: RefTree,
@@ -314,7 +253,7 @@ const writeDOMTree = async (
 
 const domNodes = async function* (
   nodeLike: JSX.Element,
-  ctx: JSX.Use,
+  ctx: Use,
 ): AsyncIterable<DOMNode> {
   const node = nodeLike && "then" in nodeLike ? await nodeLike : nodeLike;
   if (!node) return;
@@ -331,7 +270,7 @@ const domNodes = async function* (
 
     case ElementKind.Component: {
       const { Component, props } = node;
-      const subCtx = initContext(ctx);
+      const subCtx = ctx.fork();
       yield* domNodes(Component(props, subCtx), subCtx);
       return;
     }
@@ -450,7 +389,7 @@ const domNodes = async function* (
 
 async function* disambiguateText(
   children: readonly JSXElement[],
-  ctx: JSX.Use,
+  ctx: Use,
 ): AsyncIterable<DOMNode> {
   let prev: DOMNode | null = null;
 

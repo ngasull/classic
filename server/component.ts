@@ -1,8 +1,9 @@
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import type { JSX } from "./types.ts";
-import { $build, createContext } from "./render.ts";
+import { $build } from "./render.ts";
 import { transform as transformCss } from "lightningcss";
 import type { VoidElement } from "./void.ts";
+import { createUseKey, type Use } from "./use.ts";
 
 export const Bundle: JSX.FC = async (_, use) => {
   const { globalCssPublic, critical, dev } = use($build);
@@ -24,14 +25,13 @@ export const Bundle: JSX.FC = async (_, use) => {
   });
 };
 
-export const cssContext = createContext<Set<string>>("css");
+export const cssContext = createUseKey<Set<string>>("css");
 
 export const $addCss = (
-  use: JSX.Use,
+  use: Use,
   ...styleSheets: [string, ...string[]]
 ): void => {
-  const css = use.get(cssContext) ??
-    use.provide(cssContext, new Set())(cssContext);
+  const css = use.get(cssContext) ?? use.provide(cssContext, new Set());
   for (const s of styleSheets) css.add(s);
 };
 
@@ -47,37 +47,30 @@ export const PageStyle: JSX.FC = async (_, use) => {
 };
 
 export const Shadow: JSX.PFC = ({ children }, use) => {
-  const { globalCssPublic } = use($build);
+  // const { globalCssPublic } = use($build);
   return jsx("template", {
     shadowrootmode: "open",
     children: [
-      ...globalCssPublic.map((href) =>
-        jsx("link", { rel: "stylesheet", href })
-      ),
+      // ...globalCssPublic.map((href) =>
+      //   jsx("link", { rel: "stylesheet", href })
+      // ),
       children,
     ],
   });
 };
 
 export const Layout: JSX.PFC<{
+  styleSheets?: readonly string[];
   style?: string;
   tag?: Exclude<keyof JSX.IntrinsicElements, VoidElement>;
   shadow: JSX.Children;
-}> = ({ style, tag = "div", shadow, children }, use) =>
+}> = ({ styleSheets, style, tag = "div", shadow, children }) =>
   jsx(tag, {
     children: [
       jsx(Shadow, {
         children: [
-          style
-            ? jsx("style", {
-              children: transformCss({
-                filename: Deno.cwd(),
-                code: encoder.encode(style),
-                minify: !use($build).dev,
-                sourceMap: false,
-              }).code,
-            })
-            : null,
+          styleSheets?.map((href) => jsx("link", { rel: "stylesheet", href })),
+          style,
           shadow,
         ],
       }),
