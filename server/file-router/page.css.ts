@@ -2,31 +2,36 @@ import { create as createHash } from "@jabr/xxhash64";
 import { encodeBase64 } from "@std/encoding";
 import { transform as transformCss } from "lightningcss";
 import type { FileRoute } from "../file-router.ts";
-import { routeBuildPlugin } from "../file-router.ts";
+import { route } from "../file-router.ts";
 import type { Middleware } from "../middleware.ts";
 import { staticContents } from "../middleware/staticContents.ts";
-import type { BuildRoute } from "../build.ts";
+import type { BuildFunction } from "../build.ts";
 import { basename } from "@std/path";
 import { $addCss } from "../component.ts";
 
 export const pageCssTpl = (tpl: TemplateStringsArray): FileRoute =>
-  routeBuildPlugin(pageCss, {
-    css: encoder.encode(tpl[0]),
-    fileName: "/index.css",
+  route({
+    build: pageCss({
+      css: encoder.encode(tpl[0]),
+      fileName: "/index.css",
+    }),
   });
 
 export const layoutCssTpl = (tpl: TemplateStringsArray): FileRoute =>
-  routeBuildPlugin(pageCss, {
-    css: encoder.encode(tpl[0]),
-    fileName: "/layout.css",
-    layout: true,
+  route({
+    build: pageCss({
+      css: encoder.encode(tpl[0]),
+      fileName: "/layout.css",
+      layout: true,
+    }),
   });
 
-export const pageCss = async (build: BuildRoute, { css, fileName, layout }: {
+export const pageCss = ({ css, fileName, layout }: {
   css: Uint8Array;
   fileName: string;
   layout?: boolean;
-}): Promise<void> => {
+}): BuildFunction =>
+async (route) => {
   const { code, map } = transformCss({
     filename: fileName,
     code: css,
@@ -37,20 +42,20 @@ export const pageCss = async (build: BuildRoute, { css, fileName, layout }: {
     code,
   )}.css`;
 
-  const path = staticContents(build, {
+  const path = staticContents(route, {
     pathHint: cssFileName,
     contents: () => code,
   });
 
   if (map) {
-    staticContents(build, {
+    staticContents(route, {
       path: path + ".map",
       contents: () => map,
     });
   }
 
-  if (layout) build.get("/*", import.meta.url, path, true);
-  else build.get("/", import.meta.url, path);
+  if (layout) route.segment("/*").method("GET", import.meta.url, path, true);
+  else route.method("GET", import.meta.url, path);
 };
 
 // export const $layoutCss = createUseKey<string[]>("layout.css");

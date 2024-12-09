@@ -3,10 +3,10 @@ import type { JSX } from "./types.ts";
 import { $build } from "./render.ts";
 import { transform as transformCss } from "lightningcss";
 import type { VoidElement } from "./void.ts";
-import { createUseKey, type Use } from "./use.ts";
+import { Context } from "./context.ts";
 
-export const Bundle: JSX.FC = async (_, use) => {
-  const { globalCssPublic, critical, dev } = use($build);
+export const Bundle: JSX.FC = async (_, context) => {
+  const { globalCssPublic, critical, dev } = context.use($build);
   const [js, css] = await Promise.all([critical.js, critical.css]);
   return Fragment({
     children: [
@@ -25,13 +25,13 @@ export const Bundle: JSX.FC = async (_, use) => {
   });
 };
 
-export const cssContext = createUseKey<Set<string>>("css");
+export const cssContext = Context.key<Set<string>>("css");
 
 export const $addCss = (
-  use: Use,
+  context: Context,
   ...styleSheets: [string, ...string[]]
 ): void => {
-  const css = use.get(cssContext) ?? use.provide(cssContext, new Set());
+  const css = context.get(cssContext) ?? context.provide(cssContext, new Set());
   for (const s of styleSheets) css.add(s);
 };
 
@@ -46,7 +46,7 @@ export const PageStyle: JSX.FC = async (_, use) => {
     : null;
 };
 
-export const Shadow: JSX.PFC = ({ children }, use) => {
+export const Shadow: JSX.PFC = ({ children }, context) => {
   // const { globalCssPublic } = use($build);
   return jsx("template", {
     shadowrootmode: "open",

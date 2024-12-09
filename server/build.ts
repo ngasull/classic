@@ -1,6 +1,5 @@
 import type { JSONable } from "../js/types.ts";
-import type { Use } from "./use.ts";
-import { initUse } from "./use.ts";
+import { Context } from "./context.ts";
 import { RuntimeContext } from "./middleware.ts";
 
 /**
@@ -10,6 +9,8 @@ import { RuntimeContext } from "./middleware.ts";
  */
 
 type Async<T> = T | PromiseLike<T>;
+
+export type BuildFunction<R = void> = (route: BuildRoute) => Async<R>;
 
 type Method = "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
 
@@ -25,14 +26,12 @@ const throwIfRelative = (module: string) => {
   }
 };
 
-export const build = async (
-  plugin: (build: BuildRoute) => Async<void>,
-): Promise<RuntimeContext> => {
+export const build = async (plugin: BuildFunction): Promise<RuntimeContext> => {
   const build = new Build();
   await plugin(new BuildRoute(build, []));
 
   const result = await build.build();
-  await build.trigger(Phase.RESULT, result);
+  await build[$trigger](Phase.RESULT, result);
   return result;
 };
 
@@ -40,6 +39,8 @@ enum Phase {
   INIT = 0,
   RESULT = -1,
 }
+
+const $trigger = Symbol("trigger");
 
 export class Build {
   readonly #mappings: RequestMapping[] = [];
@@ -50,7 +51,7 @@ export class Build {
     Set<(...args: readonly never[]) => void>
   >();
 
-  add(
+  method(
     method: Method,
     pattern: string,
     module: string,
@@ -75,13 +76,27 @@ export class Build {
     return new RuntimeContext(this.#mappings, Object.fromEntries(this.#assets));
   }
 
-  on(phase: Phase, cb: (...args: readonly never[]) => void): void {
+  #on(phase: Phase, cb: (...args: readonly never[]) => void): void {
     let cbs = this.#callbacks.get(phase);
     if (!cbs) this.#callbacks.set(phase, cbs = new Set());
     cbs.add(cb);
   }
 
-  async trigger(phase: Phase, ...args: readonly unknown[]): Promise<void> {
+  /**
+  Resolves first after every plugin initialized, before any other step
+  */
+  onInit(cb: () => void): void {
+    return this.#on(Phase.INIT, cb);
+  }
+
+  /**
+  Resolves after the build has compiled to a runtime context
+  */
+  onResult(cb: (result: RuntimeContext) => void) {
+    return this.#on(Phase.RESULT, cb);
+  }
+
+  async [$trigger](phase: Phase, ...args: readonly unknown[]): Promise<void> {
     const cbs = this.#callbacks.get(phase);
     if (cbs) {
       await Promise.all([...cbs].map((cb) => cb(...args as readonly never[])));
@@ -91,43 +106,39 @@ export class Build {
 
 export type { BuildRoute };
 
-class BuildRoute {
+class BuildRoute extends Context {
+  // deno-lint-ignore constructor-super
   constructor(
-    build: BuildRoute | Build,
+    parent: BuildRoute | Build,
     parentSegments: readonly string[],
   ) {
-    if (build instanceof BuildRoute) {
-      this.#build = build.#build;
-      this.#use = build.#use.fork();
+    if (parent instanceof BuildRoute) {
+      super(parent);
+      this.build = parent.build;
     } else {
-      this.#build = build;
-      this.#use = initUse();
+      super();
+      this.build = parent;
     }
 
     this.#parentSegments = parentSegments;
   }
 
-  readonly #build: Build;
+  readonly build: Build;
   readonly #parentSegments: readonly string[];
 
-  readonly #use: Use;
-  get use(): Use {
-    return this.#use;
-  }
-
-  segment(segment: string): BuildRoute {
+  segment(segment?: string): BuildRoute {
     const api = segment
       ? new BuildRoute(this, [...this.#parentSegments, segment])
-      : this;
+      : new BuildRoute(this, this.#parentSegments);
     return api;
   }
 
-  #add(
+  method(
     method: Method,
     module: string,
     ...params: Readonly<HandlerParam>[]
   ): void {
-    return this.#build.add(
+    return this.build.method(
       method,
       this.#parentSegments.join("").replace(/\/$/, "") || "/",
       module,
@@ -135,34 +146,8 @@ class BuildRoute {
     );
   }
 
-  get(segment: string, module: string, ...params: Readonly<HandlerParam>[]) {
-    return this.segment(segment).#add("GET", module, ...params);
-  }
-
-  post(segment: string, module: string, ...params: Readonly<HandlerParam>[]) {
-    return this.segment(segment).#add("POST", module, ...params);
-  }
-
-  asset(contents: () => Async<string | Uint8Array>): string {
-    return this.#build.asset(contents);
-  }
-
-  get routePattern(): string {
+  get pattern(): string {
     return this.#parentSegments.join("");
-  }
-
-  /**
-  Resolves first after every plugin initialized, before any other step
-  */
-  onInit(cb: () => void): void {
-    return this.#build.on(Phase.INIT, cb);
-  }
-
-  /**
-  Resolves after the build has compiled to a runtime context
-  */
-  onResult(cb: (result: RuntimeContext) => void) {
-    return this.#build.on(Phase.RESULT, cb);
   }
 }
 

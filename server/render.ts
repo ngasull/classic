@@ -23,7 +23,7 @@ import {
   type JSXElement,
   type JSXRef,
 } from "./types.ts";
-import { createUseKey, initUse, type Use } from "./use.ts";
+import { Context, type ContextInterface } from "./context.ts";
 import { voidElements } from "./void.ts";
 
 const camelRegExp = /[A-Z]/g;
@@ -67,19 +67,19 @@ const encoder = new TextEncoder();
 export const render = (
   root: JSX.Element,
   opts: {
-    use?: Use;
+    context?: ContextInterface;
     doctype?: boolean;
   } = {},
 ): ReadableStream<Uint8Array> =>
   new ReadableStream<Uint8Array>({
     start(controller) {
-      const use = opts.use?.fork() ?? initUse();
-      if (!use.get($effects)) use.provide($effects, []);
-      const effects = use($effects);
-      const build = use.get($buildContext) ?? use.get($build)?.context;
+      const context = new Context(opts.context);
+      if (!context.get($effects)) context.provide($effects, []);
+      const effects = context.use($effects);
+      const build = context.get($buildContext) ?? context.get($build)?.context;
 
       const write = (chunk: Uint8Array) => controller.enqueue(chunk);
-      const tree = domNodes(root, use);
+      const tree = domNodes(root, context);
 
       writeDOMTree(tree, { build, effects, write, ...opts }, true)
         .finally(() => {
@@ -88,11 +88,11 @@ export const render = (
     },
   });
 
-export const $effects = createUseKey<JSable<void>[]>("effect");
+export const $effects = Context.key<JSable<void>[]>("effect");
 
-export const $build = createUseKey<AppBuild>("build");
+export const $build = Context.key<AppBuild>("build");
 
-export const $buildContext = createUseKey<BuildContext>("build context");
+export const $buildContext = Context.key<BuildContext>("build context");
 
 const activate = async (
   refs: RefTree,
@@ -253,12 +253,12 @@ const writeDOMTree = async (
 
 const domNodes = async function* (
   nodeLike: JSX.Element,
-  ctx: Use,
+  ctx: ContextInterface,
 ): AsyncIterable<DOMNode> {
   const node = nodeLike && "then" in nodeLike ? await nodeLike : nodeLike;
   if (!node) return;
 
-  const effects = ctx($effects);
+  const effects = ctx.use($effects);
 
   switch (node.kind) {
     case ElementKind.Fragment: {
@@ -270,7 +270,7 @@ const domNodes = async function* (
 
     case ElementKind.Component: {
       const { Component, props } = node;
-      const subCtx = ctx.fork();
+      const subCtx = new Context(ctx);
       yield* domNodes(Component(props, subCtx), subCtx);
       return;
     }
@@ -389,7 +389,7 @@ const domNodes = async function* (
 
 async function* disambiguateText(
   children: readonly JSXElement[],
-  ctx: Use,
+  ctx: ContextInterface,
 ): AsyncIterable<DOMNode> {
   let prev: DOMNode | null = null;
 
@@ -455,9 +455,9 @@ export const Effect: JSX.FC<{
     | readonly string[]
     | JSable<readonly string[]>
     | readonly JSable<string>[];
-}> = ({ js: cb, uris }, use) => {
+}> = ({ js: cb, uris }, context) => {
   const ref = mkRef<Comment>();
-  use($effects).push(
+  context.use($effects).push(
     js.fn(() => {
       const effectJs = js.fn(cb);
       return client.sub(

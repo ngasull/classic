@@ -1,37 +1,37 @@
 import type { BuildRoute } from "../build.ts";
 import { $rootBuild } from "../file-router.ts";
 import type { RequestContextAPI } from "../middleware.ts";
-import { createUseKey } from "../use.ts";
+import { Context } from "../context.ts";
 
-const $preferredStaticRoot = createUseKey<string>("preferredStaticRoot");
+const $preferredStaticRoot = Context.key<string>("preferredStaticRoot");
 
 let staticExtRegExp: RegExp | undefined;
 
 export const staticContents = (
-  build: BuildRoute,
+  route: BuildRoute,
   { path, pathHint, contents, headers }: {
     contents: () => string | Uint8Array | PromiseLike<string | Uint8Array>;
     headers?: Record<string, string | undefined>;
   } & ({ pathHint: string; path?: never } | { pathHint?: never; path: string }),
 ): string => {
-  const rootBuild = build.use($rootBuild);
+  const root = route.use($rootBuild);
 
   staticExtRegExp ??= new RegExp(`\.(${
     Object.keys(responseHeaders)
       .map((ext) => ext.replaceAll(".", "\\."))
       .join("|")
   })$`);
-  path ??= (rootBuild.use.get($preferredStaticRoot) ?? "/static/") + pathHint;
+  path ??= (root.get($preferredStaticRoot) ?? "/static/") + pathHint;
   const extension = path.match(staticExtRegExp)?.[1] ??
     "";
-  const asset = build.asset(contents);
+  const asset = route.build.asset(contents);
   const staticHeaders = {
     ...responseHeaders[extension as keyof typeof responseHeaders] ??
       defaultHeaders,
     ...headers,
   };
 
-  rootBuild.get(path, import.meta.url, asset, staticHeaders);
+  root.segment(path).method("GET", import.meta.url, asset, staticHeaders);
   return path;
 };
 

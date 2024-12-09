@@ -1,8 +1,7 @@
 import { RegExpRouter } from "hono/router/reg-exp-router";
 import { join } from "@std/path";
 import type { BuildMeta, HandlerParam, RequestMapping } from "./build.ts";
-import type { Use } from "./use.ts";
-import { createUseKey, initUse } from "./use.ts";
+import { Context } from "./context.ts";
 
 const noop = () => {};
 const asyncNoop = async () => {};
@@ -42,7 +41,7 @@ export class RuntimeContext {
       req,
     );
 
-    rootCtx.use.provide(
+    rootCtx.provide(
       $path,
       Object.freeze(
         url.pathname
@@ -50,6 +49,8 @@ export class RuntimeContext {
           .map(decodeURIComponent),
       ),
     );
+
+    rootCtx.provide($runtime, this);
 
     const mws = matches.map(
       ([[module, ...params], urlParamsIndices]): Middleware => {
@@ -65,7 +66,7 @@ export class RuntimeContext {
         );
         return async (ctx) => {
           const mod = await modQ;
-          ctx.use.provide($urlGroups, urlParams);
+          ctx.provide($urlGroups, urlParams);
           return mod.default(...params)(ctx);
         };
       },
@@ -129,14 +130,15 @@ export type RequestContextAPI<Params = Record<never, string>> = Omit<
   "new"
 >;
 
-const $urlGroups = createUseKey<Record<string, string>>("urlGroups");
-const $path = createUseKey<readonly string[]>("path");
-const $currentPath = createUseKey<readonly string[]>("currentPath");
+export const $runtime = Context.key<RuntimeContext>("runtime");
+const $urlGroups = Context.key<Record<string, string>>("urlGroups");
+const $path = Context.key<readonly string[]>("path");
+const $currentPath = Context.key<readonly string[]>("currentPath");
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export class RequestContext<Params> {
+export class RequestContext<Params> extends Context {
   constructor(
     handle: Middleware<Params>,
     runtime: RuntimeContext,
@@ -146,24 +148,24 @@ export class RequestContext<Params> {
     handle: Middleware<Params>,
     runtime: RequestContext<unknown>,
   );
+  // deno-lint-ignore constructor-super
   constructor(
     handle: Middleware<Params>,
     runtime: RuntimeContext | RequestContext<unknown>,
     req?: Request,
   ) {
     if (runtime instanceof RequestContext) {
+      super(runtime);
       this.#runtime = runtime.#runtime;
       this.#request = runtime.#request;
-      this.use = initUse(runtime.use);
     } else {
+      super();
       this.#runtime = runtime;
       this.#request = req!;
-      this.use = initUse();
     }
     this.#next = handle;
   }
 
-  readonly use: Use;
   readonly #next: Middleware<Params>;
   readonly #runtime: RuntimeContext;
   readonly #request: Request;
