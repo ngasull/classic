@@ -645,7 +645,6 @@ export const routePost = <Params>(
       build.post(
         "/",
         import.meta.url,
-        build.use($moduleImportSpec),
         build.use($childRouteIndex),
       ),
     (ctx) => {

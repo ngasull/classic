@@ -9,6 +9,7 @@
 .settings/
 
 # Temp
+/.direnv
 gitignore
 
 # System Files
