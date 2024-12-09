@@ -9,7 +9,7 @@ const asyncNoop = async () => {};
 type Async<T> = T | PromiseLike<T>;
 
 export type Middleware<Params = Record<never, string>> = (
-  ctx: RequestContextAPI<Params>,
+  ctx: MiddlewareContext<Params>,
 ) => Async<Response | void>;
 
 export class RuntimeContext {
@@ -35,7 +35,7 @@ export class RuntimeContext {
     const url = new URL(req.url);
     const [matches, stash] = this.#router.match(req.method, url.pathname);
 
-    const rootCtx = new RequestContext<Record<never, string>>(
+    const rootCtx = new MiddlewareContext<Record<never, string>>(
       asyncNoop,
       this,
       req,
@@ -125,11 +125,6 @@ export class RuntimeContext {
 export const load = (buildDirectory?: string): Promise<RuntimeContext> =>
   RuntimeContext.read(buildDirectory);
 
-export type RequestContextAPI<Params = Record<never, string>> = Omit<
-  RequestContext<Params>,
-  "new"
->;
-
 export const $runtime = Context.key<RuntimeContext>("runtime");
 const $urlGroups = Context.key<Record<string, string>>("urlGroups");
 const $path = Context.key<readonly string[]>("path");
@@ -139,43 +134,29 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export class RequestContext<Params> extends Context {
-  constructor(
-    handle: Middleware<Params>,
-    runtime: RuntimeContext,
-    req: Request,
-  );
-  constructor(
-    handle: Middleware<Params>,
-    runtime: RequestContext<unknown>,
-  );
+  constructor(runtime: RuntimeContext, req: Request);
+  constructor(context: RequestContext<unknown>);
   // deno-lint-ignore constructor-super
   constructor(
-    handle: Middleware<Params>,
-    runtime: RuntimeContext | RequestContext<unknown>,
+    runtimeOrCtx: RuntimeContext | RequestContext<unknown>,
     req?: Request,
   ) {
-    if (runtime instanceof RequestContext) {
-      super(runtime);
-      this.#runtime = runtime.#runtime;
-      this.#request = runtime.#request;
+    if (runtimeOrCtx instanceof RequestContext) {
+      super(runtimeOrCtx);
+      this.#runtime = runtimeOrCtx.#runtime;
+      this.#request = runtimeOrCtx.#request;
     } else {
       super();
-      this.#runtime = runtime;
+      this.#runtime = runtimeOrCtx;
       this.#request = req!;
     }
-    this.#next = handle;
   }
 
-  readonly #next: Middleware<Params>;
   readonly #runtime: RuntimeContext;
   readonly #request: Request;
 
   get request() {
     return this.#request;
-  }
-
-  async next(): Promise<Response | void> {
-    return this.#next(this);
   }
 
   async asset(key: string): Promise<Uint8Array> {
@@ -198,6 +179,33 @@ export class RequestContext<Params> extends Context {
 
   get currentPath(): readonly string[] {
     return this.use($currentPath);
+  }
+}
+
+export class MiddlewareContext<Params> extends RequestContext<Params> {
+  constructor(
+    handle: Middleware<Params>,
+    runtime: RuntimeContext,
+    req: Request,
+  );
+  constructor(
+    handle: Middleware<Params>,
+    runtime: MiddlewareContext<unknown>,
+  );
+  constructor(
+    handle: Middleware<Params>,
+    runtimeOrCtx: RuntimeContext | RequestContext<unknown>,
+    req?: Request,
+  ) {
+    // @ts-ignore TS won't infer this because constructor is overloaded
+    super(runtimeOrCtx, req);
+    this.#next = handle;
+  }
+
+  readonly #next: Middleware<Params>;
+
+  async next(): Promise<Response | void> {
+    return this.#next(this);
   }
 }
 
@@ -233,6 +241,6 @@ export const chainMiddlewares = <Params>(
   //@ts-ignore Goal is to provide type safety from the outside
   middlewares.reduceRight<Middleware<Params>>(
     (next, p) => (parent) =>
-      p(new RequestContext(next, parent as RequestContext<unknown>)),
+      p(new MiddlewareContext(next, parent as MiddlewareContext<unknown>)),
     noop,
   );

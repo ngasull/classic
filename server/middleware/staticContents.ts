@@ -1,6 +1,6 @@
 import type { BuildRoute } from "../build.ts";
 import { $rootBuild } from "../file-router.ts";
-import type { RequestContextAPI } from "../middleware.ts";
+import type { MiddlewareContext } from "../middleware.ts";
 import { Context } from "../context.ts";
 
 const $preferredStaticRoot = Context.key<string>("preferredStaticRoot");
@@ -36,7 +36,7 @@ export const staticContents = (
 };
 
 export default (asset: string, headers: Record<string, string>) =>
-async (ctx: RequestContextAPI) =>
+async (ctx: MiddlewareContext) =>
   new Response(await ctx.asset(asset), { headers });
 
 const responseHeaders = {

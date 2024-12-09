@@ -1,6 +1,6 @@
 import { join, relative, resolve, toFileUrl } from "@std/path";
 import type { BuildFunction, BuildRoute } from "./build.ts";
-import type { Middleware, RequestContextAPI } from "./middleware.ts";
+import type { Middleware, MiddlewareContext } from "./middleware.ts";
 import { pageCss } from "./file-router/page.css.ts";
 import { Context } from "./context.ts";
 
@@ -179,16 +179,6 @@ const segmentToURLPattern = (segment: string) => {
 const $moduleImportSpec = Context.key<string>("moduleImportSpec");
 const $childRouteIndex = Context.key<number[]>("childRouteIndex");
 
-type RouteFn = {
-  <ParamStr extends string, Meta>(
-    segment?: ParamStr,
-    ...nested: FileRouteOrOpts<RouteParams<ParamStr>, Meta>[]
-  ): FileRoute<RouteParams<ParamStr>>;
-  <Params, Meta>(
-    ...nested: FileRouteOrOpts<Params, Meta>[]
-  ): FileRoute<Params>;
-};
-
 const asRoute = <Params, Meta>(route: FileRouteOrOpts<Params, Meta>) => {
   if (route instanceof FileRoute) return route;
 
@@ -218,7 +208,15 @@ const asRoute = <Params, Meta>(route: FileRouteOrOpts<Params, Meta>) => {
   );
 };
 
-export const route: RouteFn = <ParamStr extends string, Meta>(
+export const route: {
+  <ParamStr extends string, Params, Meta>(
+    segment?: ParamStr,
+    ...nested: FileRouteOrOpts<Params & RouteParams<ParamStr>, Meta>[]
+  ): FileRoute<Params & RouteParams<ParamStr>>;
+  <Params, Meta>(
+    ...nested: FileRouteOrOpts<Params, Meta>[]
+  ): FileRoute<Params>;
+} = <ParamStr extends string, Meta>(
   segment?: ParamStr | FileRouteOrOpts<RouteParams<ParamStr>, Meta>,
   ...nested: FileRouteOrOpts<RouteParams<ParamStr>, Meta>[]
 ): FileRoute<RouteParams<ParamStr>, void> => {
@@ -287,7 +285,7 @@ export class FileRoute<Params = Record<never, string>, Meta = void> {
     public readonly build?: BuildFunction,
     public readonly handle: {
       [method in Method]?: (
-        ctx: RequestContextAPI<Params>,
+        ctx: MiddlewareContext<Params>,
         modulePath: string,
         index: number[],
         meta: Meta,
@@ -304,7 +302,7 @@ type FileRouteOpts<Params, Meta> =
   & { readonly build?: (build: BuildRoute) => Meta }
   & {
     readonly [method in Method]?: (
-      ctx: RequestContextAPI<Params>,
+      ctx: MiddlewareContext<Params>,
       meta: Awaited<Meta>,
     ) => Async<void | Response>;
   };
