@@ -1,14 +1,13 @@
 import type { JSONable } from "../js/types.ts";
 import { Context } from "./context.ts";
 import { RuntimeContext } from "./middleware.ts";
+import type { Async } from "./mod.ts";
 
 /**
  * @module
  * Build system designed for backends.
  * No need for a central config like other tools such as Vite.
  */
-
-type Async<T> = T | PromiseLike<T>;
 
 export type BuildFunction<R = void> = (route: BuildRoute) => Async<R>;
 

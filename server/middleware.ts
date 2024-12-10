@@ -2,11 +2,11 @@ import { RegExpRouter } from "hono/router/reg-exp-router";
 import { join } from "@std/path";
 import type { BuildMeta, HandlerParam, RequestMapping } from "./build.ts";
 import { Context } from "./context.ts";
+import { Key } from "./key.ts";
+import type { Async } from "./mod.ts";
 
 const noop = () => {};
 const asyncNoop = async () => {};
-
-type Async<T> = T | PromiseLike<T>;
 
 export type Middleware<Params = Record<never, string>> = (
   ctx: MiddlewareContext<Params>,
@@ -125,10 +125,10 @@ export class RuntimeContext {
 export const load = (buildDirectory?: string): Promise<RuntimeContext> =>
   RuntimeContext.read(buildDirectory);
 
-export const $runtime = Context.key<RuntimeContext>("runtime");
-const $urlGroups = Context.key<Record<string, string>>("urlGroups");
-const $path = Context.key<readonly string[]>("path");
-const $currentPath = Context.key<readonly string[]>("currentPath");
+export const $runtime = new Key<RuntimeContext>("runtime");
+const $urlGroups = new Key<Record<string, string>>("urlGroups");
+const $path = new Key<readonly string[]>("path");
+const $currentPath = new Key<readonly string[]>("currentPath");
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

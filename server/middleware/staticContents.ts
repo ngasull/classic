@@ -1,9 +1,9 @@
 import type { BuildRoute } from "../build.ts";
 import { $rootBuild } from "../file-router.ts";
 import type { MiddlewareContext } from "../middleware.ts";
-import { Context } from "../context.ts";
+import { Key } from "../key.ts";
 
-const $preferredStaticRoot = Context.key<string>("preferredStaticRoot");
+const $preferredStaticRoot = new Key<string>("preferredStaticRoot");
 
 let staticExtRegExp: RegExp | undefined;
 
@@ -36,7 +36,7 @@ export const staticContents = (
 };
 
 export default (asset: string, headers: Record<string, string>) =>
-async (ctx: MiddlewareContext) =>
+async (ctx: MiddlewareContext<Record<never, string>>) =>
   new Response(await ctx.asset(asset), { headers });
 
 const responseHeaders = {

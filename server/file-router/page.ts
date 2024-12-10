@@ -1,6 +1,5 @@
 import { create as createHash } from "@jabr/xxhash64";
 import { encodeBase64 } from "@std/encoding";
-import { Context } from "../context.ts";
 import type { FileRoute } from "../file-router.ts";
 import { route } from "../file-router.ts";
 import { jsx } from "../jsx-runtime.ts";
@@ -8,6 +7,7 @@ import { type MiddlewareContext, RequestContext } from "../middleware.ts";
 import { layoutCssTpl, pageCssTpl } from "./page.css.ts";
 import { render } from "../render.ts";
 import type { JSX } from "../types.ts";
+import { Key } from "../key.ts";
 
 class LayoutContext<Params> extends RequestContext<Params> {
   constructor(
@@ -35,7 +35,7 @@ export const layout: {
     },
   }) as FileRoute<Params>;
 
-const $layouts = Context.key<JSX.PFC[]>("layouts");
+const $layouts = new Key<JSX.PFC[]>("layouts");
 
 layout.css = layoutCssTpl;
 

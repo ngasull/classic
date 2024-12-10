@@ -2,10 +2,11 @@ import type { AppBuild } from "@classic/build";
 import { js, type JSable } from "@classic/js";
 import { accepts } from "@std/http";
 import { transform as transformCss } from "lightningcss";
+import { Context } from "./context.ts";
 import { Fragment, jsx } from "./jsx-runtime.ts";
+import { Key } from "./key.ts";
 import { $build, $buildContext, $effects, render } from "./render.ts";
 import type { JSX, JSXElement } from "./types.ts";
-import { Context } from "./context.ts";
 
 type SubSegment<Params extends string, P extends string> = Segment<
   Params,
@@ -422,7 +423,7 @@ class Router {
   }
 }
 
-const $initResponse = Context.key<{
+const $initResponse = new Key<{
   status?: number;
   headers?: Record<string, string>;
 }>("initResponse");

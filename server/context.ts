@@ -1,12 +1,8 @@
-declare const $keyType: unique symbol;
-
-type Key<T> = symbol & { [$keyType]: T };
+import type { Key } from "./key.ts";
 
 export type ContextInterface = Pick<Context, keyof Context>;
 
 export class Context {
-  static key = <T>(hint: string): Key<T> => Symbol(hint) as Key<T>;
-
   constructor(parent?: ContextInterface) {
     this.#parent = parent;
   }

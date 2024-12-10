@@ -1,8 +1,8 @@
 import { join, relative, resolve, toFileUrl } from "@std/path";
 import type { BuildFunction, BuildRoute } from "./build.ts";
+import { Key } from "./key.ts";
 import type { Middleware, MiddlewareContext } from "./middleware.ts";
 import { pageCss } from "./file-router/page.css.ts";
-import { Context } from "./context.ts";
 
 type Async<T> = T | PromiseLike<T>;
 
@@ -13,7 +13,7 @@ type Method = typeof httpMethods[number];
 type AsRouteParam<Name extends string | number | symbol> = Name extends
   `[[${infer P}]]` ? P : Name extends `[${infer P}]` ? P : never;
 
-export const $rootBuild = Context.key<BuildRoute>("rootBuild");
+export const $rootBuild = new Key<BuildRoute>("rootBuild");
 
 export const fileRouter = (base: string): BuildFunction => async (route) => {
   route.provide($rootBuild, route);
@@ -176,8 +176,8 @@ const segmentToURLPattern = (segment: string) => {
 //       }
 //     }
 
-const $moduleImportSpec = Context.key<string>("moduleImportSpec");
-const $childRouteIndex = Context.key<number[]>("childRouteIndex");
+const $moduleImportSpec = new Key<string>("moduleImportSpec");
+const $childRouteIndex = new Key<number[]>("childRouteIndex");
 
 const asRoute = <Params, Meta>(route: FileRouteOrOpts<Params, Meta>) => {
   if (route instanceof FileRoute) return route;
@@ -213,9 +213,8 @@ export const route: {
     segment?: ParamStr,
     ...nested: FileRouteOrOpts<Params & RouteParams<ParamStr>, Meta>[]
   ): FileRoute<Params & RouteParams<ParamStr>>;
-  <Params, Meta>(
-    ...nested: FileRouteOrOpts<Params, Meta>[]
-  ): FileRoute<Params>;
+  <Params, Meta>(nested: FileRouteOrOpts<Params, Meta>): FileRoute<Params>;
+  <Params>(...nested: FileRouteOrOpts<Params, void>[]): FileRoute<Params>;
 } = <ParamStr extends string, Meta>(
   segment?: ParamStr | FileRouteOrOpts<RouteParams<ParamStr>, Meta>,
   ...nested: FileRouteOrOpts<RouteParams<ParamStr>, Meta>[]
@@ -242,10 +241,10 @@ export const route: {
     )
     : new FileRoute(
       async (build: BuildRoute) => {
+        const childRoute = build.segment(segment);
         for (let i = 0; i < fileRoutes.length; i++) {
           const child = fileRoutes[i];
           if (child.build) {
-            const childRoute = build.segment(segment);
             const prevIndex = childRoute.use($childRouteIndex);
             childRoute.provide($childRouteIndex, [...prevIndex, i]);
             await child.build(childRoute);
@@ -285,7 +284,7 @@ export class FileRoute<Params = Record<never, string>, Meta = void> {
     public readonly build?: BuildFunction,
     public readonly handle: {
       [method in Method]?: (
-        ctx: MiddlewareContext<Params>,
+        req: MiddlewareContext<Params>,
         modulePath: string,
         index: number[],
         meta: Meta,
@@ -299,10 +298,10 @@ type FileRouteOrOpts<Params, Meta> =
   | FileRouteOpts<Params, Meta>;
 
 type FileRouteOpts<Params, Meta> =
-  & { readonly build?: (build: BuildRoute) => Meta }
+  & { readonly build?: BuildFunction<Meta> }
   & {
     readonly [method in Method]?: (
-      ctx: MiddlewareContext<Params>,
+      req: MiddlewareContext<Params>,
       meta: Awaited<Meta>,
     ) => Async<void | Response>;
   };

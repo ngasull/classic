@@ -3,7 +3,8 @@ import type { JSX } from "./types.ts";
 import { $build } from "./render.ts";
 import { transform as transformCss } from "lightningcss";
 import type { VoidElement } from "./void.ts";
-import { Context } from "./context.ts";
+import type { Context } from "./context.ts";
+import { Key } from "./key.ts";
 
 export const Bundle: JSX.FC = async (_, context) => {
   const { globalCssPublic, critical, dev } = context.use($build);
@@ -25,7 +26,7 @@ export const Bundle: JSX.FC = async (_, context) => {
   });
 };
 
-export const cssContext = Context.key<Set<string>>("css");
+export const cssContext = new Key<Set<string>>("css");
 
 export const $addCss = (
   context: Context,

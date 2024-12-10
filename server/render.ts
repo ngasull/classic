@@ -14,6 +14,8 @@ import {
   toJS,
   unsafe,
 } from "@classic/js";
+import { Context, type ContextInterface } from "./context.ts";
+import { Key } from "./key.ts";
 import {
   type DOMLiteral,
   type DOMNode,
@@ -23,7 +25,6 @@ import {
   type JSXElement,
   type JSXRef,
 } from "./types.ts";
-import { Context, type ContextInterface } from "./context.ts";
 import { voidElements } from "./void.ts";
 
 const camelRegExp = /[A-Z]/g;
@@ -88,11 +89,11 @@ export const render = (
     },
   });
 
-export const $effects = Context.key<JSable<void>[]>("effect");
+export const $effects = new Key<JSable<void>[]>("effect");
 
-export const $build = Context.key<AppBuild>("build");
+export const $build = new Key<AppBuild>("build");
 
-export const $buildContext = Context.key<BuildContext>("build context");
+export const $buildContext = new Key<BuildContext>("build context");
 
 const activate = async (
   refs: RefTree,
