@@ -229,7 +229,7 @@ const minifyCss: CSSTransformer = (css, filename) => {
       sourceMap: true,
     });
     return code;
-  } catch (e) {
+  } catch (e: any) {
     throw new TransformCSSError(e.toString(), {
       lineText: e.source.split("\n")[e.loc.line - 1],
       line: e.loc.line,

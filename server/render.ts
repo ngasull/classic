@@ -1,6 +1,4 @@
-import type { AppBuild, BuildContext } from "@classic/build";
 import {
-  client,
   type Fn,
   indexedUris,
   inline,
@@ -11,10 +9,11 @@ import {
   jsResources,
   mkRef,
   type RefTree,
+  type Resolver,
   toJS,
   unsafe,
 } from "@classic/js";
-import { Context, type ContextInterface } from "./context.ts";
+import { type Context, createContext } from "./context.ts";
 import { Key } from "./key.ts";
 import {
   type DOMLiteral,
@@ -26,6 +25,8 @@ import {
   type JSXRef,
 } from "./types.ts";
 import { voidElements } from "./void.ts";
+import { expectedRefsArg, setIndicativeOrder } from "../js/js.ts";
+import { type Activation, jsSymbol } from "../js/types.ts";
 
 const camelRegExp = /[A-Z]/g;
 
@@ -68,21 +69,22 @@ const encoder = new TextEncoder();
 export const render = (
   root: JSX.Element,
   opts: {
-    context?: ContextInterface;
+    context?: Context;
+    resolve?: Resolver;
     doctype?: boolean;
   } = {},
 ): ReadableStream<Uint8Array> =>
   new ReadableStream<Uint8Array>({
     start(controller) {
-      const context = new Context(opts.context);
+      const context = createContext(opts.context);
       if (!context.get($effects)) context.provide($effects, []);
       const effects = context.use($effects);
-      const build = context.get($buildContext) ?? context.get($build)?.context;
+      const resolve = opts.resolve ?? context.get($resolve);
 
       const write = (chunk: Uint8Array) => controller.enqueue(chunk);
       const tree = domNodes(root, context);
 
-      writeDOMTree(tree, { build, effects, write, ...opts }, true)
+      writeDOMTree(tree, { resolve, effects, write, ...opts }, true)
         .finally(() => {
           controller.close();
         });
@@ -91,43 +93,82 @@ export const render = (
 
 export const $effects = new Key<JSable<void>[]>("effect");
 
-export const $build = new Key<AppBuild>("build");
-
-export const $buildContext = new Key<BuildContext>("build context");
+export const $resolve = new Key<Resolver>("resolver");
 
 const activate = async (
   refs: RefTree,
   opts: {
-    build?: BuildContext;
+    resolve?: Resolver;
     effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },
 ): Promise<DOMNode | void> => {
-  const { effects, build } = opts;
+  const { effects, resolve } = opts;
   if (effects.length) {
-    if (!build) {
+    if (!resolve) {
       effects.splice(0, effects.length);
       return console.error(
-        `Can't attach JS to refs: no build context is provided`,
+        `Can't attach JS to refs: no module resolver is provided`,
       );
     }
 
-    const [activationScript] = await toJS(
-      () => effects,
-      { build, refs: refs.length ? ["$", refs] : true },
+    let order = 0;
+    const indicateRefs = (refs: RefTree) =>
+      refs.forEach(([ref, subTree]) => {
+        setIndicativeOrder(ref, order);
+        if (subTree) indicateRefs(subTree);
+      });
+    indicateRefs(refs);
+
+    const effectsFn = js`_=>{${
+      effects.length > 1 ? effects.reduce((a, b) => js`${a};${b}`) : effects[0]
+    }}`;
+    const { js: activationScript, expectedRefs } = await toJS(
+      () => [
+        js`$.ownerDocument==d?setTimeout(${effectsFn}):d.addEventListener("patch",${effectsFn})`,
+      ],
+      { resolve },
     );
 
+    const expectedRefsSet = new Set(expectedRefs);
+    const filterRefs = (refs: RefTree): Activation =>
+      refs.flatMap(([r, subRefs], i) => {
+        const activation: Activation = [];
+        if (expectedRefsSet.has(r[jsSymbol])) activation.push([i]);
+        if (subRefs) {
+          const subActivation = filterRefs(subRefs);
+          if (subActivation.length) activation.push([i, subActivation]);
+        }
+        return activation;
+      });
+
+    // refsJS[jsSymbol],
+    // "(",
+    // this.currentScript,
+    // ",",
+    // this.refs.length.toString(),
+    // ",",
+    // JSON.stringify(this.#activateReferenced(this.refs)),
+    // ")",
+
     effects.splice(0, effects.length);
+
+    const s = new TextEncoderStream();
+    const writer = s.writable.getWriter();
+    writer.write(
+      `{let d=document,$=d.currentScript,n=$,i=0,w=(n,a)=>a.flatMap(([c,s])=>{for(;i<c;i++)n=n.nextSibling;return s?w(n.firstChild,s):n}),${expectedRefsArg};for(;i<${refs.length};i++)n=n.previousSibling;i=0;${expectedRefsArg}=w(n,${
+        JSON.stringify(filterRefs(refs))
+      });(async()=>{${activationScript}})()}`,
+    );
+    writer.close();
 
     await writeDOMTree([{
       kind: DOMNodeKind.Tag,
       tag: "script",
       attributes: new Map(),
       children: [{
-        kind: DOMNodeKind.Text,
-        text: refs.length
-          ? `{const $=document.currentScript;setTimeout(async()=>{${activationScript}})}`
-          : `(async()=>{${activationScript}})()`,
+        kind: DOMNodeKind.HTMLNode,
+        html: s.readable,
         ref: mkRef(),
       }],
       ref: mkRef(),
@@ -135,11 +176,42 @@ const activate = async (
   }
 };
 
+/*
+Inline compact JS version of the following TS code:
+
+const refs = (
+  node: ChildNode,
+  activatedLength: number,
+  activation: Activation,
+): readonly EventTarget[] => {
+  for (i = 0; i < activatedLength; i++) node = node.previousSibling!;
+  i = 0;
+  return walkRefs(node, activation);
+};
+
+const walkRefs = (
+  node: ChildNode,
+  activation: Activation,
+): readonly EventTarget[] =>
+  activation.flatMap(([childIndex, sub]) => {
+    for (; i! < childIndex; i!++) node = node.nextSibling!;
+    return sub ? walkRefs(node.firstChild!, sub) : node;
+  });
+*/
+// const refsJS: JS<
+//   (
+//     node: ChildNode,
+//     activatedLength: number,
+//     activation: Activation,
+//   ) => readonly EventTarget[]
+// > =
+//   js`(n,l,a)=>{let i=0;for(;i<l;i++)n=n.previousSibling;i=0;let w=(n,a)=>a.flatMap(([c,s])=>{for(;i<c;i++)n=n.nextSibling;return s?w(n.firstChild,s):n});return w(n,a)}`;
+
 const writeDOMTree = async (
   tree: Iterable<DOMNode> | AsyncIterable<DOMNode>,
   opts: {
     doctype?: boolean;
-    build?: BuildContext;
+    resolve?: Resolver;
     effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },
@@ -213,7 +285,7 @@ const writeDOMTree = async (
             await writeDOMTree(scriptChildren, opts);
           } else {
             // Write any global initializing effect that may use document.body
-            if (node.tag === "body") await activate([], opts);
+            // if (node.tag === "body") await activate([], opts);
 
             childRefs = await writeDOMTree(node.children, opts);
 
@@ -254,7 +326,7 @@ const writeDOMTree = async (
 
 const domNodes = async function* (
   nodeLike: JSX.Element,
-  ctx: ContextInterface,
+  ctx: Context,
 ): AsyncIterable<DOMNode> {
   const node = nodeLike && "then" in nodeLike ? await nodeLike : nodeLike;
   if (!node) return;
@@ -271,7 +343,7 @@ const domNodes = async function* (
 
     case ElementKind.Component: {
       const { Component, props } = node;
-      const subCtx = new Context(ctx);
+      const subCtx = createContext(ctx);
       yield* domNodes(Component(props, subCtx), subCtx);
       return;
     }
@@ -390,7 +462,7 @@ const domNodes = async function* (
 
 async function* disambiguateText(
   children: readonly JSXElement[],
-  ctx: ContextInterface,
+  ctx: Context,
 ): AsyncIterable<DOMNode> {
   let prev: DOMNode | null = null;
 
@@ -458,16 +530,17 @@ export const Effect: JSX.FC<{
     | readonly JSable<string>[];
 }> = ({ js: cb, uris }, context) => {
   const ref = mkRef<Comment>();
-  context.use($effects).push(
-    js.fn(() => {
-      const effectJs = js.fn(cb);
-      return client.sub(
-        ref,
-        effectJs,
-        uris ? indexedUris(uris) : [],
-      );
-    })(),
-  );
+  context.use($effects).push(cb());
+  // context.use($effects).push(
+  //   js.fn(() => {
+  //     const effectJs = js.fn(cb);
+  //     return client.sub(
+  //       ref,
+  //       effectJs,
+  //       uris ? indexedUris(uris) : [],
+  //     );
+  //   })(),
+  // );
   return {
     kind: ElementKind.Comment,
     text: "",

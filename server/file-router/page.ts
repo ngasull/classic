@@ -1,17 +1,16 @@
-import { create as createHash } from "@jabr/xxhash64";
-import { encodeBase64 } from "@std/encoding";
-import type { FileRoute } from "../file-router.ts";
-import { route } from "../file-router.ts";
+import type { FileBuildContext, FileRoute } from "../file-router.ts";
 import { jsx } from "../jsx-runtime.ts";
-import { type MiddlewareContext, RequestContext } from "../middleware.ts";
+import { RequestContext } from "../middleware.ts";
 import { layoutCssTpl, pageCssTpl } from "./page.css.ts";
 import { render } from "../render.ts";
 import type { JSX } from "../types.ts";
 import { Key } from "../key.ts";
+import type { BuildContext } from "../../build/context.ts";
+import { devModules } from "../plugin/build.ts";
 
 class LayoutContext<Params> extends RequestContext<Params> {
   constructor(
-    parent: MiddlewareContext<Params>,
+    parent: RequestContext<Params>,
     public readonly children: JSX.Children,
   ) {
     super(parent);
@@ -20,50 +19,51 @@ class LayoutContext<Params> extends RequestContext<Params> {
 
 export const layout: {
   <Params>(
+    r: FileBuildContext<Params>,
     layout: (context: LayoutContext<Params>) => JSX.Element,
-  ): FileRoute<Params>;
-  css: (tpl: TemplateStringsArray) => FileRoute;
-} = <Params>(userLayout: (context: LayoutContext<Params>) => JSX.Element) =>
-  route("/*", {
-    GET: async (ctx) => {
-      const prevLayouts = ctx.get($layouts) ?? [];
-      ctx.provide($layouts, [
-        ...prevLayouts,
-        ({ children }) => userLayout(new LayoutContext<any>(ctx, children)),
-      ]);
-      return ctx.next();
-    },
-  }) as FileRoute<Params>;
+  ): void;
+  css: (tpl: TemplateStringsArray) => FileRoute<{ [n in never]: never }>;
+} = <Params>(
+  r: FileBuildContext<Params>,
+  userLayout: (context: LayoutContext<Params>) => JSX.Element,
+) => {
+  r.segment("/*").method("GET", async (ctx) => {
+    const layouts = ctx.get($layouts) ?? ctx.root().provide($layouts, []);
+    layouts.push(({ children }) =>
+      userLayout(new LayoutContext<any>(ctx, children))
+    );
+    return ctx.next();
+  });
+};
 
 const $layouts = new Key<JSX.PFC[]>("layouts");
 
 layout.css = layoutCssTpl;
 
+export const $buildContext = new Key<BuildContext>("build context");
+
 export const page: {
   <Params>(
+    r: FileBuildContext<Params>,
     page: (context: RequestContext<Params>) => JSX.Element,
-  ): FileRoute<Params>;
-  css: (tpl: TemplateStringsArray) => FileRoute;
-} = (userPage) =>
-  route({
-    GET: async (ctx) => {
-      const layouts = ctx.get($layouts) ?? [];
-      const el = layouts.reduceRight(
-        (el, Layout) => jsx(Layout, null, el),
-        jsx(() => userPage(new RequestContext(ctx))),
-      );
-      return new Response(render(el, { context: ctx }), {
-        headers: {
-          "Content-Type": "text/html; charset=UTF-8",
-        },
-      });
-    },
+  ): void;
+  css: (tpl: TemplateStringsArray) => FileRoute<{ [n in never]: never }>;
+} = async (r, userPage) => {
+  const $resolve = await r.use(devModules);
+
+  r.method("GET", async (ctx) => {
+    const layouts = ctx.get($layouts) ?? [];
+    const el = layouts.reduceRight(
+      (el, Layout) => jsx(Layout, null, el),
+      jsx(() => userPage(new RequestContext(ctx))),
+    );
+    const resolve = await ctx.use($resolve);
+    return new Response(render(el, { context: ctx, resolve }), {
+      headers: {
+        "Content-Type": "text/html; charset=UTF-8",
+      },
+    });
   });
+};
 
 page.css = pageCssTpl;
-
-export const encodeHash = async (data: Uint8Array) => {
-  const hasher = await createHash();
-  hasher.update(data);
-  return encodeBase64(hasher.digest() as Uint8Array);
-};

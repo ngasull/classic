@@ -1,7 +1,7 @@
 import { RegExpRouter } from "hono/router/reg-exp-router";
 import { join } from "@std/path";
 import type { BuildMeta, HandlerParam, RequestMapping } from "./build.ts";
-import { Context } from "./context.ts";
+import { BaseContext } from "./context.ts";
 import { Key } from "./key.ts";
 import type { Async } from "./mod.ts";
 
@@ -54,9 +54,12 @@ export class RuntimeContext {
 
     const mws = matches.map(
       ([[module, ...params], urlParamsIndices]): Middleware => {
-        const modQ: Promise<{
-          default: (...meta: Readonly<HandlerParam>[]) => Middleware;
-        }> = import(module);
+        const modQ = import(module).then((
+          mod: {
+            default: (...meta: Readonly<HandlerParam>[]) => Async<Middleware>;
+          },
+        ) => mod.default(...params));
+
         const urlParams = Object.freeze(
           stash
             ? Object.fromEntries(
@@ -65,9 +68,9 @@ export class RuntimeContext {
             : {},
         );
         return async (ctx) => {
-          const mod = await modQ;
+          const mw = await modQ;
           ctx.provide($urlGroups, urlParams);
-          return mod.default(...params)(ctx);
+          return mw(ctx);
         };
       },
     );
@@ -76,10 +79,20 @@ export class RuntimeContext {
       new Response(`Not found`, { status: 404 });
   };
 
-  async asset(key: string): Promise<string | Uint8Array> {
+  async #asset(key: string): Promise<string | Uint8Array> {
     const asset = this.#assets[key];
     if (!asset) throw Error(`No built asset named ${key}`);
     return asset();
+  }
+
+  async asset(key: string): Promise<Uint8Array> {
+    const asset = await this.#asset(key);
+    return typeof asset === "string" ? encoder.encode(asset) : asset;
+  }
+
+  async textAsset(key: string): Promise<string> {
+    const asset = await this.#asset(key);
+    return typeof asset === "string" ? asset : decoder.decode(asset);
   }
 
   async write(
@@ -133,7 +146,7 @@ const $currentPath = new Key<readonly string[]>("currentPath");
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export class RequestContext<Params> extends Context {
+export class RequestContext<Params> extends BaseContext {
   constructor(runtime: RuntimeContext, req: Request);
   constructor(context: RequestContext<unknown>);
   // deno-lint-ignore constructor-super
@@ -153,20 +166,13 @@ export class RequestContext<Params> extends Context {
   }
 
   readonly #runtime: RuntimeContext;
-  readonly #request: Request;
+  get runtime(): RuntimeContext {
+    return this.#runtime;
+  }
 
+  readonly #request: Request;
   get request() {
     return this.#request;
-  }
-
-  async asset(key: string): Promise<Uint8Array> {
-    const asset = await this.#runtime.asset(key);
-    return typeof asset === "string" ? encoder.encode(asset) : asset;
-  }
-
-  async textAsset(key: string): Promise<string> {
-    const asset = await this.#runtime.asset(key);
-    return typeof asset === "string" ? asset : decoder.decode(asset);
   }
 
   get groups(): Readonly<Params> {

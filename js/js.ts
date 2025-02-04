@@ -1,6 +1,4 @@
-import type { BuildContext } from "@classic/build";
 import type {
-  Activation,
   Fn,
   ImplicitlyJSable,
   JS,
@@ -11,7 +9,7 @@ import type {
   JSONable,
   JSReturn,
   ParamKeys,
-  RefTree,
+  Resolver,
   ResourceGroup,
   Resources,
 } from "./types.ts";
@@ -20,6 +18,7 @@ import { isJSable, jsSymbol } from "./types.ts";
 // https://graphemica.com/categories/letter-number/page/2
 export const argn = (n: number) => `𐏒${n}`;
 export const varArg = "𐏑";
+export const expectedRefsArg = "𐏓";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -52,9 +51,9 @@ type JSMetaContext = {
   argn: number;
   args: Map<JSMetaArgument, string>;
   modules: JSMetaModuleStore;
-  refs?: JSMetaRefStore;
+  refs: JSMetaRefStore;
   resources?: JSMetaResources;
-  build?: BuildContext;
+  resolve?: Resolver;
   moduleCache: Record<string, JSMetaModule>;
 };
 
@@ -132,7 +131,7 @@ const jsTpl =
     };
 
 class JSMetaTemplate extends JSMeta {
-  public readonly hasResources: boolean;
+  public override readonly hasResources: boolean;
   private parts: (string | JSMeta)[];
 
   constructor(
@@ -153,7 +152,7 @@ class JSMetaTemplate extends JSMeta {
     this.parts[i * 2] = this.tpl[i];
   }
 
-  template(): (string | JSMeta)[] {
+  override template(): (string | JSMeta)[] {
     return this.parts;
   }
 
@@ -245,7 +244,7 @@ class JSMetaObject extends JSMeta {
     }
   }
 
-  template(): (string | JSMeta)[] {
+  override template(): (string | JSMeta)[] {
     return this.parts;
   }
 
@@ -281,7 +280,7 @@ class JSMetaArray extends JSMeta {
     }
   }
 
-  template(): (string | JSMeta)[] {
+  override template(): (string | JSMeta)[] {
     return this.parts;
   }
 
@@ -325,7 +324,7 @@ const makeConvenient = <J extends JSable>(
 };
 
 class JSMetaCall extends JSMeta {
-  readonly hasResources: boolean;
+  override readonly hasResources: boolean;
 
   constructor(
     private readonly callable: JSMeta,
@@ -335,7 +334,7 @@ class JSMetaCall extends JSMeta {
     this.hasResources = values.some((v) => v.hasResources);
   }
 
-  template(context: JSMetaContext): (string | JSMeta)[] {
+  override template(context: JSMetaContext): (string | JSMeta)[] {
     return [
       ...(context.declaredNames.has(this.callable) ||
           !(this.callable instanceof JSMetaFunction)
@@ -355,13 +354,13 @@ class JSMetaCall extends JSMeta {
 }
 
 class JSMetaAwait extends JSMeta {
-  isAwaited = true;
+  override isAwaited = true;
 
   constructor(private readonly _expr: JSMeta) {
     super();
   }
 
-  template(): (string | JSMeta)[] {
+  override template(): (string | JSMeta)[] {
     return ["await ", this._expr];
   }
 
@@ -370,24 +369,26 @@ class JSMetaAwait extends JSMeta {
   }
 }
 
+type ToJSResult<A extends string[]> = {
+  js: string;
+  args: A;
+  expectedRefs: JSMeta[];
+};
+
 export const toJS = async <A extends readonly unknown[]>(
   f: Fn<A, unknown>,
-  { build, refs }: {
-    build?: BuildContext;
-    refs?: true | [string, RefTree];
+  { resolve, isServer = false }: {
+    resolve?: Resolver;
+    isServer?: boolean;
   } = {},
-): Promise<[string, ...{ -readonly [I in keyof A]: string }]> => {
+): Promise<ToJSResult<{ -readonly [I in keyof A]: string }>> => {
   const globalFn = new JSMetaFunction(f as Fn<readonly never[], unknown>, {
     scoped: false,
   });
   const globalBody = globalFn.body;
 
   let lastVarId = -1;
-  const context: JSMetaContext = mkMetaContext(!refs, build);
-
-  if (refs && refs !== true) {
-    context.refs = new JSMetaRefStore(...refs);
-  }
+  const context: JSMetaContext = mkMetaContext(isServer, resolve);
 
   const scopeToRefs = new Map<JSMeta | null, Set<JSMeta>>();
   const refToParentReuse = new Map<
@@ -512,17 +513,18 @@ export const toJS = async <A extends readonly unknown[]>(
   ) as { -readonly [I in keyof A]: string };
   const globalBodyStr = await metaToJS(context, globalBody);
 
-  return [
-    globalBody.isExpression(context)
+  return {
+    js: globalBody.isExpression(context)
       ? `return ${globalBodyStr};`
       : globalBodyStr.slice(1, -1) + ";",
-    ...argsName,
-  ];
+    args: argsName,
+    expectedRefs: context.refs?.expectedRefs ?? [],
+  };
 };
 
 const mkMetaContext = (
   isServer = true,
-  build?: BuildContext,
+  resolve?: Resolver,
 ): JSMetaContext => ({
   isServer,
   argn: -1,
@@ -533,7 +535,8 @@ const mkMetaContext = (
   asyncScopes: new Set(),
   modules: new JSMetaModuleStore(isServer),
   moduleCache: {},
-  build,
+  refs: new JSMetaRefStore(),
+  resolve,
 });
 
 const metaToJS = async (
@@ -594,7 +597,7 @@ const jsUtils = {
   },
 
   eval: async <T>(expr: JSable<T>): Promise<T> => {
-    const [rawJS] = await toJS(() => expr);
+    const { js: rawJS } = await toJS(() => expr, { isServer: true });
     const jsBody = `return(async()=>{${rawJS}})()`;
     try {
       return new Function("document", "window", jsBody)();
@@ -618,9 +621,9 @@ const jsUtils = {
     makeConvenient(
       jsable(
         new JSMetaVar((context) => {
-          if (!context.build) throw Error(`Must configure JS modules`);
-          const mod = context.build.resolve(name);
-          if (mod == null) {
+          if (!context.resolve) throw Error(`Must configure JS modules`);
+          const publicPath = context.resolve(name);
+          if (publicPath == null) {
             throw Error(
               `${name} needs to be added to your client modules configuration`,
             );
@@ -628,7 +631,7 @@ const jsUtils = {
           return [
             context.moduleCache[name] ??= new JSMetaModule(
               name,
-              mod.publicPath,
+              publicPath,
             ),
           ];
         }, { isntAssignable: true }),
@@ -642,9 +645,9 @@ const jsUtils = {
     makeConvenient(
       jsable(
         new JSMetaVar((context) => {
-          if (!context.build) throw Error(`Must configure JS modules`);
-          const r = context.build.resolve(name)?.publicPath;
-          return [r ? JSON.stringify(r) : "void 0"];
+          if (!context.resolve) throw Error(`Must configure JS modules`);
+          const publicPath = context.resolve(name);
+          return [publicPath ? JSON.stringify(publicPath) : "void 0"];
         }),
       )<string>(),
     )) as {
@@ -759,7 +762,7 @@ class JSMetaFunction extends JSMeta {
     return this._body;
   }
 
-  template(context: JSMetaContext): (string | JSMeta)[] {
+  override template(context: JSMetaContext): (string | JSMeta)[] {
     const args: (string | JSMeta)[] = this.args.length === 1
       ? [this.args[0]]
       : ["(", ...this.args.flatMap((a, i) => i ? [",", a] : a), ")"];
@@ -781,7 +784,7 @@ class JSMetaFunction extends JSMeta {
 
 class JSMetaFunctionBody extends JSMeta {
   public readonly fnBody: Writable<JSFnBody>;
-  readonly hasResources: boolean;
+  override readonly hasResources: boolean;
 
   constructor(fnBody: JSFnBody) {
     super();
@@ -796,7 +799,9 @@ class JSMetaFunctionBody extends JSMeta {
       !context.scopedDeclarations.get(this.fnBody)?.length;
   }
 
-  async template(context: JSMetaContext): Promise<(string | JSMeta)[]> {
+  override async template(
+    context: JSMetaContext,
+  ): Promise<(string | JSMeta)[]> {
     const { scopedDeclarations, declaredNames } = context;
     const parts: (string | JSMeta)[] = ["{"];
 
@@ -856,13 +861,13 @@ class JSMetaFunctionBody extends JSMeta {
 }
 
 class JSMetaArgument extends JSMeta {
-  readonly isntAssignable = true;
+  override readonly isntAssignable = true;
 
   constructor(private name?: string) {
     super();
   }
 
-  template(context: JSMetaContext): (string | JSMeta)[] {
+  override template(context: JSMetaContext): (string | JSMeta)[] {
     const existing = context.args.get(this);
     if (existing) return [existing];
 
@@ -884,7 +889,7 @@ class JSMetaModule extends JSMeta {
     super();
   }
 
-  template(context: JSMetaContext): (string | JSMeta)[] {
+  override template(context: JSMetaContext): (string | JSMeta)[] {
     return [
       context.modules,
       `[${
@@ -902,8 +907,8 @@ class JSMetaModule extends JSMeta {
 }
 
 class JSMetaModuleStore extends JSMeta {
-  readonly mustDeclare = true;
-  readonly isAwaited: boolean = true;
+  override readonly mustDeclare = true;
+  override readonly isAwaited: boolean = true;
   #urls: Record<string, [number, string]> = {};
   #i = 0;
 
@@ -911,7 +916,7 @@ class JSMetaModuleStore extends JSMeta {
     super();
   }
 
-  template(_: JSMetaContext): (string | JSMeta)[] {
+  override template(_: JSMetaContext): (string | JSMeta)[] {
     return [
       `(await Promise.all(${
         JSON.stringify(
@@ -933,13 +938,14 @@ class JSMetaModuleStore extends JSMeta {
 }
 
 class JSMetaRef extends JSMeta {
-  readonly isntAssignable: boolean = true;
+  override readonly isntAssignable: boolean = true;
+  indicativeOrder?: number;
 
   constructor() {
     super();
   }
 
-  template(context: JSMetaContext): (string | JSMeta)[] {
+  override template(context: JSMetaContext): (string | JSMeta)[] {
     if (!context.refs) throw Error(`Must provide activation when using refs`);
     return [context.refs, "[", context.refs.get(this).toString(), "]"];
   }
@@ -950,77 +956,113 @@ class JSMetaRef extends JSMeta {
 }
 
 class JSMetaRefStore extends JSMeta {
-  readonly mustDeclare = true;
-  #metas: Set<JSMeta> = new Set();
-  #referenced: Map<JSMeta, number> = new Map();
-  #firstPass: boolean = true;
+  override readonly isntAssignable = true;
+  // #metas: Set<JSMeta> = new Set();
+  // #referenced: Map<JSMeta, number> = new Map();
+  // #firstPass: boolean = true;
 
-  constructor(
-    private readonly currentScript: string,
-    private readonly refs: RefTree,
-  ) {
-    super();
+  #usedRefs = new Set<JSMetaRef>();
+  #expectedRefs?: Map<JSMetaRef, number>;
 
-    const iterRefs = (refs: RefTree) =>
-      refs.forEach(([r, children]) => {
-        this.#metas.add(r[jsSymbol]);
-        if (children) iterRefs(children);
-      });
-    iterRefs(refs);
-  }
+  // constructor(
+  //   private readonly currentScript: string,
+  //   private readonly refs: RefTree,
+  // ) {
+  //   super();
 
-  template(_context: JSMetaContext): (string | JSMeta)[] {
-    if (this.#firstPass) {
-      this.#firstPass = false;
-      return [];
-    } else {
-      // On second pass, every used ref is accessed: compute activation
-      return [
-        client.refs[jsSymbol],
-        "(",
-        this.currentScript,
-        ",",
-        this.refs.length.toString(),
-        ",",
-        JSON.stringify(this.#activateReferenced(this.refs)),
-        ")",
-      ];
-    }
+  //   const iterRefs = (refs: RefTree) =>
+  //     refs.forEach(([r, children]) => {
+  //       this.#metas.add(r[jsSymbol]);
+  //       if (children) iterRefs(children);
+  //     });
+  //   iterRefs(refs);
+  // }
+
+  override template(_context: JSMetaContext): (string | JSMeta)[] {
+    // if (this.#firstPass) {
+    //   this.#firstPass = false;
+    //   // return [refsJS[jsSymbol]];
+    // } else {
+    //   // On second pass, every used ref is accessed: compute expected refs
+    //   this.#expectedRefs ??= new Map(
+    //     [...this.#usedRefs]
+    //       .sort((a, b) => a.indicativeOrder! - b.indicativeOrder!)
+    //       .map((r, i) => [r, i]),
+    //   );
+
+    //   // On second pass, every used ref is accessed: compute activation
+    //   // return [
+    //   //   refsJS[jsSymbol],
+    //   //   "(",
+    //   //   this.currentScript,
+    //   //   ",",
+    //   //   this.refs.length.toString(),
+    //   //   ",",
+    //   //   JSON.stringify(this.#activateReferenced(this.refs)),
+    //   //   ")",
+    //   // ];
+    // }
+    return [expectedRefsArg];
   }
 
   get(ref: JSMetaRef): number {
-    if (!this.#metas.has(ref)) return -1;
-
-    const i = this.#referenced.get(ref);
-    if (i == null) {
-      this.#referenced.set(ref, -1);
-      return -1;
+    if (ref.indicativeOrder == null) {
+      throw Error(
+        `Refs must receive an indicative order for render pre-optimisation`,
+      );
     }
-    return i;
+
+    if (!this.#expectedRefs) {
+      if (!this.#usedRefs.has(ref)) {
+        this.#usedRefs.add(ref);
+        return -1;
+      } else {
+        this.#expectedRefs = new Map(
+          [...this.#usedRefs]
+            .sort((a, b) => a.indicativeOrder! - b.indicativeOrder!)
+            .map((r, i) => [r, i]),
+        );
+      }
+    }
+
+    return this.#expectedRefs.get(ref)!;
+
+    // if (!this.#metas.has(ref)) return -1;
+
+    // const i = this.#referenced.get(ref);
+    // if (i == null) {
+    //   this.#referenced.set(ref, -1);
+    //   return -1;
+    // }
+    // return i;
   }
 
-  #lastRefIndex = -1;
-  #activateReferenced(refs: RefTree): Activation {
-    return refs.flatMap(([ref, children], i) => {
-      const activation: Activation = [];
-      const r = this.#referenced.get(ref[jsSymbol]);
-      const referencedChildren = children && this.#activateReferenced(children);
+  // #lastRefIndex = -1;
+  // #activateReferenced(refs: RefTree): Activation {
+  //   return refs.flatMap(([ref, children], i) => {
+  //     const activation: Activation = [];
+  //     const r = this.#referenced.get(ref[jsSymbol]);
+  //     const referencedChildren = children && this.#activateReferenced(children);
 
-      if (r) {
-        activation.push([i]);
-        this.#referenced.set(ref[jsSymbol], ++this.#lastRefIndex);
-      }
+  //     if (r) {
+  //       activation.push([i]);
+  //       this.#referenced.set(ref[jsSymbol], ++this.#lastRefIndex);
+  //     }
 
-      if (referencedChildren?.length) activation.push([i, referencedChildren]);
+  //     if (referencedChildren?.length) activation.push([i, referencedChildren]);
 
-      return activation;
-    });
+  //     return activation;
+  //   });
+  // }
+
+  get expectedRefs(): JSMeta[] {
+    return this.#expectedRefs ? [...this.#expectedRefs.keys()] : [];
   }
 }
 
 class JSMetaResource<T extends JSONable = JSONable> extends JSMeta {
-  readonly hasResources: boolean = true;
-  readonly isntAssignable: boolean = true;
+  override readonly hasResources: boolean = true;
+  override readonly isntAssignable: boolean = true;
   readonly js: JSable<T> = jsable(this)();
 
   constructor(
@@ -1030,7 +1072,9 @@ class JSMetaResource<T extends JSONable = JSONable> extends JSMeta {
     super();
   }
 
-  async template(context: JSMetaContext): Promise<(string | JSMeta)[]> {
+  override async template(
+    context: JSMetaContext,
+  ): Promise<(string | JSMeta)[]> {
     context.resources ??= new JSMetaResources(context);
     return [await context.resources.peek<T>(this.uri, this.fetch)];
   }
@@ -1061,7 +1105,7 @@ class JSMetaResources extends JSMeta {
     super();
   }
 
-  template(): (string | JSMeta)[] {
+  override template(): (string | JSMeta)[] {
     return [
       `(`,
       client.store.set[jsSymbol],
@@ -1115,7 +1159,7 @@ class JSMetaVar extends JSMeta {
     this.isntAssignable = isntAssignable;
   }
 
-  template(
+  override template(
     context: JSMetaContext,
   ): (string | JSMeta)[] | Promise<(string | JSMeta)[]> {
     return this.cb(context);
@@ -1136,7 +1180,7 @@ class JSMetaURIs extends JSMeta {
     super();
   }
 
-  template(context: JSMetaContext): (string | JSMeta)[] {
+  override template(context: JSMetaContext): (string | JSMeta)[] {
     return Array.isArray(this.uris)
       ? context.resources
         ? [
@@ -1184,7 +1228,7 @@ class JSMetaReassign extends JSMeta {
     }
   }
 
-  template(context: JSMetaContext): (string | JSMeta)[] {
+  override template(context: JSMetaContext): (string | JSMeta)[] {
     const varMeta = this.varMut;
     return context.declaredNames.has(varMeta) ||
         varMeta instanceof JSMetaArgument
@@ -1195,6 +1239,13 @@ class JSMetaReassign extends JSMeta {
 
 export const mkRef = <T extends EventTarget>(): JS<T> =>
   makeConvenient(jsable(new JSMetaRef())<T>());
+
+export const setIndicativeOrder = <T extends EventTarget>(
+  ref: JSable<T>,
+  i: number,
+): void => {
+  (ref[jsSymbol] as JSMetaRef).indicativeOrder = i;
+};
 
 export const resource = <T extends Readonly<Record<string, JSONable>>>(
   uri: string,
@@ -1235,18 +1286,5 @@ export const resources = <
 
 type DomApi = typeof import("./dom.ts");
 
-const domApi = js.module<DomApi>("@classic/js/dom");
-const domStore = domApi.store;
-
-// Memoized version of the API, ensuring static JS references
-export const client: JS<DomApi> = {
-  refs: domApi.refs,
-  store: {
-    peek: domStore.peek,
-    set: domStore.set,
-    sub: domStore.sub,
-    [jsSymbol]: domStore[jsSymbol],
-  },
-  sub: domApi.sub,
-  [jsSymbol]: domApi[jsSymbol],
-} as JS<DomApi>;
+// const domApi = js.module<DomApi>("@classic/js/dom");
+// const domApiRefs = domApi.refs;

@@ -837,6 +837,7 @@
       "jsr:@classic/build@0",
       "jsr:@classic/element@0",
       "jsr:@classic/js@0",
+      "jsr:@classic/morph@0",
       "jsr:@classic/server@0",
       "jsr:@classic/util@0",
       "jsr:@hono/hono@^4.4.8",

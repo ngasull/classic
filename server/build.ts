@@ -1,5 +1,5 @@
 import type { JSONable } from "../js/types.ts";
-import { Context } from "./context.ts";
+import { BaseContext } from "./context.ts";
 import { RuntimeContext } from "./middleware.ts";
 import type { Async } from "./mod.ts";
 
@@ -9,7 +9,7 @@ import type { Async } from "./mod.ts";
  * No need for a central config like other tools such as Vite.
  */
 
-export type BuildFunction<R = void> = (route: BuildRoute) => Async<R>;
+export type BuildFunction<R = Async<void>> = (route: BuildRoute) => R;
 
 type Method = "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
 
@@ -105,7 +105,7 @@ export class Build {
 
 export type { BuildRoute };
 
-class BuildRoute extends Context {
+class BuildRoute extends BaseContext {
   // deno-lint-ignore constructor-super
   constructor(
     parent: BuildRoute | Build,

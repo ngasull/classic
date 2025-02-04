@@ -192,3 +192,5 @@ type ParamKey<Component> = Component extends `:${infer NameWithPattern}`
 export type ParamKeys<Path extends string> = Path extends
   `${infer Component}/${infer Rest}` ? ParamKey<Component> | ParamKeys<Rest>
   : ParamKey<Path>;
+
+export type Resolver = (spec: string) => string | undefined;

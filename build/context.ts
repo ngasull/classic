@@ -61,7 +61,29 @@ export class BuildContext {
     );
   }
 
-  static load = async (outDir: string): Promise<BuildContext> => {
+  private static inMemoryKey = 0;
+  private static inMemoryKeyContexts = new Map<number, BuildContext>();
+
+  #inMemoryKey = BuildContext.inMemoryKey++;
+
+  saveInMemory(): number {
+    BuildContext.inMemoryKeyContexts.set(this.#inMemoryKey, this);
+    return this.#inMemoryKey;
+  }
+
+  releaseFromMemory(): void {
+    BuildContext.inMemoryKeyContexts.delete(this.#inMemoryKey);
+  }
+
+  static load = async (outDir: string | number): Promise<BuildContext> => {
+    if (typeof outDir === "number") {
+      const inMem = BuildContext.inMemoryKeyContexts.get(outDir);
+      if (!inMem) {
+        throw Error(`No build context in memory found with number ${outDir}`);
+      }
+      return inMem;
+    }
+
     const { moduleBase, publicBase, modules }: BuildMeta = JSON.parse(
       await Deno.readTextFile(join(outDir, "meta.json")),
     );

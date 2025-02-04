@@ -1,10 +1,12 @@
+import type { AppBuild } from "@classic/build";
 import { Fragment, jsx } from "./jsx-runtime.ts";
 import type { JSX } from "./types.ts";
-import { $build } from "./render.ts";
 import { transform as transformCss } from "lightningcss";
 import type { VoidElement } from "./void.ts";
 import type { Context } from "./context.ts";
 import { Key } from "./key.ts";
+
+export const $build = new Key<AppBuild>("build");
 
 export const Bundle: JSX.FC = async (_, context) => {
   const { globalCssPublic, critical, dev } = context.use($build);

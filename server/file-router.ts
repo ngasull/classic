@@ -1,8 +1,10 @@
 import { join, relative, resolve, toFileUrl } from "@std/path";
-import type { BuildFunction, BuildRoute } from "./build.ts";
-import { Key } from "./key.ts";
-import type { Middleware, MiddlewareContext } from "./middleware.ts";
+import type { BuildRoute } from "./build.ts";
 import { pageCss } from "./file-router/page.css.ts";
+import type { Middleware, MiddlewareContext } from "./middleware.ts";
+import type { JSONable } from "../js/types.ts";
+
+type Empty = { [n in never]: never };
 
 type Async<T> = T | PromiseLike<T>;
 
@@ -13,10 +15,10 @@ type Method = typeof httpMethods[number];
 type AsRouteParam<Name extends string | number | symbol> = Name extends
   `[[${infer P}]]` ? P : Name extends `[${infer P}]` ? P : never;
 
-export const $rootBuild = new Key<BuildRoute>("rootBuild");
-
-export const fileRouter = (base: string): BuildFunction => async (route) => {
-  route.provide($rootBuild, route);
+export const fileRouter = async (
+  route: BuildRoute,
+  base: string,
+): Promise<void> => {
   await scanDir(base, route, [], route);
 };
 
@@ -77,16 +79,16 @@ const scanDir = async (
 
     const url = toFileUrl(resolve(cwdFilePath)).href;
 
-    const { default: mod } = await import(url).catch((e) => {
-      throw new Error(`Failed importing ${url}: ` + e.message);
-    });
-    if (!(mod instanceof FileRoute)) {
-      throw new Error(`${url} must \`export default\` a FileRouterRoute`);
+    const { default: mod }: { default: FileRoute<unknown> } = await import(url)
+      .catch((e) => {
+        throw new Error(`Failed importing ${url}: ` + e.message);
+      });
+    if (typeof mod !== "function") {
+      throw new Error(`${url} must \`export default\` a function`);
     }
 
-    route.provide($moduleImportSpec, url);
-    route.provide($childRouteIndex, []);
-    await mod.build?.(route);
+    const fileBuild = new FileBuild(url);
+    await new FileBuildContextBuild(fileBuild, route).use(mod);
   };
 
   if (indexFile) {
@@ -139,207 +141,254 @@ const segmentToURLPattern = (segment: string) => {
   return optional ? `{/:${optional}}?` : `/:${param}`;
 };
 
-//     if (mutation) {
-//       for (const name of mutation === true ? [""] : mutation) {
-//         router.add(
-//           "POST",
-//           name ? `${pattern}/${name}` : pattern,
-//           async (req, params, context) => {
-//             const mod = (await getMod(route))!;
-//             const url = new URL(req.url);
-//             const rawLocation = url.searchParams.get("location");
-//             const requestedLocation = rawLocation
-//               ? new URL(rawLocation, url.origin)
-//               : null;
-
-//             const modMutation = mutation === true
-//               ? mod.mutation as Mutation<string>
-//               : (mod.mutation as Record<string, Mutation<string>>)[name];
-
-//             const res = await modMutation({ req, params });
-//             if (res instanceof Response) {
-//               return res;
-//             } else if (
-//               requestedLocation && requestedLocation?.pathname !== url.pathname
-//             ) {
-//               const res = await handleRequest(
-//                 new Request(requestedLocation, { headers: req.headers }),
-//                 context,
-//               );
-//               res?.headers.set("Content-Location", requestedLocation.pathname);
-//               return res;
-//             } else {
-//               return new Response();
-//             }
-//           },
-//         );
-//       }
-//     }
-
-const $moduleImportSpec = new Key<string>("moduleImportSpec");
-const $childRouteIndex = new Key<number[]>("childRouteIndex");
-
-const asRoute = <Params, Meta>(route: FileRouteOrOpts<Params, Meta>) => {
-  if (route instanceof FileRoute) return route;
-
-  const methods = httpMethods.filter((m) => route[m]);
-  return new FileRoute<Params, Awaited<Meta>>(
-    route.build || methods.length > 0
-      ? (async (build) => {
-        const meta = await route.build?.(build);
-
-        for (const method of methods) {
-          build.method(
-            method,
-            import.meta.url,
-            build.use($moduleImportSpec),
-            build.use($childRouteIndex),
-            meta!,
-          );
-        }
-      })
-      : undefined,
-    Object.fromEntries(
-      methods.map((m) => [
-        m,
-        (ctx, _modulePath, _index, meta) => route[m]!(ctx, meta),
-      ]),
-    ),
-  );
-};
-
 export const route: {
-  <ParamStr extends string, Params, Meta>(
-    segment?: ParamStr,
-    ...nested: FileRouteOrOpts<Params & RouteParams<ParamStr>, Meta>[]
+  <ParamStr extends string, Params>(
+    segment: ParamStr,
+    fileRoute: FileRoute<Params & RouteParams<ParamStr>>,
   ): FileRoute<Params & RouteParams<ParamStr>>;
-  <Params, Meta>(nested: FileRouteOrOpts<Params, Meta>): FileRoute<Params>;
-  <Params>(...nested: FileRouteOrOpts<Params, void>[]): FileRoute<Params>;
-} = <ParamStr extends string, Meta>(
-  segment?: ParamStr | FileRouteOrOpts<RouteParams<ParamStr>, Meta>,
-  ...nested: FileRouteOrOpts<RouteParams<ParamStr>, Meta>[]
-): FileRoute<RouteParams<ParamStr>, void> => {
-  if (typeof segment === "object") {
-    nested.unshift(segment);
-    segment = undefined;
-  }
-
-  const fileRoutes = nested.map(asRoute);
-
-  const methods = new Set<Method>();
-  for (const m of httpMethods) {
-    if (fileRoutes.some((r) => r.handle[m])) {
-      methods.add(m);
-    }
-  }
-
-  return (fileRoutes.length === 1
-    ? new FileRoute(
-      fileRoutes[0].build &&
-        ((build: BuildRoute) => fileRoutes[0].build!(build.segment(segment))),
-      fileRoutes[0].handle,
-    )
-    : new FileRoute(
-      async (build: BuildRoute) => {
-        const childRoute = build.segment(segment);
-        for (let i = 0; i < fileRoutes.length; i++) {
-          const child = fileRoutes[i];
-          if (child.build) {
-            const prevIndex = childRoute.use($childRouteIndex);
-            childRoute.provide($childRouteIndex, [...prevIndex, i]);
-            await child.build(childRoute);
-            childRoute.provide($childRouteIndex, prevIndex);
-          }
-        }
-      },
-      Object.fromEntries(
-        [...methods].map(
-          (m) => [m, async (ctx, modulePath, index, meta: never) => {
-            const [i, ...childIndex] = index;
-            const child = fileRoutes[i];
-            if (child?.handle[m]) {
-              return child.handle[m](
-                ctx,
-                modulePath,
-                childIndex,
-                meta,
-              );
-            } else {
-              throw new HandlerNotFoundError();
-            }
-          }],
-        ),
-      ),
-    )) as FileRoute<RouteParams<ParamStr>>;
-};
-
-class HandlerNotFoundError extends Error {}
+  <F extends FileRoute<any>>(fileRoute: F): F;
+} = <ParamStr extends string, Params>(
+  segment: ParamStr | FileRoute<Params>,
+  fileRoute?: FileRoute<Params & RouteParams<ParamStr>>,
+): FileRoute<Params & RouteParams<ParamStr>> =>
+  fileRoute
+    ? ((r) => fileRoute(r.segment(segment as ParamStr)))
+    : segment as FileRoute<Params & RouteParams<ParamStr>>;
 
 type RouteParams<T extends string> = T extends `${"" | "/"}:${infer P}`
-  ? Record<P, string>
-  : Record<never, string>;
+  ? { [param in P]: string }
+  : { [n in never]: never };
 
-export class FileRoute<Params = Record<never, string>, Meta = void> {
-  constructor(
-    public readonly build?: BuildFunction,
-    public readonly handle: {
-      [method in Method]?: (
-        req: MiddlewareContext<Params>,
-        modulePath: string,
-        index: number[],
-        meta: Meta,
-      ) => Async<void | Response>;
-    } = {},
-  ) {}
+export type FileRoute<Params> = <P extends Params>(
+  r: FileBuildContext<P>,
+) => Async<void>;
+
+class Queue {
+  #last: Promise<unknown> = Promise.resolve();
+
+  queue<T>(cb: () => T): Promise<Awaited<T>> {
+    return this.#last = this.#last.then(() => cb()) as Promise<Awaited<T>>;
+  }
+
+  get last(): Promise<unknown> {
+    return this.#last;
+  }
 }
 
-type FileRouteOrOpts<Params, Meta> =
-  | FileRoute<Params, Meta>
-  | FileRouteOpts<Params, Meta>;
+/**
+ * Represents a file route once processed through `FileBuildContext`.
+ * It then contains the information to dispatch the file route requests.
+ * It can also be used to store built meta for production restoration.
+ */
+class FileBuild {
+  constructor(
+    public readonly modulePath: string,
+    public readonly meta: { [i in number]: JSONable } = {},
+  ) {}
 
-type FileRouteOpts<Params, Meta> =
-  & { readonly build?: BuildFunction<Meta> }
-  & {
-    readonly [method in Method]?: (
-      req: MiddlewareContext<Params>,
-      meta: Awaited<Meta>,
-    ) => Async<void | Response>;
-  };
+  metaIndex = 0;
+  readonly handlers: Array<
+    (req: MiddlewareContext<any>) => Async<Response | void>
+  > = [];
+}
 
-export default (
-  modulePath: string,
-  index: number[],
-  meta: unknown,
-): Middleware => {
-  const routeQ = import(modulePath)
-    .then(({ default: route }) => {
-      if (!(route instanceof FileRoute)) {
-        throw Error(`${modulePath} must \`export default\` a FileRoute`);
+export interface FileBuildContext<Params> {
+  segment<P extends string>(
+    segment: P,
+  ): FileBuildContext<Params & RouteParams<P>>;
+  use<M extends Async<any>, Args extends any[]>(
+    use: (context: FileBuildContext<Params>, ...args: Args) => M,
+    ...args: Args
+  ): Promise<Awaited<M>>;
+  useBuild<M extends Async<JSONable | void>, Args extends any[]>(
+    builder: (route: BuildRoute, ...args: Args) => M,
+    ...args: Args
+  ): Promise<Awaited<M>>;
+  method(
+    method: Method,
+    handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
+  ): this;
+}
+
+export class FileBuildContextBuild<Params> implements FileBuildContext<Params> {
+  constructor(
+    fileBuild: FileBuild,
+    route: BuildRoute,
+    uses: Queue = new Queue(),
+  ) {
+    this.#fileBuild = fileBuild;
+    this.#route = route;
+    this.#uses = uses;
+  }
+
+  readonly #fileBuild: FileBuild;
+  readonly #route: BuildRoute;
+  #uses: Queue;
+
+  segment<P extends string>(
+    segment: P,
+  ): FileBuildContext<Params & RouteParams<P>> {
+    return new FileBuildContextBuild<Params & RouteParams<P>>(
+      this.#fileBuild,
+      this.#route.segment(segment),
+      this.#uses,
+    );
+  }
+
+  use<M extends Async<any>, Args extends any[]>(
+    use: (context: FileBuildContext<Params>, ...args: Args) => M,
+    ...args: Args
+  ): Promise<Awaited<M>> {
+    return this.#uses.queue(async () => {
+      const subCtx = new FileBuildContextBuild<Params>(
+        this.#fileBuild,
+        this.#route,
+      );
+
+      const used = await use(subCtx, ...args);
+      await subCtx.#uses.last;
+
+      return used;
+    });
+  }
+
+  useBuild<M extends Async<JSONable | void>, Args extends any[]>(
+    builder: (route: BuildRoute, ...args: Args) => M,
+    ...args: Args
+  ) {
+    return this.#uses.queue(async () => {
+      const index = this.#fileBuild.metaIndex++;
+      const meta = await builder(this.#route, ...args);
+      if (meta !== undefined) {
+        this.#fileBuild.meta[index] = meta;
       }
-      return route;
+      return meta;
+    });
+  }
+
+  method(
+    method: Method,
+    handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
+  ): this {
+    this.useBuild((route) => {
+      const index = this.#fileBuild.handlers.length;
+      route.method(
+        method,
+        import.meta.url,
+        this.#fileBuild.modulePath,
+        this.#fileBuild.meta,
+        index,
+      );
+      this.#fileBuild.handlers.push(handler);
+    });
+    return this;
+  }
+}
+
+export class FileBuildContextRuntime<Params>
+  implements FileBuildContext<Params> {
+  constructor(
+    fileBuild: FileBuild,
+    handlerIndex: number,
+    req: MiddlewareContext<Params>,
+    setResponse: (r: Async<Response | void>) => unknown,
+    usedBuilds = 0,
+    usedHandlers = 0,
+    uses: Queue = new Queue(),
+  ) {
+    this.#fileBuild = fileBuild;
+    this.#handlerIndex = handlerIndex;
+    this.#req = req;
+    this.#setResponse = setResponse;
+    this.#usedBuilds = usedBuilds;
+    this.#usedHandlers = usedHandlers;
+    this.#uses = uses;
+  }
+
+  readonly #fileBuild: FileBuild;
+  readonly #handlerIndex: number;
+  readonly #req: MiddlewareContext<Params>;
+  readonly #setResponse: (r: Async<Response | void>) => unknown;
+  #usedBuilds;
+  #usedHandlers;
+  #uses: Queue;
+
+  get modulePath() {
+    return this.#fileBuild.modulePath;
+  }
+
+  segment<P extends string>(_: P): FileBuildContext<Params & RouteParams<P>> {
+    return this as FileBuildContext<Params & RouteParams<P>>;
+  }
+
+  async use<M extends Async<any>, Args extends any[]>(
+    use: (context: FileBuildContext<Params>, ...args: Args) => M,
+    ...args: Args
+  ): Promise<Awaited<M>> {
+    return this.#uses.queue(async () => {
+      const ctx = new FileBuildContextRuntime(
+        this.#fileBuild,
+        this.#handlerIndex,
+        this.#req,
+        this.#setResponse,
+        this.#usedBuilds,
+        this.#usedHandlers,
+      );
+      const used = await use(ctx, ...args);
+      await ctx.#uses.last;
+      this.#usedBuilds = ctx.#usedBuilds;
+      this.#usedHandlers = ctx.#usedHandlers;
+      return used;
+    });
+  }
+
+  useBuild<M extends Async<JSONable | void>, Args extends any[]>(
+    _builder: (route: BuildRoute, ...args: Args) => M,
+    ..._args: Args
+  ) {
+    return this.#uses.queue(() =>
+      this.#fileBuild.meta[this.#usedBuilds++] as M
+    );
+  }
+
+  method(
+    _: Method,
+    handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
+  ) {
+    this.#uses.queue(() => {
+      this.#usedBuilds++;
+      if (this.#handlerIndex === this.#usedHandlers++) {
+        this.#setResponse(handler(this.#req));
+      }
+    });
+    return this;
+  }
+}
+
+export default async (
+  modulePath: string,
+  meta: { [i in number]: JSONable },
+  index: number,
+): Promise<Middleware> => {
+  const route = await import(modulePath)
+    .then(({ default: route }) => {
+      if (typeof route !== "function") {
+        throw Error(
+          `${modulePath} must \`export default\` a file route function`,
+        );
+      }
+      return route as (r: FileBuildContext<Empty>) => Async<void>;
     })
     .catch((e) => {
       console.info("Failed importing %s - see below", modulePath);
       throw e;
     });
+
   return async (ctx) => {
-    const route = await routeQ;
-    const handler = route.handle[ctx.request.method as Method];
-
-    if (!handler) {
-      throw Error(`${modulePath} route defines no request handler`);
-    }
-
-    try {
-      return await handler(ctx, modulePath, index, meta);
-    } catch (e) {
-      throw e instanceof HandlerNotFoundError
-        ? Error(
-          `${modulePath} route has no ${ctx.request.method} handler at ${
-            index.join(".")
-          }`,
-        )
-        : e;
-    }
+    const fileBuild = new FileBuild(modulePath, meta);
+    let res: Async<Response | void> | undefined;
+    await new FileBuildContextRuntime(fileBuild, index, ctx, (r) => res = r)
+      .use(route);
+    return res;
   };
 };

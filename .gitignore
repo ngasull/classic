@@ -10,6 +10,7 @@
 
 # Temp
 /.direnv
+/docs
 gitignore
 
 # System Files

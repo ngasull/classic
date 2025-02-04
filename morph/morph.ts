@@ -13,8 +13,10 @@ export const morph = (
   patch = skipDocument(patch);
   let srcAttrs = attributesMap(src);
   let patchAttrs = attributesMap(patch);
-  keys(srcAttrs).map((k) => k in patchAttrs || src.removeAttribute(k));
-  entries(patchAttrs).map(([k, v]) => src.setAttribute(k, v));
+  keys(srcAttrs).forEach((k) => k in patchAttrs || src.removeAttribute(k));
+  entries(patchAttrs).forEach(([k, v]) =>
+    v === srcAttrs[k] || src.setAttribute(k, v)
+  );
   morphChildren(src, patch);
 };
 
@@ -50,8 +52,13 @@ export const morphChildren = (
       (patchChild.nodeType == TEXT_NODE || patchChild.nodeType == COMMENT_NODE)
     ) {
       if (patchType == nextType) {
-        (nextSrcChild as CharacterData).data =
-          (patchChild as CharacterData).data;
+        if (
+          (nextSrcChild as CharacterData).data !==
+            (patchChild as CharacterData).data
+        ) {
+          (nextSrcChild as CharacterData).data =
+            (patchChild as CharacterData).data;
+        }
         nextSrcChild = nextSrcChild!.nextSibling;
       } else {
         srcRoot.insertBefore(patchChild, nextSrcChild);

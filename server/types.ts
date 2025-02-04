@@ -1,7 +1,7 @@
 import type { CustomElement, CustomElements } from "@classic/element";
 import { isJSable, type JS, type JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
-import type { ContextInterface } from "./context.ts";
+import type { Context } from "./context.ts";
 import type { VoidElement } from "./void.ts";
 
 type IntrinsicServerElement<
@@ -55,7 +55,7 @@ declare namespace JSX {
 
   type FC<O extends Record<string, unknown> = Record<never, never>> = (
     props: O,
-    context: ContextInterface,
+    context: Context,
   ) => JSX.Element;
 
   type PFC<
