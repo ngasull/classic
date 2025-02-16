@@ -7,7 +7,8 @@
     "jsr:@classic/js@0": "0.1.9",
     "jsr:@classic/server@0": "0.1.1",
     "jsr:@classic/util@0": "0.1.1",
-    "jsr:@hono/hono@^4.4.8": "4.4.8",
+    "jsr:@denosaurs/plug@1.0.3": "1.0.3",
+    "jsr:@hono/hono@^4.6.20": "4.6.20",
     "jsr:@jabr/xxhash64@2": "2.0.0",
     "jsr:@luca/esbuild-deno-loader@~0.10.3": "0.10.3",
     "jsr:@std/assert@*": "1.0.7",
@@ -15,11 +16,15 @@
     "jsr:@std/assert@^1.0.7": "1.0.7",
     "jsr:@std/assert@~0.213.1": "0.213.1",
     "jsr:@std/async@^1.0.0-rc.1": "1.0.0-rc.4",
+    "jsr:@std/bytes@^1.0.5": "1.0.5",
     "jsr:@std/cli@~0.224.7": "0.224.7",
     "jsr:@std/encoding@0.213": "0.213.1",
+    "jsr:@std/encoding@0.213.1": "0.213.1",
     "jsr:@std/encoding@1.0.0-rc.2": "1.0.0-rc.2",
     "jsr:@std/encoding@^1.0.4": "1.0.4",
+    "jsr:@std/fmt@0.213.1": "0.213.1",
     "jsr:@std/fmt@~0.225.4": "0.225.6",
+    "jsr:@std/fs@0.213.1": "0.213.1",
     "jsr:@std/fs@~0.229.3": "0.229.3",
     "jsr:@std/http@~0.224.5": "0.224.5",
     "jsr:@std/internal@^1.0.5": "1.0.5",
@@ -29,8 +34,10 @@
     "jsr:@std/media-types@^1.0.2": "1.0.2",
     "jsr:@std/net@~0.224.3": "0.224.5",
     "jsr:@std/path@0.213": "0.213.1",
+    "jsr:@std/path@0.213.1": "0.213.1",
     "jsr:@std/path@1.0.0-rc.1": "1.0.0-rc.1",
     "jsr:@std/path@1.0.0-rc.2": "1.0.0-rc.2",
+    "jsr:@std/path@~0.213.1": "0.213.1",
     "jsr:@std/path@~0.225.2": "0.225.2",
     "jsr:@std/streams@~0.224.5": "0.224.5",
     "npm:cssnano@^7.0.4": "7.0.4_postcss@8.4.40",
@@ -40,13 +47,16 @@
   },
   "jsr": {
     "@b-fuze/deno-dom@0.1.48": {
-      "integrity": "bf5b591aef2e9e9c59adfcbb93a9ecd45bab5b7c8263625beafa5c8f1662e7da"
+      "integrity": "bf5b591aef2e9e9c59adfcbb93a9ecd45bab5b7c8263625beafa5c8f1662e7da",
+      "dependencies": [
+        "jsr:@denosaurs/plug"
+      ]
     },
     "@classic/build@0.1.1": {
       "integrity": "ee54aa6217c43e070f9d431d107c9742dc66bdf13377c5466e495d64659e8702",
       "dependencies": [
         "jsr:@luca/esbuild-deno-loader",
-        "jsr:@std/fs",
+        "jsr:@std/fs@~0.229.3",
         "jsr:@std/path@~0.225.2",
         "npm:cssnano",
         "npm:esbuild",
@@ -68,8 +78,20 @@
     "@classic/util@0.1.1": {
       "integrity": "e9ff0760128f18f925eba60de1072f9e6e87228cc8e6089e4863188e82d5c516"
     },
+    "@denosaurs/plug@1.0.3": {
+      "integrity": "b010544e386bea0ff3a1d05e0c88f704ea28cbd4d753439c2f1ee021a85d4640",
+      "dependencies": [
+        "jsr:@std/encoding@0.213.1",
+        "jsr:@std/fmt@0.213.1",
+        "jsr:@std/fs@0.213.1",
+        "jsr:@std/path@0.213.1"
+      ]
+    },
     "@hono/hono@4.4.8": {
       "integrity": "6b387c666d4a1d2f50fbf7968ecaa73eb37690d08be0f5f3efe2d15dd6a679ce"
+    },
+    "@hono/hono@4.6.20": {
+      "integrity": "0db02d7b80db67a17e18b434c6105af002412cada5e908013086eb9fa9466a87"
     },
     "@jabr/xxhash64@2.0.0": {
       "integrity": "a109e902abb6787816112ac71fd9145d39f8fccb45f96d1707c82197bd8fbfbd"
@@ -97,6 +119,9 @@
     "@std/async@1.0.0-rc.4": {
       "integrity": "6d16ba99f2df32a7aa587c99e2a87140cc1eb8f38321dab3415b624bce90cc14"
     },
+    "@std/bytes@1.0.5": {
+      "integrity": "4465dd739d7963d964c809202ebea6d5c6b8e3829ef25c6a224290fbb8a1021e"
+    },
     "@std/cli@0.224.7": {
       "integrity": "654ca6477518e5e3a0d3fabafb2789e92b8c0febf1a1d24ba4b567aba94b5977"
     },
@@ -109,8 +134,18 @@
     "@std/encoding@1.0.4": {
       "integrity": "2266cd516b32369e3dc5695717c96bf88343a1f761d6e6187a02a2bbe2af86ae"
     },
+    "@std/fmt@0.213.1": {
+      "integrity": "a06d31777566d874b9c856c10244ac3e6b660bdec4c82506cd46be052a1082c3"
+    },
     "@std/fmt@0.225.6": {
       "integrity": "aba6aea27f66813cecfd9484e074a9e9845782ab0685c030e453a8a70b37afc8"
+    },
+    "@std/fs@0.213.1": {
+      "integrity": "fbcaf099f8a85c27ab0712b666262cda8fe6d02e9937bf9313ecaea39a22c501",
+      "dependencies": [
+        "jsr:@std/assert@~0.213.1",
+        "jsr:@std/path@~0.213.1"
+      ]
     },
     "@std/fs@0.229.3": {
       "integrity": "783bca21f24da92e04c3893c9e79653227ab016c48e96b3078377ebd5222e6eb",
@@ -124,7 +159,7 @@
         "jsr:@std/async",
         "jsr:@std/cli",
         "jsr:@std/encoding@1.0.0-rc.2",
-        "jsr:@std/fmt",
+        "jsr:@std/fmt@~0.225.4",
         "jsr:@std/media-types@^1.0.0-rc.1",
         "jsr:@std/net",
         "jsr:@std/path@1.0.0-rc.2",
@@ -840,10 +875,11 @@
       "jsr:@classic/morph@0",
       "jsr:@classic/server@0",
       "jsr:@classic/util@0",
-      "jsr:@hono/hono@^4.4.8",
+      "jsr:@hono/hono@^4.6.20",
       "jsr:@jabr/xxhash64@2",
       "jsr:@luca/esbuild-deno-loader@~0.10.3",
       "jsr:@std/assert@^1.0.7",
+      "jsr:@std/bytes@^1.0.5",
       "jsr:@std/encoding@^1.0.4",
       "jsr:@std/fs@~0.229.3",
       "jsr:@std/http@~0.224.5",

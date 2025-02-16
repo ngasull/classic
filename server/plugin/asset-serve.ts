@@ -2,7 +2,7 @@ import { contentType } from "@std/media-types/content-type";
 import type { Middleware } from "../mod.ts";
 
 export default (
-  asset: string,
+  asset: number,
   ext: string,
   headers: Record<string, string>,
 ): Middleware => {

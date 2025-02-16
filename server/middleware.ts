@@ -1,4 +1,4 @@
-import { RegExpRouter } from "hono/router/reg-exp-router";
+import { RegExpRouter } from "@hono/hono/router/reg-exp-router";
 import { join } from "@std/path";
 import type { BuildMeta, HandlerParam, RequestMapping } from "./build.ts";
 import { BaseContext } from "./context.ts";
@@ -12,48 +12,39 @@ export type Middleware<Params = Record<never, string>> = (
   ctx: MiddlewareContext<Params>,
 ) => Async<Response | void>;
 
-export class RuntimeContext {
+export class ClassicRuntime {
   constructor(
     mappings: RequestMapping[],
-    assets: Record<string, () => Async<string | Uint8Array>>,
+    assets: ReadonlyArray<[string, () => Async<string | Uint8Array>]>,
   ) {
     this.#mappings = mappings;
     this.#assets = assets;
 
     this.#router = new RegExpRouter();
-    for (const [method, pattern, ...target] of mappings) {
-      console.debug("Add", method, pattern, ...target);
+    for (const [method, ...target] of mappings) {
+      const pattern = target[0];
+      console.debug("Add", method, ...target);
       this.#router.add(method, pattern, target);
     }
   }
 
   readonly #mappings: RequestMapping[];
-  readonly #assets: Record<string, () => Async<string | Uint8Array>>;
-  readonly #router: RegExpRouter<[string, ...HandlerParam[]]>;
+  readonly #assets: ReadonlyArray<[string, () => Async<string | Uint8Array>]>;
+  readonly #router: RegExpRouter<[string, string, ...Readonly<HandlerParam>[]]>;
 
   readonly handle = async (req: Request): Promise<Response> => {
-    const url = new URL(req.url);
-    const [matches, stash] = this.#router.match(req.method, url.pathname);
-
-    const rootCtx = new MiddlewareContext<Record<never, string>>(
+    const ctx = new MiddlewareContext<Record<never, string>>(
       asyncNoop,
       this,
       req,
     );
 
-    rootCtx.provide(
-      $path,
-      Object.freeze(
-        url.pathname
-          .split("/")
-          .map(decodeURIComponent),
-      ),
-    );
+    const [matches, stash] = this.#router.match(req.method, ctx.url.pathname);
 
-    rootCtx.provide($runtime, this);
+    ctx.provide($runtime, this);
 
     const mws = matches.map(
-      ([[module, ...params], urlParamsIndices]): Middleware => {
+      ([[pattern, module, ...params], urlParamsIndices]): Middleware => {
         const modQ = import(module).then((
           mod: {
             default: (...meta: Readonly<HandlerParam>[]) => Async<Middleware>;
@@ -69,28 +60,29 @@ export class RuntimeContext {
         );
         return async (ctx) => {
           const mw = await modQ;
+          ctx.provide($matchedPattern, pattern);
           ctx.provide($urlGroups, urlParams);
           return mw(ctx);
         };
       },
     );
 
-    return await chainMiddlewares(...mws)(rootCtx) ??
+    return await chainMiddlewares(...mws)(ctx) ??
       new Response(`Not found`, { status: 404 });
   };
 
-  async #asset(key: string): Promise<string | Uint8Array> {
+  async #asset(key: number): Promise<string | Uint8Array> {
     const asset = this.#assets[key];
-    if (!asset) throw Error(`No built asset named ${key}`);
-    return asset();
+    if (!asset) throw Error(`No built asset with id ${key}`);
+    return asset[1]();
   }
 
-  async asset(key: string): Promise<Uint8Array> {
+  async asset(key: number): Promise<Uint8Array> {
     const asset = await this.#asset(key);
     return typeof asset === "string" ? encoder.encode(asset) : asset;
   }
 
-  async textAsset(key: string): Promise<string> {
+  async textAsset(key: number): Promise<string> {
     const asset = await this.#asset(key);
     return typeof asset === "string" ? asset : decoder.decode(asset);
   }
@@ -101,7 +93,7 @@ export class RuntimeContext {
     const assetsDirectory = join(buildDirectory, "asset");
     const meta: BuildMeta = {
       mappings: this.#mappings,
-      assets: Object.keys(this.#assets),
+      assets: this.#assets.map(([key]) => key),
     };
 
     await Promise.all([
@@ -109,7 +101,7 @@ export class RuntimeContext {
         join(buildDirectory, "meta.json"),
         JSON.stringify(meta),
       ),
-      ...Object.entries(this.#assets).map(async ([key, getContents]) => {
+      ...this.#assets.map(async ([key, getContents]) => {
         const contents = await getContents();
         return typeof contents === "string"
           ? Deno.writeTextFile(join(assetsDirectory, key), contents)
@@ -120,41 +112,45 @@ export class RuntimeContext {
 
   static async read(
     buildDirectory: string = join(Deno.cwd(), ".build"),
-  ): Promise<RuntimeContext> {
+  ): Promise<ClassicRuntime> {
     const meta: BuildMeta = await import(join(buildDirectory, "meta.json"), {
       with: { type: "json" },
     });
-    return new RuntimeContext(
+    return new ClassicRuntime(
       meta.mappings,
-      new Proxy({} as Record<string, () => Promise<Uint8Array>>, {
-        get: (assets, key: string) =>
-          assets[key] ??= () =>
-            Deno.readFile(join(buildDirectory, "asset", key)),
+      new Proxy([] as Array<[string, () => Async<string | Uint8Array>]>, {
+        get: (assets, k: string) => {
+          const key = parseInt(k);
+          const hint = meta.assets[key];
+          return assets[key] ??= [
+            hint,
+            () => Deno.readFile(join(buildDirectory, "asset", hint)),
+          ];
+        },
       }),
     );
   }
 }
 
-export const load = (buildDirectory?: string): Promise<RuntimeContext> =>
-  RuntimeContext.read(buildDirectory);
+export const load = (buildDirectory?: string): Promise<ClassicRuntime> =>
+  ClassicRuntime.read(buildDirectory);
 
-export const $runtime = new Key<RuntimeContext>("runtime");
+export const $runtime = new Key<ClassicRuntime>("runtime");
 const $urlGroups = new Key<Record<string, string>>("urlGroups");
-const $path = new Key<readonly string[]>("path");
-const $currentPath = new Key<readonly string[]>("currentPath");
+const $matchedPattern = new Key<string>("matchedPattern");
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export class RequestContext<Params> extends BaseContext {
-  constructor(runtime: RuntimeContext, req: Request);
-  constructor(context: RequestContext<unknown>);
+export class ClassicRequest<Params> extends BaseContext {
+  constructor(runtime: ClassicRuntime, req: Request);
+  constructor(context: ClassicRequest<unknown>);
   // deno-lint-ignore constructor-super
   constructor(
-    runtimeOrCtx: RuntimeContext | RequestContext<unknown>,
+    runtimeOrCtx: ClassicRuntime | ClassicRequest<unknown>,
     req?: Request,
   ) {
-    if (runtimeOrCtx instanceof RequestContext) {
+    if (runtimeOrCtx instanceof ClassicRequest) {
       super(runtimeOrCtx);
       this.#runtime = runtimeOrCtx.#runtime;
       this.#request = runtimeOrCtx.#request;
@@ -165,8 +161,8 @@ export class RequestContext<Params> extends BaseContext {
     }
   }
 
-  readonly #runtime: RuntimeContext;
-  get runtime(): RuntimeContext {
+  readonly #runtime: ClassicRuntime;
+  get runtime(): ClassicRuntime {
     return this.#runtime;
   }
 
@@ -179,19 +175,15 @@ export class RequestContext<Params> extends BaseContext {
     return this.use($urlGroups) as Readonly<Params>;
   }
 
-  get path(): readonly string[] {
-    return this.use($path);
-  }
-
-  get currentPath(): readonly string[] {
-    return this.use($currentPath);
+  get matchedPattern(): string {
+    return this.use($matchedPattern);
   }
 }
 
-export class MiddlewareContext<Params> extends RequestContext<Params> {
+export class MiddlewareContext<Params> extends ClassicRequest<Params> {
   constructor(
     handle: Middleware<Params>,
-    runtime: RuntimeContext,
+    runtime: ClassicRuntime,
     req: Request,
   );
   constructor(
@@ -200,7 +192,7 @@ export class MiddlewareContext<Params> extends RequestContext<Params> {
   );
   constructor(
     handle: Middleware<Params>,
-    runtimeOrCtx: RuntimeContext | RequestContext<unknown>,
+    runtimeOrCtx: ClassicRuntime | ClassicRequest<unknown>,
     req?: Request,
   ) {
     // @ts-ignore TS won't infer this because constructor is overloaded
@@ -212,6 +204,11 @@ export class MiddlewareContext<Params> extends RequestContext<Params> {
 
   async next(): Promise<Response | void> {
     return this.#next(this);
+  }
+
+  #url?: URL;
+  get url() {
+    return this.#url ??= new URL(this.request.url);
   }
 }
 

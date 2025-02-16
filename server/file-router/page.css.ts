@@ -1,36 +1,56 @@
 import { create as createHash } from "@jabr/xxhash64";
+import { concat } from "@std/bytes";
 import { encodeBase64 } from "@std/encoding";
 import { basename } from "@std/path";
 import { transform as transformCss } from "lightningcss";
-import type { FileRoute } from "../file-router.ts";
-import type { Middleware } from "../middleware.ts";
+import { type Build, type Builder, defineBuilder } from "../build.ts";
 import { $addCss } from "../component.ts";
-import type { BuildRoute } from "../mod.ts";
+import type { Middleware } from "../middleware.ts";
 import { serveAsset } from "../plugin/asset.ts";
 
-export const pageCssTpl =
-  <Params>(tpl: TemplateStringsArray): FileRoute<Params> => (r) => {
-    r.useBuild(pageCss({
-      css: encoder.encode(tpl[0]),
-      fileName: "/index.css",
-    }));
+const makeTpl =
+  <T>(cb: (css: Uint8Array) => T) =>
+  (tpl: TemplateStringsArray, ...values: Array<string | Uint8Array>): T => {
+    const parts = values.flatMap((v, i) => [
+      typeof v === "string" ? encoder.encode(v) : v,
+      encoder.encode(tpl[i + 1]),
+    ]);
+    parts.unshift(encoder.encode(tpl[0]));
+    return cb(concat(parts));
   };
 
-export const layoutCssTpl =
-  <Params>(tpl: TemplateStringsArray): FileRoute<Params> => (r) => {
-    r.useBuild(pageCss({
-      css: encoder.encode(tpl[0]),
+export const pageCssTpl: (
+  tpl: TemplateStringsArray,
+  ...values: Array<string | Uint8Array>
+) => Builder<(b: Build) => Promise<void>> = makeTpl((css) =>
+  defineBuilder((r) =>
+    r.use(pageCss, {
+      css,
+      fileName: "/index.css",
+    })
+  )
+);
+
+export const layoutCssTpl: (
+  tpl: TemplateStringsArray,
+  ...values: Array<string | Uint8Array>
+) => Builder<(b: Build) => Promise<void>> = makeTpl((css) =>
+  defineBuilder((r) =>
+    r.use(pageCss, {
+      css,
       fileName: "/layout.css",
       layout: true,
-    }));
-  };
+    })
+  )
+);
 
-export const pageCss = ({ css, fileName, layout }: {
-  css: Uint8Array;
-  fileName: string;
-  layout?: boolean;
-}) =>
-async (route: BuildRoute): Promise<void> => {
+export const pageCss: Builder<
+  (build: Build, opts: {
+    css: Uint8Array;
+    fileName: string;
+    layout?: boolean;
+  }) => Promise<void>
+> = defineBuilder(async (route, { css, fileName, layout }) => {
   const { code, map } = transformCss({
     filename: fileName,
     code: css,
@@ -55,7 +75,7 @@ async (route: BuildRoute): Promise<void> => {
 
   if (layout) route.segment("/*").method("GET", import.meta.url, path, true);
   else route.method("GET", import.meta.url, path);
-};
+});
 
 export default (cssFileName: string): Middleware => (ctx) => {
   ctx.use($addCss, cssFileName);

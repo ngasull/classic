@@ -7,7 +7,7 @@ import type { Key } from "./key.ts";
  */
 export interface Context extends BaseContext {}
 
-type Parameters1N<Fn extends (_: never, ...args: never[]) => unknown> =
+export type Parameters1N<Fn extends (_: never, ...args: never[]) => unknown> =
   Fn extends (_: never, ...args: infer Args) => unknown ? Args : never;
 
 /**
@@ -67,15 +67,18 @@ export abstract class BaseContext {
     if (typeof keyOrUse === "function") {
       return keyOrUse(this, ...args);
     } else {
-      if (this.#store.has(keyOrUse)) {
-        return this.#store.get(keyOrUse) as T;
-      } else if (this.#parent) {
-        return this.#parent.use(keyOrUse);
-      } else {
-        throw new Error(
-          `Looking up unset context "${keyOrUse.description ?? ""}"`,
-        );
+      // deno-lint-ignore no-this-alias
+      let node: Context | undefined = this;
+      while (node) {
+        if (node.#store.has(keyOrUse)) {
+          return node.#store.get(keyOrUse) as T;
+        }
+        node = node.#parent;
       }
+
+      throw new Error(
+        `Looking up unset context "${keyOrUse.description ?? ""}"`,
+      );
     }
   }
 
@@ -120,15 +123,12 @@ export abstract class BaseContext {
   }
 
   /**
-   * Reach top-level context
-   *
-   * Used as a function in order to allow casting to the right {@linkcode Context}, such as `ctx.root<RequestContext>()`.
-   * Returns root as `this`' type by default.
+   * Top-level context
    *
    * @returns Top-level context
    */
-  root<T extends Context>(this: T): T {
-    return this.#root as T;
+  get root(): BaseContext {
+    return this.#root;
   }
 
   /**

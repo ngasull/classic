@@ -1,11 +1,8 @@
-import { define, element, shadow } from "@classic/element";
-import { render } from "@classic/element/jsx";
 import { morph } from "@classic/morph";
 import {
   domParse,
   listen,
   preventDefault,
-  querySelector,
   remove,
   replaceWith,
   timeout,
@@ -15,43 +12,25 @@ const { document, history, location, Promise } = globalThis;
 
 const suspenseDelay = 500;
 
+let needsInit = 1;
+let submitting = 0;
 let currentNavigateQ: Promise<unknown> | 0;
 
-const ccFrom = "cc-from";
-const ccAction = "cc-action";
-const ccRoute = "cc-route";
 const fetchingClass = "cc-fetching";
 
 const navigate = async (href: string) => {
   let url = new URL(href, location.origin),
-    rootSlot = querySelector(ccRoute)!,
-    slot = rootSlot,
-    child: Element | null,
-    pathAttr: string | null,
-    currentFrom: string[] = [], // Contains dynamic routes too
     navigateQ: Promise<void | Document>,
-    resQ: Promise<Document>,
+    receivedDocQ: Promise<Document>,
     rootClassList = document.documentElement.classList;
-
-  // Fallback to regular navigation if page defines no route
-  if (!rootSlot) navigateFallback(href);
 
   if (location.href != href) {
     history.pushState(0, "", href);
   }
 
-  while ((child = querySelector(ccRoute, slot))) {
-    pathAttr = slot.getAttribute("path");
-    if (!pathAttr) break;
-    currentFrom.push(pathAttr);
-    slot = child;
-  }
-
-  url.searchParams.set(ccFrom, currentFrom.join("/"));
-
   navigateQ = currentNavigateQ = Promise.race([
     timeout(suspenseDelay),
-    resQ = Promise.resolve(
+    receivedDocQ = Promise.resolve(
       fetch(url).then((res): Promise<Document> =>
         res.redirected
           ? Promise.reject(navigate(res.url))
@@ -67,69 +46,8 @@ const navigate = async (href: string) => {
 
   if (!await navigateQ) rootClassList.add(fetchingClass);
 
-  morph(document, await resQ);
-  // receivedSlot = querySelector(ccRoute, receivedDoc.body),
-  // title = receivedDoc.title,
-  // currentHead: Record<string, Element> = {},
-  // i = 0,
-  // seg: string;
-
-  // if (!receivedSlot) navigateFallback(href);
-
-  // // ! \\ `reqQ` needs to be awaited from here, so `resFrom` is available
-  // // ! \\ If `resFrom` is null, it means SSG or cache result
-  // slot = rootSlot;
-  // for (seg of resFrom! ? resFrom.split("/") : []) {
-  //   // We must already have all the layouts assumed by CC-From
-  //   if (
-  //     seg != currentFrom[i] ||
-  //     !(slot = querySelector(ccRoute, slot)!)
-  //   ) navigateFallback(href);
-  //   i++;
-  // }
-
-  // if (!slot) navigateFallback(href);
-
-  // if (title) document.title = title;
-
-  // forEachSourceable(document.head, (el, key) => currentHead[key] = el);
-  // forEachSourceable(
-  //   receivedDoc.head,
-  //   (el, key) => !currentHead[key] && document.head.append(adoptNode(el)),
-  // );
-
-  // replaceWith(slot, adoptNode(receivedSlot!));
-
-  // // Scripts parsed with DOMParser are not marked to be run
-  // forEach(
-  //   querySelectorAll<HTMLScriptElement>("script", receivedSlot!),
-  //   reviveScript,
-  // );
+  patchDocument(await receivedDocQ);
 };
-
-const navigateFallback = (href: string) => {
-  throw location.href = href;
-};
-
-// const forEachSourceable = (
-//   head: HTMLHeadElement,
-//   cb: (el: HTMLLinkElement | HTMLScriptElement, key: string) => void,
-// ) =>
-//   forEach(
-//     querySelectorAll<HTMLLinkElement | HTMLScriptElement>(
-//       `link,script`,
-//       head,
-//     ),
-//     (el, tagName?: any) =>
-//       cb(
-//         el,
-//         `${tagName = el.tagName}:${
-//           tagName == "LINK"
-//             ? (el as HTMLLinkElement).href
-//             : (el as HTMLScriptElement).src
-//         }`,
-//       ),
-//   );
 
 const isLocal = (href: string) => {
   let origin = location.origin;
@@ -171,75 +89,38 @@ const submit = async (
 
   if (res === 0) formClassList.add(fetchingClass);
   if ((receivedDoc = await resQ)) {
-    morph(document, receivedDoc);
+    patchDocument(receivedDoc);
   }
 };
 
-// const morph = (
-//   src: Node,
-//   target: Node,
-// ): void =>
-//   morphdom(src, target, {
-//     onBeforeNodeAdded(node): any {
-//       let mode: string | null;
-//       if (
-//         (node as Element).tagName == "TEMPLATE" &&
-//         (mode = getShadowRootMode(node as HTMLTemplateElement))
-//       ) {
-//         morph(
-//           shadow(node.parentElement!, { mode: mode as ShadowRootMode }),
-//           (node as HTMLTemplateElement).content,
-//         );
-//         return false;
-//       }
-//       return node;
-//     },
-//     onNodeAdded(node: Node): any {
-//       if (node.nodeType === Node.ELEMENT_NODE) {
-//         if ((node as Element).tagName == "SCRIPT") {
-//           reviveScript(node as HTMLScriptElement);
-//         }
-//         for (
-//           let script of (node as Element).querySelectorAll<HTMLScriptElement>(
-//             "script",
-//           )
-//         ) {
-//           reviveScript(script);
-//         }
-//         for (
-//           let template of (node as Element).querySelectorAll<
-//             HTMLTemplateElement
-//           >(
-//             "template[shadowrootmode]",
-//           )
-//         ) {
-//           morph(
-//             shadow(template.parentElement!, {
-//               mode: getShadowRootMode(template) as ShadowRootMode,
-//             }),
-//             template.content,
-//           );
-//           template.remove();
-//         }
-//       }
-//     },
-//   });
+const patchDocument = (receivedDoc: Document) =>
+  requestAnimationFrame(() => {
+    let div = document.createElement("div"),
+      body = receivedDoc.body;
+    div.append(...body.childNodes);
 
-const reviveScript = (script: HTMLScriptElement) => {
-  let copy = document.createElement("script");
-  copy.text = script.text;
-  replaceWith(script, copy);
-};
+    for (let script of div.querySelectorAll<HTMLScriptElement>("script")) {
+      let copy = document.createElement("script");
+      copy.text = script.text;
+      replaceWith(script, copy);
+    }
 
-/* `shadowRootMode` attribute isn't well-supported yet */
-const getShadowRootMode = (template: HTMLTemplateElement) =>
-  template.getAttribute("shadowrootmode")! as ShadowRootMode;
+    // Execute scripts
+    document.body.append(div);
+    div.remove();
 
-const initRoot = (target: EventTarget | null) => {
-  if (target) {
+    // Take body nodes back
+    body.append(...div.childNodes);
+
+    morph(document, receivedDoc);
+    document.dispatchEvent(new Event("patch"));
+  });
+
+const initRoot = (root: EventTarget | null) => {
+  if (root) {
     let t: EventTarget | null;
     listen(
-      target,
+      root,
       "click",
       (e) =>
         !e.ctrlKey &&
@@ -247,61 +128,37 @@ const initRoot = (target: EventTarget | null) => {
         (t = e.composedPath()[0]) instanceof HTMLAnchorElement &&
         isLocal(t.href) && (preventDefault(e), navigate(t.href)),
     );
+
+    listen(
+      root,
+      "submit",
+      (e) => {
+        let form = e.target as HTMLFormElement,
+          submitter = e.submitter,
+          action = submitter?.getAttribute("formaction") ?? form.action,
+          data = new FormData(form, submitter);
+        if (isLocal(action)) {
+          preventDefault(e);
+          if (form.method == "get") {
+            navigate(
+              // @ts-ignore TS bug: URLSearchParams accepts an Iterable<[string, string]> as per https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams/URLSearchParams#options and FormData is one.
+              action + "?" + new URLSearchParams(data),
+            );
+          } else if (!submitting) {
+            submitting = 1;
+            submit(form, action, data)
+              .finally(() => submitting = 0);
+          }
+        }
+      },
+    );
   }
 };
 
 export const init = () => {
-  initRoot(document.body);
-  listen(window, "popstate", (_) => navigate(location.href));
+  if (needsInit) {
+    needsInit = 0;
+    initRoot(document.body);
+    listen(window, "popstate", (_) => navigate(location.href));
+  }
 };
-
-define(
-  ccRoute,
-  element({
-    defer: true,
-    js(host) {
-      let template = host.querySelector<HTMLTemplateElement>(
-        "template[shadowrootmode]",
-      );
-      if (template && template.parentNode == host.shadowRoot) {
-        render(
-          shadow(host, { mode: getShadowRootMode(template) }),
-          template.content,
-        );
-      }
-      initRoot(shadow(host));
-    },
-  }),
-);
-
-define(
-  ccAction,
-  element({
-    extends: "form",
-    js(host) {
-      let submitting = 0;
-      listen(
-        host,
-        "submit",
-        (e) => {
-          let form = host as unknown as HTMLFormElement,
-            submitter = e.submitter,
-            action = submitter?.getAttribute("formaction") ?? form.action,
-            data = new FormData(form, submitter);
-          if (isLocal(action)) {
-            preventDefault(e);
-            if (form.method == "get") {
-              navigate(
-                // @ts-ignore TS bug: URLSearchParams accepts an Iterable<[string, string]> as per https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams/URLSearchParams#options and FormData is one.
-                action + "?" + new URLSearchParams(data),
-              );
-            } else if (!submitting) {
-              submitting = 1;
-              submit(form, action, data).finally(() => submitting = 0);
-            }
-          }
-        },
-      );
-    },
-  }),
-);
