@@ -1,9 +1,10 @@
 {
   "name": "@classic/js",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "exports": {
     ".": "./mod.ts",
-    "./dom": "./dom.ts"
+    "./dom": "./dom.ts",
+    "./stringify": "./stringify.ts"
   },
   "compilerOptions": {
     "lib": [
