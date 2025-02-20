@@ -1,5 +1,6 @@
 import { join, relative, resolve, toFileUrl } from "@std/path";
 import {
+  Asset,
   type BaseBuild,
   type Build,
   Builder,
@@ -11,9 +12,9 @@ import {
 } from "./build.ts";
 import { type Context, createContext, type Parameters1N } from "./context.ts";
 import { pageCss } from "./file-router/page.css.ts";
-import type { JSONable } from "../js/types.ts";
 import type { Key } from "./key.ts";
 import type { Middleware, MiddlewareContext } from "./middleware.ts";
+import type { Stringifiable } from "../js/stringify.ts";
 
 type Empty = { [n in never]: never };
 
@@ -99,9 +100,7 @@ const scanDir = defineBuilder(async (
       }
 
       const fileMeta = Promise.withResolvers<FileBuildNodeMeta>();
-      const fileMetaAsset = baseBuilder.asset(async () =>
-        JSON.stringify(await fileMeta.promise)
-      );
+      const fileMetaAsset = new Asset(async () => fileMeta.promise);
 
       const fileCtx = new FileBuildBuildContext(url, fileMetaAsset);
       const fileBuilder = new FileBuildBuild(
@@ -227,7 +226,9 @@ export interface FileBuild<Params> extends Build {
       (build: FileBuild<Params>, ...args: never[]) => unknown
     >,
   >(use: B, ...args: BuilderParams<B>): BuilderReturnType<B>;
-  use<B extends Builder<(build: Build, ...args: never[]) => Async<JSONable>>>(
+  use<
+    B extends Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
+  >(
     use: B,
     ...args: BuilderParams<B>
   ): Promise<Awaited<BuilderReturnType<B>>>;
@@ -249,7 +250,7 @@ class FileBuildBuildContext {
 
   constructor(
     public readonly modulePath: string,
-    public readonly metaAsset: number,
+    public readonly metaAsset: Asset,
   ) {}
 }
 
@@ -327,7 +328,9 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
       (build: FileBuild<Params>, ...args: never[]) => unknown
     >,
   >(use: B, ...args: BuilderParams<B>): BuilderReturnType<B>;
-  use<B extends Builder<(build: Build, ...args: never[]) => Async<JSONable>>>(
+  use<
+    B extends Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
+  >(
     use: B,
     ...args: BuilderParams<B>
   ): Promise<Awaited<BuilderReturnType<B>>>;
@@ -336,7 +339,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
       | Key<unknown>
       | ((ctx: Context, ...args: never[]) => unknown)
       | FileBuilder<(build: FileBuild<Params>, ...args: never[]) => unknown>
-      | Builder<(build: Build, ...args: never[]) => Async<JSONable>>,
+      | Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
     ...args: never[]
   ): unknown {
     if (builder instanceof FileBuilder) {
@@ -361,10 +364,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
       return used;
     } else if (builder instanceof Builder) {
       const meta = this.#build.use(builder);
-      this.asset(async () =>
-        // JSON.stringify(undefined) === undefined
-        JSON.stringify(await meta) ?? ""
-      );
+      this.asset(() => meta);
       return Promise.resolve(meta);
     } else if (typeof builder === "function") {
       return this.#context.context.use(builder);
@@ -405,10 +405,10 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
   }
 
   asset(
-    contents: () => Async<string | Uint8Array>,
+    contents: () => Async<Stringifiable | Uint8Array>,
     opts?: { hint?: string },
-  ): number {
-    const asset = this.#build.asset(contents, opts);
+  ): Asset {
+    const asset = new Asset(contents, opts?.hint);
     this.#node.assets.push(asset);
     return asset;
   }
@@ -435,7 +435,7 @@ class FileBuildNode {
 
   constructor(
     public uses: FileBuildNodeMeta[] = [],
-    public assets: number[] = [],
+    public assets: Asset[] = [],
   ) {}
 
   toMeta(): FileBuildNodeMeta {
@@ -455,7 +455,7 @@ class FileBuildNode {
 
 type FileBuildNodeMeta = {
   uses?: readonly FileBuildNodeMeta[];
-  assets?: readonly number[];
+  assets?: readonly Asset[];
 };
 
 class FileBuildRuntimeContext {
@@ -533,7 +533,9 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
       (build: FileBuild<Params>, ...args: never[]) => unknown
     >,
   >(use: B, ...args: BuilderParams<B>): BuilderReturnType<B>;
-  use<B extends Builder<(build: Build, ...args: never[]) => Async<JSONable>>>(
+  use<
+    B extends Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
+  >(
     build: B,
     ...args: BuilderParams<B>
   ): Promise<Awaited<BuilderReturnType<B>>>;
@@ -558,8 +560,7 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
       );
       return build.fn(subCtx, ...args);
     } else if (build instanceof Builder) {
-      return this.#context.ctx.runtime.textAsset(this.asset(null!))
-        .then((json) => json === "" ? undefined : JSON.parse(json));
+      return this.asset(null!).contents();
     } else if (typeof build === "function") {
       return this.#context.ctx.use(build);
     } else {
@@ -594,9 +595,9 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
   }
 
   asset(
-    _contents: () => Async<string | Uint8Array>,
+    _contents: () => Async<Stringifiable | Uint8Array>,
     _opts?: { hint?: string },
-  ): number {
+  ): Asset {
     return this.#node.assets.shift()!;
   }
 
@@ -607,7 +608,7 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
 
 export default async (
   modulePath: string,
-  metaAsset: number,
+  metaAsset: Asset<FileBuildNodeMeta>,
   handlerPath: readonly number[],
 ): Promise<Middleware> => {
   const route = await import(modulePath)
@@ -621,10 +622,8 @@ export default async (
 
   return async (ctx) => {
     const meta = {
-      uses: [JSON.parse(
-        await ctx.runtime.textAsset(metaAsset),
-      )],
-    } as FileBuildNodeMeta;
+      uses: [await metaAsset.contents()],
+    };
 
     const res = Promise.withResolvers<Response | void>();
 

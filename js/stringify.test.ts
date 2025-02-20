@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { stringify } from "./stringify.ts";
 
 Deno.test({
@@ -96,6 +96,64 @@ Deno.test({
         c: "unescaped",
       }),
       `{123:"escaped",a:"unescaped",b:"unescaped","super-power":"escaped",c:"unescaped"}`,
+    );
+  },
+});
+
+Deno.test({
+  name: "strigifies keyed symbols",
+  fn() {
+    assertEquals(stringify(Symbol.for("poulet")), `Symbol.for("poulet")`);
+  },
+});
+
+Deno.test({
+  name: "errors on unkeyed symbols",
+  fn() {
+    assertThrows(() => stringify(Symbol("poulet")));
+  },
+});
+
+Deno.test({
+  name:
+    "preserve properties indexes with keyed symbols, discard those with unkeyed symbols",
+  fn() {
+    assertEquals(
+      stringify({
+        [Symbol.for("poulet")]: "ninja",
+        [Symbol("burger")]: "Hi",
+        foo: "bar",
+      }),
+      `{foo:"bar",[Symbol.for("poulet")]:"ninja"}`,
+    );
+  },
+});
+
+Deno.test({
+  name: "errors when meets functions",
+  fn() {
+    assertThrows(() => stringify({ foo: (() => "Hello") as never }));
+  },
+});
+
+Deno.test({
+  name: "replace objects having specific keys",
+  fn() {
+    const obj = {
+      [Symbol.for("poulet")]: "ninja",
+      [Symbol("burger")]: "Hi",
+      foo: "bar",
+    };
+    assertEquals(
+      stringify(obj, {
+        replace: {
+          [Symbol.for("poulet")]: (o) => {
+            assertEquals(o, obj);
+            return "custom code";
+          },
+        },
+      }),
+      `custom code`,
     );
   },
 });

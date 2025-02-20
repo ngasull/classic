@@ -1,9 +1,20 @@
 import { RegExpRouter } from "@hono/hono/router/reg-exp-router";
+import { exists } from "@std/fs/exists";
 import { join } from "@std/path";
-import type { BuildMeta, HandlerParam, RequestMapping } from "./build.ts";
+import {
+  $asset,
+  type Asset,
+  type HandlerParam,
+  type RequestMapping,
+} from "./build.ts";
 import { BaseContext } from "./context.ts";
 import { Key } from "./key.ts";
 import type { Async } from "./mod.ts";
+import {
+  type Stringifiable,
+  stringify,
+  type StringifyOpts,
+} from "../js/stringify.ts";
 
 const noop = () => {};
 const asyncNoop = async () => {};
@@ -12,13 +23,15 @@ export type Middleware<Params = Record<never, string>> = (
   ctx: MiddlewareContext<Params>,
 ) => Async<Response | void>;
 
+export enum AssetKind {
+  JS = 0,
+  BYTES = 1,
+  STRING = 2,
+}
+
 export class ClassicRuntime {
-  constructor(
-    mappings: RequestMapping[],
-    assets: ReadonlyArray<[string, () => Async<string | Uint8Array>]>,
-  ) {
+  constructor(mappings: RequestMapping[]) {
     this.#mappings = mappings;
-    this.#assets = assets;
 
     this.#router = new RegExpRouter();
     for (const [method, ...target] of mappings) {
@@ -29,10 +42,9 @@ export class ClassicRuntime {
   }
 
   readonly #mappings: RequestMapping[];
-  readonly #assets: ReadonlyArray<[string, () => Async<string | Uint8Array>]>;
   readonly #router: RegExpRouter<[string, string, ...Readonly<HandlerParam>[]]>;
 
-  readonly handle = async (req: Request): Promise<Response> => {
+  readonly fetch = async (req: Request): Promise<Response> => {
     const ctx = new MiddlewareContext<Record<never, string>>(
       asyncNoop,
       this,
@@ -71,76 +83,100 @@ export class ClassicRuntime {
       new Response(`Not found`, { status: 404 });
   };
 
-  async #asset(key: number): Promise<string | Uint8Array> {
-    const asset = this.#assets[key];
-    if (!asset) throw Error(`No built asset with id ${key}`);
-    return asset[1]();
-  }
-
-  async asset(key: number): Promise<Uint8Array> {
-    const asset = await this.#asset(key);
-    return typeof asset === "string" ? encoder.encode(asset) : asset;
-  }
-
-  async textAsset(key: number): Promise<string> {
-    const asset = await this.#asset(key);
-    return typeof asset === "string" ? asset : decoder.decode(asset);
-  }
-
   async write(
     buildDirectory: string = join(Deno.cwd(), ".build"),
   ): Promise<void> {
-    const assetsDirectory = join(buildDirectory, "asset");
-    const meta: BuildMeta = {
-      mappings: this.#mappings,
-      assets: this.#assets.map(([key]) => key),
+    if (await exists(buildDirectory)) {
+      throw Error(
+        `Build directory already exists, specify another or remove first: ${buildDirectory}`,
+      );
+    }
+
+    const assetsDir = join(buildDirectory, "asset");
+    await Deno.mkdir(assetsDir, { recursive: true });
+
+    const assetIndices = new Map<Asset, number>();
+    let assetsToWrite: Asset[] = [];
+    const strigifyAssetOpts: StringifyOpts = {
+      replace: {
+        [$asset]: (asset: Asset) => {
+          let assetIndex = assetIndices.get(asset);
+          if (assetIndex == null) {
+            assetIndices.set(asset, assetIndex = assetIndices.size);
+            assetsToWrite.push(asset);
+          }
+          return asset.hint == null
+            ? `c.asset(${assetIndex})`
+            : `c.asset(${assetIndex},${JSON.stringify(asset.hint)})`;
+        },
+      },
     };
 
-    await Promise.all([
-      Deno.writeTextFile(
-        join(buildDirectory, "meta.json"),
-        JSON.stringify(meta),
-      ),
-      ...this.#assets.map(async ([key, getContents]) => {
-        const contents = await getContents();
-        return typeof contents === "string"
-          ? Deno.writeTextFile(join(assetsDirectory, key), contents)
-          : Deno.writeFile(join(assetsDirectory, key), contents);
-      }),
-    ]);
-  }
+    // Generate handlers to track their assets
+    const meta = stringify(this.#mappings as Stringifiable, strigifyAssetOpts);
 
-  static async read(
-    buildDirectory: string = join(Deno.cwd(), ".build"),
-  ): Promise<ClassicRuntime> {
-    const meta: BuildMeta = await import(join(buildDirectory, "meta.json"), {
-      with: { type: "json" },
-    });
-    return new ClassicRuntime(
-      meta.mappings,
-      new Proxy([] as Array<[string, () => Async<string | Uint8Array>]>, {
-        get: (assets, k: string) => {
-          const key = parseInt(k);
-          const hint = meta.assets[key];
-          return assets[key] ??= [
-            hint,
-            () => Deno.readFile(join(buildDirectory, "asset", hint)),
-          ];
-        },
-      }),
+    const assetKeys = new Set<string>();
+    const assetsMeta: Array<readonly [AssetKind, string]> = [];
+    while (assetsToWrite.length > 0) {
+      const batch = assetsToWrite;
+      assetsToWrite = [];
+
+      assetsMeta.push(
+        ...await Promise.all(batch.map(async (asset, i) => {
+          const contents = await asset.contents();
+
+          const makeKey = (suffix?: string) => {
+            const index = assetsMeta.length + i;
+            const hint = asset.hint ?? index.toString();
+
+            let h = null;
+            let key: string;
+            do {
+              key = h == null ? hint : hint + h++;
+              if (suffix != null) key = key + suffix;
+            } while (assetKeys.has(key));
+
+            assetKeys.add(key);
+            return key;
+          };
+
+          if (contents != null && contents instanceof Uint8Array) {
+            const key = makeKey();
+            await Deno.writeFile(join(assetsDir, key), contents);
+            return [AssetKind.BYTES, key] as const;
+          } else if (typeof contents === "string") {
+            const key = makeKey();
+            await Deno.writeTextFile(join(assetsDir, key), contents);
+            return [AssetKind.STRING, key] as const;
+          } else {
+            const key = makeKey(".js");
+            await Deno.writeTextFile(
+              join(assetsDir, key),
+              `export default (c)=>(${
+                stringify(contents, strigifyAssetOpts)
+              });`,
+            );
+            return [AssetKind.JS, key] as const;
+          }
+        })),
+      );
+    }
+
+    await Deno.writeTextFile(
+      join(buildDirectory, "server.js"),
+      `import { ClassicRuntime, PrebuildContext } from ${
+        JSON.stringify(import.meta.resolve("./prebuilt.ts"))
+      };
+const c = new PrebuildContext(import.meta.dirname, ${stringify(assetsMeta)});
+export default new ClassicRuntime(${meta});
+`,
     );
   }
 }
 
-export const load = (buildDirectory?: string): Promise<ClassicRuntime> =>
-  ClassicRuntime.read(buildDirectory);
-
 export const $runtime = new Key<ClassicRuntime>("runtime");
 const $urlGroups = new Key<Record<string, string>>("urlGroups");
 const $matchedPattern = new Key<string>("matchedPattern");
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 export class ClassicRequest<Params> extends BaseContext {
   constructor(runtime: ClassicRuntime, req: Request);
@@ -211,32 +247,6 @@ export class MiddlewareContext<Params> extends ClassicRequest<Params> {
     return this.#url ??= new URL(this.request.url);
   }
 }
-
-// class SortedValues<T> {
-//   readonly #indices: number[] = [];
-//   readonly #values: T[][] = [];
-
-//   insert(index: number, value: T): void {
-//     for (let i = 0; i < this.#indices.length; i++) {
-//       if (this.#indices[i] === index) {
-//         this.#values[i].push(value);
-//         return;
-//       } else if (index < this.#indices[i]) {
-//         this.#indices.splice(i, 0, index);
-//         this.#values.splice(i, 0, [value]);
-//         return;
-//       }
-//     }
-//     this.#indices.push(index);
-//     this.#values.push([value]);
-//   }
-
-//   shift(): [number, T[]] | undefined {
-//     const index = this.#indices.shift();
-//     const values = this.#values.shift();
-//     return values ? [index!, values] : undefined;
-//   }
-// }
 
 export const chainMiddlewares = <Params>(
   ...middlewares: Middleware<Params>[]

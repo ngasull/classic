@@ -15,7 +15,7 @@ export const mutation: FileBuilder<
       const contentLocation = requestedLocation
         ? requestedLocation
         : new URL(".", ctx.request.url).pathname.slice(0, -1);
-      res = await ctx.runtime.handle(
+      res = await ctx.runtime.fetch(
         new Request(new URL(contentLocation, ctx.request.url)),
       );
       if (res) {

@@ -2,7 +2,7 @@ import { contentType } from "@std/media-types/content-type";
 import { extension } from "@std/media-types/extension";
 import { basename } from "@std/path/basename";
 import { extname } from "@std/path/extname";
-import { type Build, type Builder, defineBuilder } from "../build.ts";
+import { Asset, type Build, type Builder, defineBuilder } from "../build.ts";
 import { Key } from "../key.ts";
 
 const $preferredStaticRoot = new Key<string>("preferredStaticRoot");
@@ -56,12 +56,10 @@ export const serveAsset: Builder<
     if (!ext) headers = { "Content-Type": ct, ...headers };
   }
 
-  const asset = route.asset(contents, { hint: pathHint });
-
   route.root(path).method(
     "GET",
     import.meta.resolve("./asset-serve.ts"),
-    asset,
+    new Asset(contents, pathHint),
     ext,
     headers,
   );
