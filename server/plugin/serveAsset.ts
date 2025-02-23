@@ -2,7 +2,7 @@ import { contentType } from "@std/media-types/content-type";
 import { extension } from "@std/media-types/extension";
 import { basename } from "@std/path/basename";
 import { extname } from "@std/path/extname";
-import { Asset, type Build, type Builder, defineBuilder } from "../build.ts";
+import type { Build } from "../build.ts";
 import { Key } from "../key.ts";
 
 const $preferredStaticRoot = new Key<string>("preferredStaticRoot");
@@ -40,9 +40,10 @@ export interface ServeAssetOptions {
  *   `<link rel="stylesheet" href="${darkModePathname}" />`;
  * ```
  */
-export const serveAsset: Builder<
-  (route: Build, options: ServeAssetOptions) => string
-> = defineBuilder((route, options) => {
+export const serveAsset = (
+  route: Build,
+  options: ServeAssetOptions,
+): string => {
   let { path, pathHint, contents, contentType: ct, headers = {} } = options;
   path ??= (route.get($preferredStaticRoot) ?? "/static/") +
     (pathHint ?? "asset");
@@ -58,11 +59,11 @@ export const serveAsset: Builder<
 
   route.root(path).method(
     "GET",
-    import.meta.resolve("./asset-serve.ts"),
-    new Asset(contents, pathHint),
+    import.meta.resolve("./serveAsset-serve.ts"),
+    route.asset(contents, { hint: pathHint }),
     ext,
     headers,
   );
 
   return path;
-});
+};

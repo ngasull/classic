@@ -2,12 +2,12 @@ import {
   buildModules as _buildModules,
   devModules as _devModules,
 } from "../../build/modules.ts";
-import { type Build, type Builder, defineBuilder } from "../build.ts";
-import { serveAsset } from "../plugin/asset.ts";
+import type { Build } from "../build.ts";
+import { serveAsset } from "../plugin/serveAsset.ts";
 
-export const devModules: Builder<
-  (build: Build) => Promise<Record<string, string>>
-> = defineBuilder(async (build) => {
+export const devModules = async (
+  build: Build,
+): Promise<Record<string, string>> => {
   const root = build.root("/");
 
   const modules = await _devModules({
@@ -37,7 +37,7 @@ export const devModules: Builder<
   );
 
   return moduleMap;
-});
+};
 
 export const buildModules = async <Params>(
   route: Build,

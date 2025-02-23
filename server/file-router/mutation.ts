@@ -1,13 +1,10 @@
-import {
-  defineFileBuilder,
-  type FileBuild,
-  type FileBuilder,
-} from "../file-router.ts";
+import type { FileBuild } from "../file-router.ts";
 import type { Middleware } from "../middleware.ts";
 
-export const mutation: FileBuilder<
-  <Params>(r: FileBuild<Params>, handler: Middleware<Params>) => void
-> = defineFileBuilder((r, handler): void => {
+export const mutation: <Params>(
+  r: FileBuild<Params>,
+  handler: Middleware<Params>,
+) => void = (r, handler): void => {
   r.method("POST", async (ctx) => {
     let res = await handler(ctx);
     if (!res) {
@@ -25,4 +22,4 @@ export const mutation: FileBuilder<
 
     return res;
   });
-});
+};

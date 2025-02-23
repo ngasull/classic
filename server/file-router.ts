@@ -1,22 +1,12 @@
 import { join, relative, resolve, toFileUrl } from "@std/path";
-import {
-  Asset,
-  type BaseBuild,
-  type Build,
-  Builder,
-  type BuilderParams,
-  type BuilderReturnType,
-  defineBuilder,
-  type HandlerParam,
-  Queue,
-} from "./build.ts";
-import { type Context, createContext, type Parameters1N } from "./context.ts";
+import type { Stringifiable } from "../js/stringify.ts";
+import { Asset, type AssetContents } from "./asset.ts";
+import { type Build, Queue } from "./build.ts";
+import { createContext, type Parameters1N } from "./context.ts";
 import { pageCss } from "./file-router/page.css.ts";
 import type { Key } from "./key.ts";
 import type { Middleware, MiddlewareContext } from "./middleware.ts";
-import type { Stringifiable } from "../js/stringify.ts";
-
-type Empty = { [n in never]: never };
+import type { HandlerParam, RequestMapping } from "./server.ts";
 
 type Async<T> = T | PromiseLike<T>;
 
@@ -27,14 +17,14 @@ type Method = typeof httpMethods[number];
 type AsRouteParam<Name extends string | number | symbol> = Name extends
   `[[${infer P}]]` ? P : Name extends `[${infer P}]` ? P : never;
 
-export const fileRouter = defineBuilder(async (
+export const fileRouter = async (
   route: Build,
   base: string,
-): Promise<void> => route.use(scanDir, base, []));
+): Promise<void> => route.use(scanDir, base, []);
 
 const routeRegExp = /^((?:(.+)\.)?route)\.(tsx?|css)$/;
 
-const scanDir = defineBuilder(async (
+const scanDir = async (
   parentBuild: Build,
   baseDir: string,
   parentSegments: string[],
@@ -82,43 +72,38 @@ const scanDir = defineBuilder(async (
     }
   }
 
-  const addRouteFile = defineBuilder(
-    async (baseBuilder: Build, fileName: string) => {
-      const path = join(...parentSegments, fileName);
-      const cwdFilePath = join(baseDir, path);
+  const addRouteFile = async (build: Build, fileName: string) => {
+    const path = join(...parentSegments, fileName);
+    const cwdFilePath = join(baseDir, path);
 
-      const url = toFileUrl(resolve(cwdFilePath)).href;
+    const url = toFileUrl(resolve(cwdFilePath)).href;
 
-      const { default: mod }: { default: FileRoute<unknown> } = await import(
-        url
-      )
-        .catch((e) => {
-          throw new Error(`Failed importing ${url}: ` + e.message);
-        });
-      if (!mod || !(mod instanceof FileBuilder)) {
-        throw new Error(`${url} must \`export default\` a file route builder`);
-      }
+    const { default: mod }: { default: FileRoute<unknown> } = await import(
+      url
+    )
+      .catch((e) => {
+        throw new Error(`Failed importing ${url}: ` + e.message);
+      });
+    if (!mod || typeof mod !== "function") {
+      throw new Error(`${url} must \`export default\` a file route builder`);
+    }
 
-      const fileMeta = Promise.withResolvers<FileBuildNodeMeta>();
-      const fileMetaAsset = new Asset(async () => fileMeta.promise);
+    const fileMeta = Promise.withResolvers<FileBuildNodeMeta>();
+    const fileMetaAsset = new Asset(async () => fileMeta.promise);
+    const [, built] = FileBuildBuild.use(
+      new FileBuildBuildContext(url, fileMetaAsset),
+      build,
+      [],
+      mod,
+    );
+    const [mappings, meta] = await built;
 
-      const fileCtx = new FileBuildBuildContext(url, fileMetaAsset);
-      const fileBuilder = new FileBuildBuild(
-        fileCtx,
-        [],
-        (baseBuilder as BaseBuild).fork(),
-      );
+    for (const [method, pattern, ...params] of mappings) {
+      build.root(pattern).method(method, ...params);
+    }
 
-      fileBuilder.use(mod);
-      const [mappings, meta] = await fileBuilder.close();
-
-      for (const [method, pattern, ...params] of mappings) {
-        baseBuilder.root(pattern).method(method, ...params);
-      }
-
-      fileMeta.resolve(meta.uses![0]);
-    },
-  );
+    fileMeta.resolve(meta);
+  };
 
   if (indexFile) {
     // ! \\ CSS First
@@ -152,7 +137,7 @@ const scanDir = defineBuilder(async (
     parentBuild.segment(segmentToURLPattern(name))
       .use(scanDir, baseDir, [...parentSegments, name]);
   }
-});
+};
 
 const segmentToURLPattern = (segment: string) => {
   const match = segment.match(/^\[(\.\.\.)?([^\]]+)\]$/);
@@ -165,18 +150,6 @@ const segmentToURLPattern = (segment: string) => {
   return optional ? `{/:${optional}}?` : `/:${param}`;
 };
 
-export class FileBuilder<
-  F extends (build: FileBuild<any>, ...args: never[]) => unknown,
-> extends Builder<F> {
-  constructor(f: F) {
-    super(f);
-  }
-}
-
-export const defineFileBuilder = <
-  F extends <Params>(build: FileBuild<Params>, ...args: never[]) => unknown,
->(fn: F): FileBuilder<F> => new FileBuilder(fn);
-
 export const route: {
   <ParamStr extends string, Params>(
     segment: ParamStr,
@@ -187,11 +160,9 @@ export const route: {
   segment: ParamStr | FileRouteFn<Params>,
   fileRoute?: FileRouteFn<Params & RouteParams<ParamStr>>,
 ): FileRoute<Params & RouteParams<ParamStr>> =>
-  new FileBuilder(
-    fileRoute
-      ? (r) => fileRoute(r.segment(segment as ParamStr))
-      : segment as FileRouteFn<Params & RouteParams<ParamStr>>,
-  );
+  fileRoute
+    ? (r) => fileRoute(r.segment(segment as ParamStr))
+    : segment as FileRouteFn<Params & RouteParams<ParamStr>>;
 
 type RouteParams<T extends string> = T extends `${"" | "/"}:${infer P}`
   ? { [param in P]: string }
@@ -199,48 +170,40 @@ type RouteParams<T extends string> = T extends `${"" | "/"}:${infer P}`
 
 type FileRouteFn<Params> = <P extends Params>(r: FileBuild<P>) => Async<void>;
 
-export type FileRoute<Params> = FileBuilder<FileRouteFn<Params>>;
+export type FileRoute<Params> = FileRouteFn<Params>;
 
-export const GET = defineFileBuilder(<Params>(
+export const GET = <Params>(
   builder: FileBuild<Params>,
   handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
-): void => builder.method("GET", handler));
+): void => builder.method("GET", handler);
 
-export const POST = defineFileBuilder(<Params>(
+export const POST = <Params>(
   builder: FileBuild<Params>,
   handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
-): void => builder.method("POST", handler));
+): void => builder.method("POST", handler);
 
-export interface FileBuild<Params> extends Build {
+export interface FileBuild<Params> {
+  root<P extends string>(pattern: P): FileBuild<RouteParams<P>>;
+
   segment<P extends string>(
     segment?: P,
   ): FileBuild<Params & RouteParams<P>>;
 
-  use<T>(key: Key<T>): T;
-  use<F extends (build: Context, ...args: never[]) => unknown>(
-    use: F,
-    ...args: Parameters1N<F>
-  ): ReturnType<F>;
-  use<
-    B extends FileBuilder<
-      (build: FileBuild<Params>, ...args: never[]) => unknown
-    >,
-  >(use: B, ...args: BuilderParams<B>): BuilderReturnType<B>;
-  use<
-    B extends Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
+  build<
+    B extends (build: Build, ...args: never[]) => Async<Stringifiable | void>,
   >(
     use: B,
-    ...args: BuilderParams<B>
-  ): Promise<Awaited<BuilderReturnType<B>>>;
+    ...args: Parameters1N<B>
+  ): Promise<Awaited<ReturnType<B>>>;
+
+  use<B extends (build: FileBuild<Params>, ...args: never[]) => unknown>(
+    use: B,
+    ...args: Parameters1N<B>
+  ): ReturnType<B>;
 
   method(
     method: Method,
     handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
-  ): void;
-  method(
-    method: Method,
-    module: string,
-    ...params: Readonly<HandlerParam>[]
   ): void;
 }
 
@@ -257,10 +220,10 @@ class FileBuildBuildContext {
 class FileBuildBuild<Params> implements FileBuild<Params> {
   constructor(
     context: FileBuildBuildContext,
+    build: Build,
     handlerPath: number[],
-    build: BaseBuild,
-    node = new FileBuildNode(),
-    queue = new Queue(),
+    node: FileBuildNode,
+    queue: Queue,
   ) {
     this.#context = context;
     this.#build = build;
@@ -270,7 +233,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
   }
 
   readonly #context: FileBuildBuildContext;
-  readonly #build: BaseBuild;
+  readonly #build: Build;
 
   readonly #handlerPath: number[];
 
@@ -299,8 +262,8 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
   root<P extends string>(pattern: P): FileBuildBuild<RouteParams<P>> {
     return new FileBuildBuild<RouteParams<P>>(
       this.#context,
-      this.#handlerPath,
       this.#build.root(pattern),
+      this.#handlerPath,
       this.#node,
       this.#queue,
     );
@@ -311,116 +274,106 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
   ): FileBuildBuild<Params & RouteParams<P>> {
     return new FileBuildBuild<Params & RouteParams<P>>(
       this.#context,
-      this.#handlerPath,
       this.#build.segment(segment),
+      this.#handlerPath,
       this.#node,
       this.#queue,
     );
   }
 
-  use<T>(key: Key<T>): T;
-  use<F extends (build: Context, ...args: never[]) => unknown>(
-    use: F,
-    ...args: Parameters1N<F>
-  ): ReturnType<F>;
-  use<
-    B extends FileBuilder<
-      (build: FileBuild<Params>, ...args: never[]) => unknown
-    >,
-  >(use: B, ...args: BuilderParams<B>): BuilderReturnType<B>;
-  use<
-    B extends Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
+  build<
+    B extends (build: Build, ...args: never[]) => Async<Stringifiable | void>,
   >(
     use: B,
-    ...args: BuilderParams<B>
-  ): Promise<Awaited<BuilderReturnType<B>>>;
-  use(
-    builder:
-      | Key<unknown>
-      | ((ctx: Context, ...args: never[]) => unknown)
-      | FileBuilder<(build: FileBuild<Params>, ...args: never[]) => unknown>
-      | Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
-    ...args: never[]
-  ): unknown {
-    if (builder instanceof FileBuilder) {
-      const subCtx = new FileBuildBuild<Params>(
-        this.#context,
-        [...this.#handlerPath, this.#node.useIndex++],
-        this.#build.fork(),
-      );
-      const used = builder.fn(subCtx, ...args);
-
-      this.#queue.queue(async () => {
-        await used;
-        const [mappings, meta] = await subCtx.close();
-
-        for (const [method, pattern, module, ...params] of mappings) {
-          this.#build.root(pattern).method(method, module, ...params);
-        }
-
-        this.#node.uses.push(meta);
-      });
-
-      return used;
-    } else if (builder instanceof Builder) {
-      const meta = this.#build.use(builder);
-      this.asset(() => meta);
-      return Promise.resolve(meta);
-    } else if (typeof builder === "function") {
-      return this.#context.context.use(builder);
-    } else {
-      return this.#context.context.use(builder);
-    }
+    ...args: Parameters1N<B>
+  ): Promise<Awaited<ReturnType<B>>> {
+    const meta = this.#queue.queue(() => this.#build.use(use, ...args));
+    this.asset(() => meta);
+    return Promise.resolve(meta);
   }
 
-  method(
-    method: Method,
-    module: string,
-    ...params: Readonly<HandlerParam>[]
-  ): void;
-  method(
-    method: Method,
-    handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
-  ): void;
-  method(
-    method: Method,
-    handler:
-      | string
-      | ((req: MiddlewareContext<Params>) => Async<void | Response>),
-    ...params: Readonly<HandlerParam>[]
-  ): void {
-    this.#queue.queue(() => {
-      if (typeof handler === "string") {
-        this.#build.method(method, handler, ...params);
-      } else {
-        this.#build.method(
-          method,
-          import.meta.url,
-          this.#context.modulePath,
-          this.#context.metaAsset,
-          [...this.#handlerPath, this.#node.handlerIndex++],
-        );
-      }
-    });
-  }
-
-  asset(
-    contents: () => Async<Stringifiable | Uint8Array>,
+  asset<T extends Stringifiable | Uint8Array>(
+    contents: AssetContents<T>,
     opts?: { hint?: string },
-  ): Asset {
-    const asset = new Asset(contents, opts?.hint);
+  ): Asset<T> {
+    const asset = this.#build.asset(contents, opts);
     this.#node.assets.push(asset);
     return asset;
+  }
+
+  use<B extends (build: FileBuild<Params>, ...args: never[]) => unknown>(
+    use: B,
+    ...args: Parameters1N<B>
+  ): ReturnType<B> {
+    const [used, built] = FileBuildBuild.use<Params, B>(
+      this.#context,
+      this.#build,
+      [...this.#handlerPath, this.#node.useIndex++],
+      use,
+      ...args,
+    );
+
+    this.#queue.queue(async () => {
+      const [mappings, meta] = await built;
+
+      for (const [method, pattern, module, ...params] of mappings) {
+        this.#build.root(pattern).method(method, module, ...params);
+      }
+
+      this.#node.uses.push(meta);
+    });
+
+    return used;
+  }
+
+  method(
+    method: Method,
+    _handler: (req: MiddlewareContext<Params>) => Async<void | Response>,
+  ): void {
+    this.#queue.queue(() => {
+      this.#build.method(
+        method,
+        import.meta.url,
+        this.#context.modulePath,
+        this.#context.metaAsset,
+        [...this.#handlerPath, this.#node.handlerIndex++],
+      );
+    });
   }
 
   get pattern(): string {
     return this.#build.pattern;
   }
 
-  async close() {
-    await this.#queue.close();
-    const mappings = await this.#build.close();
-    return [mappings, this.#node.toMeta()] as const;
+  static use<
+    Params,
+    B extends (build: FileBuild<Params>, ...args: never[]) => unknown,
+  >(
+    context: FileBuildBuildContext,
+    build: Build,
+    handlerPath: number[],
+    use: B,
+    ...args: Parameters1N<B>
+  ): [ReturnType<B>, Promise<[RequestMapping[], FileBuildNodeMeta]>] {
+    const node = new FileBuildNode();
+    const queue = new Queue();
+    const mappings: RequestMapping[] = [];
+    const fileBuild = new FileBuildBuild<Params>(
+      context,
+      build,
+      handlerPath,
+      node,
+      queue,
+    );
+    const used = use(fileBuild, ...args) as ReturnType<B>;
+    return [
+      used,
+      (async () => {
+        await used;
+        await queue.close();
+        return [mappings, node.toMeta()];
+      })(),
+    ];
   }
 }
 
@@ -502,7 +455,7 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
     this.#context.ctx.delete(key);
   }
 
-  root(pattern: string): Build {
+  root<P extends string>(pattern: P): FileBuild<RouteParams<P>> {
     return new FileBuildRuntime(
       this.#context,
       pattern,
@@ -523,49 +476,38 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
     );
   }
 
-  use<T>(key: Key<T>): T;
-  use<F extends (build: Context, ...args: never[]) => unknown>(
-    use: F,
-    ...args: Parameters1N<F>
-  ): ReturnType<F>;
-  use<
-    B extends FileBuilder<
-      (build: FileBuild<Params>, ...args: never[]) => unknown
-    >,
-  >(use: B, ...args: BuilderParams<B>): BuilderReturnType<B>;
-  use<
-    B extends Builder<(build: Build, ...args: never[]) => Async<Stringifiable>>,
+  build<
+    B extends (build: Build, ...args: never[]) => Async<Stringifiable | void>,
   >(
-    build: B,
-    ...args: BuilderParams<B>
-  ): Promise<Awaited<BuilderReturnType<B>>>;
-  use(
-    build:
-      | Key<unknown>
-      | ((context: Context, ...args: never[]) => unknown)
-      | Builder<(context: FileBuild<Params>, ...args: never[]) => unknown>,
-    ...args: never[]
-  ): unknown {
-    if (build instanceof FileBuilder) {
-      const useIndex = this.#node.useIndex++;
-      const nodeMeta = this.#node.uses[useIndex];
-      const subCtx = new FileBuildRuntime<Params>(
-        this.#context,
-        this.#pattern,
-        nodeMeta ? FileBuildNode.fromMeta(nodeMeta) : undefined,
-        this.#handlerPath.length > 1 &&
-          this.#handlerPath[0] === useIndex
-          ? this.#handlerPath.slice(1)
-          : [],
-      );
-      return build.fn(subCtx, ...args);
-    } else if (build instanceof Builder) {
-      return this.asset(null!).contents();
-    } else if (typeof build === "function") {
-      return this.#context.ctx.use(build);
-    } else {
-      return this.#context.ctx.use(build);
-    }
+    _use: B,
+    ..._args: Parameters1N<B>
+  ): Promise<Awaited<ReturnType<B>>> {
+    return this.asset<Awaited<ReturnType<B>>>(null!).contents();
+  }
+
+  asset<T extends Stringifiable | Uint8Array>(
+    _contents: () => Async<T>,
+    _opts?: { hint?: string },
+  ): Asset<T> {
+    return this.#node.assets.shift()! as Asset<T>;
+  }
+
+  use<B extends (build: FileBuild<Params>, ...args: never[]) => unknown>(
+    use: B,
+    ...args: Parameters1N<B>
+  ): ReturnType<B> {
+    const useIndex = this.#node.useIndex++;
+    const nodeMeta = this.#node.uses[useIndex];
+    const subCtx = new FileBuildRuntime<Params>(
+      this.#context,
+      this.#pattern,
+      nodeMeta ? FileBuildNode.fromMeta(nodeMeta) : undefined,
+      this.#handlerPath.length > 1 &&
+        this.#handlerPath[0] === useIndex
+        ? this.#handlerPath.slice(1)
+        : [],
+    );
+    return use(subCtx, ...args) as ReturnType<B>;
   }
 
   method(
@@ -594,47 +536,43 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
     }
   }
 
-  asset(
-    _contents: () => Async<Stringifiable | Uint8Array>,
-    _opts?: { hint?: string },
-  ): Asset {
-    return this.#node.assets.shift()!;
-  }
-
   get pattern(): string {
     return this.#pattern;
   }
 }
 
-export default async (
+export default async <Params>(
   modulePath: string,
   metaAsset: Asset<FileBuildNodeMeta>,
   handlerPath: readonly number[],
 ): Promise<Middleware> => {
   const route = await import(modulePath)
     .then(({ default: route }) =>
-      route as FileBuilder<(r: FileBuild<Empty>) => Async<void>>
+      route as (r: FileBuild<Params>) => Async<void>
     )
     .catch((e) => {
       console.info("Failed importing %s - see below", modulePath);
       throw e;
     });
 
+  const wrappedNode = FileBuildNode.fromMeta({
+    uses: [await metaAsset.contents()],
+  });
+  const wrappedPath = [0, ...handlerPath];
+
   return async (ctx) => {
-    const meta = {
-      uses: [await metaAsset.contents()],
-    };
+    let res: Async<Response | void> | undefined;
 
-    const res = Promise.withResolvers<Response | void>();
-
-    new FileBuildRuntime(
-      new FileBuildRuntimeContext(ctx, res.resolve),
+    await new FileBuildRuntime<Params>(
+      new FileBuildRuntimeContext(ctx, (r) => {
+        res = r;
+      }),
       ctx.matchedPattern,
-      FileBuildNode.fromMeta(meta),
-      handlerPath,
-    )
-      .use(route);
+      wrappedNode,
+      wrappedPath,
+    ).use(route);
 
-    return res.promise;
+    if (!res) console.warn(`File route didn't hit any handler`);
+    return res;
   };
 };

@@ -1,8 +1,14 @@
-import type { JSONable } from "../js/types.ts";
-import { type Context, createContext } from "./context.ts";
+import type { Stringifiable } from "../js/stringify.ts";
+import type { Context, Parameters1N } from "./context.ts";
 import type { Key } from "./key.ts";
-import { ClassicRuntime } from "./middleware.ts";
+import {
+  ClassicServer,
+  type HandlerParam,
+  type Method,
+  type RequestMapping,
+} from "./server.ts";
 import type { Async } from "./mod.ts";
+import { Asset, type AssetContents } from "./asset.ts";
 
 /**
  * @module
@@ -10,66 +16,120 @@ import type { Async } from "./mod.ts";
  * No need for a central config like other tools such as Vite.
  */
 
-/**
- * Build function wrapper
- *
- * Implementors contain information about when to run.
- */
-export abstract class Builder<F> {
-  constructor(public readonly fn: F) {}
-}
-
-export type BuilderParams<B> = B extends
-  Builder<(_: never, ...args: infer Args) => unknown> ? Args : never;
-
-export type BuilderReturnType<B> = B extends
-  Builder<(_: never, ...args: never[]) => infer R> ? R : never;
-
-class BaseBuilder<F extends (build: Build, ...args: never[]) => unknown>
-  extends Builder<F> {
-  constructor(f: F) {
-    super(f);
-  }
-}
-
-export const defineBuilder = <
-  F extends (build: Build, ...args: never[]) => unknown,
->(fn: F): Builder<F> => new BaseBuilder(fn);
-
-type Method = "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
-
-type MiddlewareReturnType = Response | void | null;
-
-export type HandlerParam = JSONable | undefined;
-
-export type RequestMapping = [
-  Method,
-  string,
-  string,
-  ...Readonly<HandlerParam>[],
-];
-
-type BuilderMapping = [Method, string, Readonly<HandlerParam>[]];
-
 const throwIfRelative = (module: string) => {
   if (/^\.\.?\//.test(module)) {
     throw Error(`Can't import module relatively: ${module}`);
   }
 };
 
-export const build = async (
-  builder:
-    | ((route: Build) => Async<void>)
-    | Builder<(route: Build) => Async<void>>,
-): Promise<ClassicRuntime> => {
-  const context = new BuildContext();
-  const build = new BaseBuild(context, "");
+export class ServerBuilder {
+  constructor(
+    builder: (build: Build) => Async<void>,
+  ) {
+    this.#server = (async () => {
+      const [, mappings] = BaseBuild.use(new Map(), "", builder);
+      return new ClassicServer(await mappings);
+    })();
+  }
 
-  build.use(typeof builder === "function" ? defineBuilder(builder) : builder);
-  const mappings = await build.close();
+  readonly #server: Promise<ClassicServer>;
 
-  return new ClassicRuntime(mappings, context.assets);
+  fetch = async (req: Request): Promise<Response> => {
+    const runtime = await this.runtime;
+    this.fetch = runtime.fetch;
+    return runtime.fetch(req);
+  };
+
+  get runtime(): Promise<ClassicServer> {
+    return this.#server;
+  }
+
+  async prebuild(path?: string): Promise<void> {
+    const runtime = await this.runtime;
+    await runtime.write(path);
+  }
+}
+
+export const defineServer = (
+  builder: (build: Build) => Async<void>,
+): ServerBuilder => {
+  const server = new ServerBuilder(builder);
+
+  if (Deno.args.includes("prebuild")) {
+    server.prebuild();
+  }
+
+  return server;
 };
+
+// enum Phase {
+//   INIT = 0,
+//   RESULT = -1,
+// }
+
+// const $trigger = Symbol("trigger");
+
+// export class Build {
+//   readonly #mappings: RequestMapping[] = [];
+//   readonly #assets = new Map<string, () => Async<string | Uint8Array>>();
+//   #assetsHint = 0;
+//   readonly #callbacks = new Map<
+//     Phase,
+//     Set<(...args: readonly never[]) => void>
+//   >();
+
+//   method(
+//     method: Method,
+//     pattern: string,
+//     module: string,
+//     ...params: Readonly<HandlerParam>[]
+//   ): void {
+//     throwIfRelative(module);
+//     this.#mappings.push([method, pattern, module, ...params as HandlerParam[]]);
+//   }
+
+//   asset(
+//     contents: () => Async<string | Uint8Array>,
+//     { hint = `${this.#assetsHint++}` }: { hint?: string } = {},
+//   ): string {
+//     let i = null;
+//     let key: string;
+//     while (this.#assets.has(key = i == null ? hint : hint + i++));
+//     this.#assets.set(key, contents);
+//     return key;
+//   }
+
+//   async build(): Promise<RuntimeContext> {
+//     return new RuntimeContext(this.#mappings, Object.fromEntries(this.#assets));
+//   }
+
+//   #on(phase: Phase, cb: (...args: readonly never[]) => void): void {
+//     let cbs = this.#callbacks.get(phase);
+//     if (!cbs) this.#callbacks.set(phase, cbs = new Set());
+//     cbs.add(cb);
+//   }
+
+//   /**
+//    * Resolves first after every plugin initialized, before any other step
+//    */
+//   onInit(cb: () => void): void {
+//     return this.#on(Phase.INIT, cb);
+//   }
+
+//   /**
+//    * Resolves after the build has compiled to a runtime context
+//    */
+//   onResult(cb: (result: RuntimeContext) => void) {
+//     return this.#on(Phase.RESULT, cb);
+//   }
+
+//   async [$trigger](phase: Phase, ...args: readonly unknown[]): Promise<void> {
+//     const cbs = this.#callbacks.get(phase);
+//     if (cbs) {
+//       await Promise.all([...cbs].map((cb) => cb(...args as readonly never[])));
+//     }
+//   }
+// }
 
 export class Queue {
   #closed = false;
@@ -84,37 +144,26 @@ export class Queue {
     this.#closed = true;
     await this.#last;
   }
-}
 
-class BuildContext {
-  readonly assets: Array<[string, () => Async<string | Uint8Array>]> = [];
-  readonly context = createContext();
-
-  readonly #assetKeys = new Set<string>();
-
-  addAsset(
-    contents: () => Async<string | Uint8Array>,
-    { hint = `${this.assets.length}` }: { hint?: string } = {},
-  ) {
-    let i = null;
-    let key: string;
-    while (this.#assetKeys.has(key = i == null ? hint : hint + i++));
-    this.#assetKeys.add(key);
-    this.assets.push([key, contents]);
-    return this.assets.length - 1;
+  get closed(): boolean {
+    return this.#closed;
   }
 }
 
 export interface Build extends Omit<Context, "use" | "root"> {
+  use<B extends (build: Build, ...args: never[]) => unknown>(
+    use: B,
+    ...args: Parameters1N<B>
+  ): ReturnType<B>;
+
   root(pattern: string): Build;
 
-  use<T>(key: Key<T>): Promise<Awaited<T>>;
-  use<B extends Builder<(build: Build, ...args: never[]) => unknown>>(
-    use: B,
-    ...args: BuilderParams<B>
-  ): BuilderReturnType<B>;
-
   segment(segment?: string): Build;
+
+  asset<T extends Stringifiable | Uint8Array>(
+    contents: AssetContents<T>,
+    opts?: { hint?: string },
+  ): Asset<T>;
 
   method(
     method: Method,
@@ -122,20 +171,15 @@ export interface Build extends Omit<Context, "use" | "root"> {
     ...params: Readonly<HandlerParam>[]
   ): void;
 
-  asset(
-    contents: () => Async<string | Uint8Array>,
-    opts?: { hint?: string },
-  ): number;
-
   readonly pattern: string;
 }
 
 export class BaseBuild implements Build {
   constructor(
-    context: BuildContext,
+    context: Map<Key<unknown>, unknown>,
     pattern: string,
-    mappings: RequestMapping[] = [],
-    queue: Queue = new Queue(),
+    mappings: RequestMapping[],
+    queue: Queue,
   ) {
     this.#context = context;
     this.#pattern = pattern;
@@ -143,54 +187,47 @@ export class BaseBuild implements Build {
     this.#queue = queue;
   }
 
-  readonly #context: BuildContext;
+  readonly #context: Map<Key<unknown>, unknown>;
   readonly #pattern: string;
   readonly #mappings: RequestMapping[];
   readonly #queue: Queue;
 
   has<T>(key: Key<T>): boolean {
-    return this.#context.context.has(key);
+    return this.#context.has(key);
   }
 
   get<T>(key: Key<T>): T | undefined {
-    return this.#context.context.get(key);
+    return this.#context.get(key) as T | undefined;
   }
 
   provide<K extends Key<unknown>>(
     key: K,
     value: K extends Key<infer T> ? T : never,
   ): K extends Key<infer T> ? T : never {
-    return this.#context.context.provide(key, value);
+    this.#context.set(key, value);
+    return value;
   }
 
   delete<T>(key: Key<T>): void {
-    this.#context.context.delete(key);
+    this.#context.delete(key);
   }
 
-  use<T>(key: Key<T>): Promise<Awaited<T>>;
-  use<B extends Builder<(build: Build, ...args: never[]) => unknown>>(
+  use<B extends (build: Build, ...args: never[]) => unknown>(
     use: B,
-    ...args: BuilderParams<B>
-  ): BuilderReturnType<B>;
-  use(
-    use:
-      | Key<unknown>
-      | Builder<(build: Build, ...args: never[]) => unknown>,
-    ...args: never[]
-  ) {
-    if (use instanceof Builder) {
-      const subBuild = new BaseBuild(this.#context, this.#pattern);
-      const used = use.fn(subBuild, ...args);
+    ...args: Parameters1N<B>
+  ): ReturnType<B> {
+    const [used, mappings] = BaseBuild.use(
+      this.#context,
+      this.#pattern,
+      use,
+      ...args,
+    );
 
-      this.#queue.queue(async () => {
-        await used;
-        this.#mappings.push(...await subBuild.close());
-      });
+    this.#queue.queue(async () => {
+      this.#mappings.push(...await mappings);
+    });
 
-      return used;
-    } else {
-      return this.#context.context.use(use);
-    }
+    return used;
   }
 
   root(pattern: string): BaseBuild {
@@ -206,39 +243,51 @@ export class BaseBuild implements Build {
     );
   }
 
+  asset<T extends Stringifiable | Uint8Array>(
+    contents: AssetContents<T>,
+    opts?: { hint?: string },
+  ): Asset<T> {
+    return new Asset(contents, opts);
+  }
+
   method(
     method: Method,
     module: string,
     ...params: Readonly<HandlerParam>[]
   ): void {
+    if (this.#queue.closed) {
+      throw Error(
+        `Can't add ${method} ${this.pattern} -> ${module} in closed builder`,
+      );
+    }
     throwIfRelative(module);
+
     this.#queue.queue(() => {
       this.#mappings.push([method, this.pattern, module, ...params]);
     });
-  }
-
-  asset(
-    contents: () => Async<string | Uint8Array>,
-    opts?: { hint?: string },
-  ): number {
-    return this.#context.addAsset(contents, opts);
   }
 
   get pattern(): string {
     return this.#pattern || "/";
   }
 
-  fork() {
-    return new BaseBuild(this.#context, this.#pattern);
-  }
-
-  async close() {
-    await this.#queue.close();
-    return this.#mappings;
+  static use<B extends (build: Build, ...args: never[]) => unknown>(
+    context: Map<Key<unknown>, unknown>,
+    pattern: string,
+    use: B,
+    ...args: Parameters1N<B>
+  ): [ReturnType<B>, Promise<RequestMapping[]>] {
+    const mappings: RequestMapping[] = [];
+    const queue = new Queue();
+    const build = new BaseBuild(context, pattern, mappings, queue);
+    const used = use(build, ...args) as ReturnType<B>;
+    return [
+      used,
+      (async () => {
+        await used;
+        await queue.close();
+        return mappings;
+      })(),
+    ];
   }
 }
-
-export type BuildMeta = {
-  mappings: RequestMapping[];
-  assets: string[];
-};

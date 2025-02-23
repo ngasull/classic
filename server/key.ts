@@ -2,6 +2,8 @@ declare const $type: unique symbol;
 
 /**
  * Abstract key identifying data to be provided contextually.
+ *
+ * Acts like `Symbol` but contains type information.
  * @see {@linkcode ./context | Context}
  */
 export class Key<T> {
