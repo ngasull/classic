@@ -5,8 +5,6 @@
     ".": "./mod.ts",
     "./prebuilt": "./prebuilt.ts",
     "./client/router": "./client-router.ts",
-    "./hono": "./hono.ts",
-    "./hono.d.ts": "./hono.d.ts",
     "./jsx-runtime": "./jsx-runtime.ts"
   },
   "compilerOptions": {

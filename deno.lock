@@ -87,9 +87,6 @@
         "jsr:@std/path@0.213.1"
       ]
     },
-    "@hono/hono@4.4.8": {
-      "integrity": "6b387c666d4a1d2f50fbf7968ecaa73eb37690d08be0f5f3efe2d15dd6a679ce"
-    },
     "@hono/hono@4.6.20": {
       "integrity": "0db02d7b80db67a17e18b434c6105af002412cada5e908013086eb9fa9466a87"
     },
