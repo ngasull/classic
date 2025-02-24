@@ -1,5 +1,5 @@
 import type { FileBuild } from "../file-router.ts";
-import type { Middleware } from "../middleware.ts";
+import type { Middleware } from "../request.ts";
 
 export const mutation: <Params>(
   r: FileBuild<Params>,

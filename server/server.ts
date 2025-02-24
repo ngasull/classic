@@ -8,16 +8,16 @@ import {
   type StringifyOpts,
 } from "../js/stringify.ts";
 import { $asset, type Asset, AssetKind } from "./asset.ts";
+import { createContext } from "./context.ts";
+import type { Async } from "./mod.ts";
 import {
   $matchedPattern,
   $runtime,
   $urlGroups,
-  asyncNoop,
-  chainMiddlewares,
   type Middleware,
-  MiddlewareContext,
-} from "./middleware.ts";
-import type { Async } from "./mod.ts";
+  notFound,
+  runMiddlewares,
+} from "./request.ts";
 
 export type Method = "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
 
@@ -46,17 +46,15 @@ export class ClassicServer {
   readonly #router: RegExpRouter<[string, string, ...Readonly<HandlerParam>[]]>;
 
   readonly fetch = async (req: Request): Promise<Response> => {
-    const ctx = new MiddlewareContext<Record<never, string>>(
-      asyncNoop,
-      this,
-      req,
+    const [matches, stash] = this.#router.match(
+      req.method,
+      new URL(req.url).pathname,
     );
 
-    const [matches, stash] = this.#router.match(req.method, ctx.url.pathname);
+    const context = createContext();
+    context.provide($runtime, this);
 
-    ctx.provide($runtime, this);
-
-    const mws = matches.map(
+    const [first, ...next] = matches.map(
       ([[pattern, module, ...params], urlParamsIndices]): Middleware => {
         const modQ = import(module).then((
           mod: {
@@ -80,8 +78,8 @@ export class ClassicServer {
       },
     );
 
-    return await chainMiddlewares(...mws)(ctx) ??
-      new Response(`Not found`, { status: 404 });
+    return await runMiddlewares(first, next, context, this, req) ??
+      notFound;
   };
 
   async write(

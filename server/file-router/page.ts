@@ -1,19 +1,23 @@
+import type { Context } from "../context.ts";
 import { type FileBuild, type FileRoute, GET } from "../file-router.ts";
 import { jsx } from "../jsx-runtime.ts";
 import { Key } from "../key.ts";
-import { ClassicRequest } from "../middleware.ts";
 import { layoutCssTpl, pageCssTpl } from "./page.css.ts";
 import { render } from "../render.ts";
+import { ClassicRequestBase } from "../request.ts";
 import type { JSX } from "../types.ts";
 import type { BuildContext } from "../../build/context.ts";
 import { resolveModule } from "../plugin/build-serve.ts";
+import type { ClassicServer } from "../server.ts";
 
-class LayoutContext<Params> extends ClassicRequest<Params> {
+class LayoutContext<Params> extends ClassicRequestBase<Params> {
   constructor(
-    parent: ClassicRequest<Params>,
+    context: Context,
+    server: ClassicServer,
+    req: Request,
     public readonly children: JSX.Children,
   ) {
-    super(parent);
+    super(context, server, req);
   }
 }
 
@@ -31,9 +35,16 @@ export const layout:
     ) => FileRoute<{ [n in never]: never }>;
   } = (r, userLayout) => {
     r.segment("/*").use(GET, async (ctx) => {
-      const layouts = ctx.get($layouts) ?? ctx.root.provide($layouts, []);
+      const layouts = ctx.get($layouts) ?? ctx.provide($layouts, []);
       layouts.push(({ children }) =>
-        userLayout(new LayoutContext<any>(ctx, children))
+        userLayout(
+          new LayoutContext<never>(
+            ctx._context,
+            ctx.runtime,
+            ctx.request,
+            children,
+          ),
+        )
       );
       return ctx.next();
     });
@@ -49,7 +60,7 @@ export const page:
   & (
     <Params>(
       r: FileBuild<Params>,
-      page: (context: ClassicRequest<Params>) => JSX.Element,
+      page: (context: ClassicRequestBase<Params>) => JSX.Element,
     ) => Promise<void>
   )
   & {
@@ -62,10 +73,14 @@ export const page:
       const layouts = ctx.get($layouts) ?? [];
       const el = layouts.reduceRight(
         (el, Layout) => jsx(Layout, null, el),
-        jsx(() => userPage(new ClassicRequest(ctx))),
+        jsx(() =>
+          userPage(
+            new ClassicRequestBase(ctx._context, ctx.runtime, ctx.request),
+          )
+        ),
       );
       return new Response(
-        render(el, { context: ctx, resolve: ctx.use(resolveModule) }),
+        render(el, { context: ctx._context, resolve: ctx.use(resolveModule) }),
         {
           headers: {
             "Content-Type": "text/html; charset=UTF-8",

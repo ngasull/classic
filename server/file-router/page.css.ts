@@ -6,8 +6,8 @@ import { transform as transformCss } from "lightningcss";
 import type { Build } from "../build.ts";
 import { $addCss } from "../component.ts";
 import type { FileBuild } from "../file-router.ts";
-import type { Middleware } from "../middleware.ts";
 import { serveAsset } from "../plugin/serveAsset.ts";
+import type { Middleware } from "../request.ts";
 
 const makeTpl =
   <T>(cb: (css: Uint8Array) => T) =>
