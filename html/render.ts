@@ -118,7 +118,7 @@ const activate = async (
     const context = createContext();
     context.use(initRefs, refs, "$");
 
-    const { js: activationScript } = await toJS(
+    const { js: activationScript } = toJS(
       () => [
         js`$.ownerDocument==d?setTimeout(${effectsFn}):d.addEventListener("patch",${effectsFn})`,
       ],

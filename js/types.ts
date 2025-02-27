@@ -61,9 +61,7 @@ export type JSable<T = unknown> =
 export type JSMeta<T = unknown, R = false> = Readonly<JSableType<T, R>> & {
   readonly [jsSymbol]: JSMeta<T, R>;
   scope: JSMeta | null;
-  template(
-    context: unknown,
-  ): (string | JSMeta)[] | Promise<(string | JSMeta)[]>;
+  template(_context: unknown): Array<string | JSMeta>;
   thenable?: JSMeta;
   isAwaited?: boolean;
   isntAssignable?: boolean;
@@ -103,11 +101,11 @@ export declare const returnSymbol: unique symbol;
 export type ResourceGroup<
   T extends Readonly<Record<string, JSONable>>,
   U extends string,
-> = ((v: { [k in ParamKeys<U>]: string | number }) => JS<T>) & {
+> = ((v: { [k in ParamKeys<U>]: string | number }) => Promise<JS<T>>) & {
   pattern: U;
   each: (
     values: ReadonlyArray<{ [k in ParamKeys<U>]: string | number }>,
-  ) => Resources<T, U>;
+  ) => Promise<Resources<T, U>>;
 };
 
 export type Resources<

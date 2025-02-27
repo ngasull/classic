@@ -42,9 +42,7 @@ export abstract class JSMetaBase<T = unknown, R = false>
       null,
   ) {}
 
-  template(
-    _context: JSMetaContext,
-  ): (string | JSMetaBase)[] | Promise<(string | JSMetaBase)[]> {
+  template(_context: JSMetaContext): Array<string | JSMetaBase> {
     throw "unimplemented";
   }
 }
@@ -226,6 +224,68 @@ const implicit = (
   }
 };
 
+class JSMetaVar<T = unknown> extends JSMetaBase<T> {
+  constructor(
+    private readonly cb: (context: JSMetaContext) => Array<string | JSMetaBase>,
+    { scope, isntAssignable }: {
+      scope?: JSMetaBase | null;
+      isntAssignable?: boolean;
+    } = {},
+  ) {
+    super(scope);
+    this.isntAssignable = isntAssignable;
+  }
+
+  override template(
+    context: JSMetaContext,
+  ): Array<string | JSMetaBase> {
+    return this.cb(context);
+  }
+
+  [Symbol.for("Deno.customInspect")](): string {
+    return "var";
+  }
+}
+
+class JSMetaURIs extends JSMetaBase<string[]> {
+  constructor(
+    private readonly uris:
+      | readonly string[]
+      | JSable<readonly string[]>
+      | readonly JSable<string>[],
+  ) {
+    super();
+  }
+
+  override template(context: JSMetaContext): (string | JSMetaBase)[] {
+    return Array.isArray(this.uris)
+      ? context.resources
+        ? [
+          "[",
+          ...this.uris.flatMap((uri: string | JSMetaBase, i) => {
+            const tpl: (string | JSMetaBase)[] = typeof uri === "string"
+              ? [
+                ",",
+                context.resources!,
+                "[",
+                String(context.resources!.indexOf(uri)),
+                "]",
+              ]
+              : [",", uri];
+            if (!i) tpl.shift();
+            return tpl;
+          }),
+          "]",
+        ]
+        : []
+      : [(this.uris as JSable)[jsSymbol]];
+  }
+
+  [Symbol.for("Deno.customInspect")](): string {
+    return `$(${this.uris})`;
+  }
+}
+
 class JSMetaObject extends JSMetaBase {
   private parts: (string | JSMetaBase)[];
 
@@ -384,14 +444,14 @@ type ToJSResult<A extends string[]> = {
   args: A;
 };
 
-export const toJS = async <A extends readonly unknown[]>(
+export const toJS = <A extends readonly unknown[]>(
   f: Fn<A, unknown>,
   { resolve, isServer = false, context: user }: {
     resolve?: Resolver;
     isServer?: boolean;
     context?: Context;
   } = {},
-): Promise<ToJSResult<{ -readonly [I in keyof A]: string }>> => {
+): ToJSResult<{ -readonly [I in keyof A]: string }> => {
   const globalFn = new JSMetaFunction(f as Fn<readonly never[], unknown>, {
     scoped: false,
   });
@@ -439,7 +499,7 @@ export const toJS = async <A extends readonly unknown[]>(
 
       if (!refToChildren.has(meta)) {
         const children: JSMetaBase[] = [];
-        for (const c of await meta.template(context)) {
+        for (const c of meta.template(context)) {
           if (typeof c !== "string") children.push(c);
         }
         refToChildren.set(meta, children);
@@ -525,7 +585,7 @@ export const toJS = async <A extends readonly unknown[]>(
   const argsName = globalFn.args.map((a) =>
     (a.template(context) as string[]).join("")
   ) as { -readonly [I in keyof A]: string };
-  const globalBodyStr = await metaToJS(context, globalBody);
+  const globalBodyStr = metaToJS(context, globalBody);
 
   return {
     js: globalBody.isExpression(context)
@@ -553,11 +613,11 @@ const mkMetaContext = (
   resolve,
 });
 
-const metaToJS = async (
+const metaToJS = (
   context: JSMetaContext,
   meta: JSMetaBase,
   declare?: boolean,
-): Promise<string> => {
+): string => {
   const parts = [];
   const templates: (string | JSMetaBase)[] = [meta];
 
@@ -571,7 +631,7 @@ const metaToJS = async (
         else parts.push(d);
       } else {
         declare = false;
-        templates.unshift(...await first.template(context));
+        templates.unshift(...first.template(context));
       }
     }
   }
@@ -611,7 +671,7 @@ const jsUtils = {
   },
 
   eval: async <T>(expr: JSable<T>): Promise<T> => {
-    const { js: rawJS } = await toJS(() => expr, { isServer: true });
+    const { js: rawJS } = toJS(() => expr, { isServer: true });
     const jsBody = `return(async()=>{${rawJS}})()`;
     try {
       return new Function("document", "window", jsBody)();
@@ -798,18 +858,16 @@ class JSMetaFunctionBody extends JSMetaBase {
       !context.scopedDeclarations.get(this.fnBody)?.length;
   }
 
-  override async template(
-    context: JSMetaContext,
-  ): Promise<(string | JSMetaBase)[]> {
+  override template(context: JSMetaContext): Array<string | JSMetaBase> {
     const { scopedDeclarations, declaredNames } = context;
     const parts: (string | JSMetaBase)[] = ["{"];
 
     const assignments: string[] = [];
     for (const scoped of scopedDeclarations.get(this.fnBody) ?? []) {
       assignments.push(
-        `${declaredNames.get(scoped)}=${
-          scoped.hasResources ? "()=>" : ""
-        }${await metaToJS(context, scoped, true)}`,
+        `${declaredNames.get(scoped)}=${scoped.hasResources ? "()=>" : ""}${
+          metaToJS(context, scoped, true)
+        }`,
       );
     }
 
@@ -831,7 +889,7 @@ class JSMetaFunctionBody extends JSMetaBase {
             this.fnBody[jsSymbol];
           firstBodyMeta && typeof firstBodyMeta !== "string" &&
           !context.declaredNames.has(firstBodyMeta);
-          firstBodyMeta = (await firstBodyMeta.template(context))
+          firstBodyMeta = firstBodyMeta.template(context)
             .find((t) => t !== "")
         ) {
           if (firstBodyMeta instanceof JSMetaObject) {
@@ -946,16 +1004,14 @@ class JSMetaResource<T extends JSONable = JSONable> extends JSMetaBase<T> {
 
   constructor(
     public readonly uri: string,
-    private readonly fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
+    private readonly fetch: T | (() => T),
   ) {
     super();
   }
 
-  override async template(
-    context: JSMetaContext,
-  ): Promise<(string | JSMetaBase)[]> {
+  override template(context: JSMetaContext): Array<string | JSMetaBase> {
     context.resources ??= new JSMetaResources(context);
-    return [await context.resources.peek<T>(this.uri, this.fetch)];
+    return [context.resources.peek<T>(this.uri, this.fetch)];
   }
 
   [Symbol.for("Deno.customInspect")](): string {
@@ -993,15 +1049,13 @@ class JSMetaResources extends JSMetaBase {
     ];
   }
 
-  async peek<T extends JSONable>(
+  peek<T extends JSONable>(
     uri: string,
-    fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
-  ): Promise<JSMetaBase> {
+    fetch: T | (() => T),
+  ): JSMetaBase {
     this.#store[uri] ??= [
       this.#i++,
-      await (typeof fetch === "function"
-        ? (fetch as () => T | PromiseLike<T>)()
-        : fetch),
+      typeof fetch === "function" ? fetch() : fetch,
     ];
 
     return this.context.isServer
@@ -1018,70 +1072,6 @@ class JSMetaResources extends JSMetaBase {
 
   [Symbol.for("Deno.customInspect")](): string {
     return `resources`;
-  }
-}
-
-class JSMetaVar<T = unknown> extends JSMetaBase<T> {
-  constructor(
-    private readonly cb: (
-      context: JSMetaContext,
-    ) => (string | JSMetaBase)[] | Promise<(string | JSMetaBase)[]>,
-    { scope, isntAssignable }: {
-      scope?: JSMetaBase | null;
-      isntAssignable?: boolean;
-    } = {},
-  ) {
-    super(scope);
-    this.isntAssignable = isntAssignable;
-  }
-
-  override template(
-    context: JSMetaContext,
-  ): (string | JSMetaBase)[] | Promise<(string | JSMetaBase)[]> {
-    return this.cb(context);
-  }
-
-  [Symbol.for("Deno.customInspect")](): string {
-    return "var";
-  }
-}
-
-class JSMetaURIs extends JSMetaBase<string[]> {
-  constructor(
-    private readonly uris:
-      | readonly string[]
-      | JSable<readonly string[]>
-      | readonly JSable<string>[],
-  ) {
-    super();
-  }
-
-  override template(context: JSMetaContext): (string | JSMetaBase)[] {
-    return Array.isArray(this.uris)
-      ? context.resources
-        ? [
-          "[",
-          ...this.uris.flatMap((uri: string | JSMetaBase, i) => {
-            const tpl: (string | JSMetaBase)[] = typeof uri === "string"
-              ? [
-                ",",
-                context.resources!,
-                "[",
-                String(context.resources!.indexOf(uri)),
-                "]",
-              ]
-              : [",", uri];
-            if (!i) tpl.shift();
-            return tpl;
-          }),
-          "]",
-        ]
-        : []
-      : [(this.uris as JSable)[jsSymbol]];
-  }
-
-  [Symbol.for("Deno.customInspect")](): string {
-    return `$(${this.uris})`;
   }
 }
 
@@ -1115,7 +1105,7 @@ class JSMetaReassign<T> extends JSMetaBase<T> {
 
 export const resource = <T extends Readonly<Record<string, JSONable>>>(
   uri: string,
-  fetch: T | PromiseLike<T> | (() => T | PromiseLike<T>),
+  fetch: T | (() => T),
 ): JS<T> & { [jsSymbol]: JSMetaResource } =>
   mkJS(new JSMetaResource(uri, fetch));
 
@@ -1126,26 +1116,30 @@ export const resources = <
   pattern: U,
   fetch: (params: { [k in ParamKeys<U>]: string }) => T | Promise<T>,
 ): ResourceGroup<T, U> => {
-  const make = (params: { [k in ParamKeys<U>]: string | number }) => {
+  const make = async (params: { [k in ParamKeys<U>]: string | number }) => {
     const stringParams = (
       Object.fromEntries(
         Object.entries(params).map(([k, v]) => [k, String(v)]),
       )
     ) as { [k in ParamKeys<U>]: string };
 
+    const value = await fetch(stringParams);
     return resource(
       pattern.replaceAll(
         /:([^/]+)/g,
         (_, p) => stringParams[p as ParamKeys<U>],
       ),
-      () => fetch(stringParams),
+      value,
     );
   };
   const group: ResourceGroup<T, U> = Object.assign(make, {
     pattern,
-    each: (
+    each: async (
       values: ReadonlyArray<{ [k in ParamKeys<U>]: string | number }>,
-    ): Resources<T, U> => ({ group, values: values.map(make) }),
+    ): Promise<Resources<T, U>> => ({
+      group,
+      values: await Promise.all(values.map(make)),
+    }),
   });
   return group;
 };
