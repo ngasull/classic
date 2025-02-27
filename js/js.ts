@@ -994,7 +994,7 @@ class JSMetaModuleStore extends JSMetaBase {
   }
 }
 
-const { store } = js.module<typeof import("./dom/store.ts")>(
+export const { store } = js.module<typeof import("./dom/store.ts")>(
   import.meta.resolve("./dom/store.ts"),
 );
 

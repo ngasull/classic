@@ -1,3 +1,6 @@
+/**
+ * Union of HTML tags which may not have any child node
+ */
 export type VoidElement = typeof voidList[number];
 
 const voidList = [

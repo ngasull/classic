@@ -1,6 +1,7 @@
 import { isJSable } from "@classic/js";
 import { mkRef } from "./ref.ts";
 import type {
+  ComponentProps,
   DOMLiteral,
   IntrinsicElementProps,
   JSX,
@@ -66,9 +67,6 @@ const jsx = ((
     props?: NullableProps<ComponentProps<Cpt>>,
   ): JSXElement;
 };
-
-type ComponentProps<Cpt extends JSX.FC<Record<any, any>>> = Cpt extends
-  JSX.FC<infer O> ? O : never;
 
 type NullableProps<Props> =
   | Props

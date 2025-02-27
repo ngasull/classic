@@ -2449,8 +2449,12 @@ export namespace JSXInternal {
 
   export interface HTMLSemanticsElement extends MathMLElement {}
 
-  export interface IntrinsicElements {
-    // HTML
+  interface IntrinsicElements extends HTMLElements {}
+  interface IntrinsicElements extends SVGElements {}
+  interface IntrinsicElements extends MathMLElements {}
+  export { IntrinsicElements };
+
+  export interface HTMLElements {
     a: HTMLAttributes<HTMLAnchorElement>;
     abbr: HTMLAttributes<HTMLElement>;
     address: HTMLAttributes<HTMLElement>;
@@ -2568,8 +2572,9 @@ export namespace JSXInternal {
     var: HTMLAttributes<HTMLElement>;
     video: HTMLAttributes<HTMLVideoElement>;
     wbr: HTMLAttributes<HTMLElement>;
+  }
 
-    //SVG
+  export interface SVGElements {
     svg: SVGAttributes<SVGSVGElement>;
     animate: SVGAttributes<SVGAnimateElement>;
     circle: SVGAttributes<SVGCircleElement>;
@@ -2629,7 +2634,9 @@ export namespace JSXInternal {
     tspan: SVGAttributes<SVGTSpanElement>;
     use: SVGAttributes<SVGUseElement>;
     view: SVGAttributes<SVGViewElement>;
+  }
 
+  export interface MathMLElements {
     // MathML See https://developer.mozilla.org/en-US/docs/Web/MathML
     "annotation-xml": MathMLAttributes<HTMLAnnotationXmlElement>;
     annotation: MathMLAttributes<HTMLAnnotationElement>;

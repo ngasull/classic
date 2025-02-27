@@ -9,12 +9,12 @@ import {
   js,
   type JSable,
   jsResources,
-  type RefTree,
   type Resolver,
+  store,
   toJS,
   unsafe,
 } from "@classic/js";
-import { initRefs, mkRef } from "./ref.ts";
+import { initRefs, mkRef, type RefTree } from "./ref.ts";
 import {
   type DOMLiteral,
   type DOMNode,
@@ -64,13 +64,31 @@ export const escapeScriptContent = (node: DOMLiteral) =>
 
 const encoder = new TextEncoder();
 
+/**
+ * `render` options
+ */
+interface RenderOpts {
+  /** Initial context to provide to rendered components */
+  context?: Context;
+
+  /** Module resolver: server specifier to public specifier */
+  resolve?: Resolver;
+
+  /**
+   * Prepend HTML5 doctype to the stream
+   * @default true
+   */
+  doctype?: boolean;
+}
+
+/**
+ * Render JSX to HTML
+ *
+ * @param root JSX element to render
+ */
 export const render = (
   root: JSX.Element,
-  opts: {
-    context?: Context;
-    resolve?: Resolver;
-    doctype?: boolean;
-  } = {},
+  opts: RenderOpts = {},
 ): ReadableStream<Uint8Array> =>
   new ReadableStream<Uint8Array>({
     start(controller) {
@@ -428,6 +446,12 @@ async function* disambiguateText(
   }
 }
 
+const subEl = js.fn((
+  node: JS<EventTarget>,
+  cb: JS<() => unknown>,
+  uris: JS<string[]>,
+) => store.sub(uris, cb));
+
 const onEvent = js.fn((
   target: JS<EventTarget>,
   type: JS<string>,
@@ -444,7 +468,7 @@ const subAttribute = js.fn((
   k: JS<string>,
   expr: JS<() => unknown>,
 ): JS<void> =>
-  client.sub(
+  subEl(
     target,
     () => {
       const v = expr();
@@ -463,7 +487,7 @@ const subText = js.fn((
 ) =>
   js<
     () => void
-  >`${client.sub}(${node},_=>${node}.textContent=${value}(),${uris})`
+  >`${subEl}(${node},_=>${node}.textContent=${value}(),${uris})`
 );
 
 export const Effect: JSX.FC<{
@@ -474,7 +498,7 @@ export const Effect: JSX.FC<{
     | readonly JSable<string>[];
 }> = ({ js: cb, uris }, context) => {
   const ref = mkRef<Comment>();
-  context.use($effects).push(cb());
+  context.use($effects).push(cb() as JSable<void>);
   // context.use($effects).push(
   //   js.fn(() => {
   //     const effectJs = js.fn(cb);

@@ -1,5 +1,4 @@
 import type { Context } from "@classic/context";
-import type { CustomElement, CustomElements } from "@classic/element";
 import { isJSable, type JS, type JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
 import type { VoidElement } from "./void.ts";
@@ -15,34 +14,42 @@ type IntrinsicServerElement<
     readonly ref?: JSXRef<Ref>;
   };
 
+/**
+ * Specifies JSX types for `@classic/html` plus helpers
+ *
+ * [Specification details on typescriptlang.org](https://www.typescriptlang.org/docs/handbook/jsx.html#the-jsx-namespace)
+ */
 declare namespace JSX {
   // JSX Spec
 
+  /** Instrinsic elements identified by lowercase tag name */
   type IntrinsicElements =
     & {
       [K in keyof JSXInternal.IntrinsicElements]: IntrinsicServerElement<
         JSXInternal.IntrinsicElements[K],
-        JSXInternal.IntrinsicElements[K] extends
-          JSXInternal.HTMLAttributes<infer E> ? E
-          : JSXInternal.IntrinsicElements[K] extends
-            JSXInternal.SVGAttributes<infer E> ? E
-          : never,
+        ComponentProps<K>,
         K extends VoidElement ? never : JSX.Children
       >;
     }
     & {
       "cc-route": IntrinsicServerElement<{ path?: string }, HTMLElement>;
-    }
-    & {
-      [K in keyof CustomElements]: CustomElements[K] extends
-        CustomElement<infer Props, infer Ref>
-        ? IntrinsicServerElement<Props, Ref>
-        : never;
     };
+  // import type { CustomElement, CustomElements } from "@classic/element";
+  // & {
+  //   [K in keyof CustomElements]: CustomElements[K] extends
+  //     CustomElement<infer Props, infer Ref>
+  //     ? IntrinsicServerElement<Props, Ref>
+  //     : never;
+  // }
+
+  /**
+   * Union of all types of values that can be returned by `jsx`
+   */
   type Element = JSXElement | null | PromiseLike<JSXElement | null>;
 
   // Classic helpers
 
+  /** Nodes that may be passed as children to elements and components that accepts them */
   type Children =
     | JSX.Element
     | DOMLiteral
@@ -53,11 +60,13 @@ declare namespace JSX {
     | JSable<DOMLiteral | null | undefined>
     | JSX.Children[];
 
+  /** Functional component */
   type FC<O extends Record<string, unknown> = Record<never, never>> = (
     props: O,
     context: Context,
   ) => JSX.Element;
 
+  /** Parent functional component (accepts children) */
   type PFC<
     O extends Record<string, unknown> = Record<never, never>,
   > = JSX.FC<O & { readonly children?: JSX.Children }>;
@@ -130,7 +139,19 @@ export type IntrinsicElementProps = Readonly<
   >
 >;
 
-export type FCProps<C> = C extends JSX.FC<infer P> ? P : never;
+/**
+ * Infer props from a functional component or an intrinsic HTML/SVG/MathML element
+ */
+export type ComponentProps<C> = C extends keyof JSXInternal.IntrinsicElements
+  ? JSXInternal.IntrinsicElements[C] extends JSXInternal.HTMLAttributes<infer E>
+    ? E
+  : JSXInternal.IntrinsicElements[C] extends JSXInternal.SVGAttributes<infer E>
+    ? E
+  : JSXInternal.IntrinsicElements[C] extends
+    JSXInternal.MathMLAttributes<infer E> ? E
+  : never
+  : C extends JSX.FC<infer P> ? P
+  : never;
 
 export type DOMLiteral = string | number;
 

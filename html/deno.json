@@ -6,6 +6,8 @@
     "./jsx-runtime": "./jsx-runtime.ts"
   },
   "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@classic/html",
     "lib": [
       "deno.ns",
       "DOM",
