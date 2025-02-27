@@ -1,14 +1,14 @@
-import type { Context } from "../context.ts";
-import { type FileBuild, type FileRoute, GET } from "../file-router.ts";
-import { jsx } from "../jsx-runtime.ts";
-import { Key } from "../key.ts";
+import type { BuildContext } from "@classic/build";
+import { type Context, Key } from "@classic/context";
+import { render } from "@classic/html";
+import type { JSX } from "@classic/html";
+import { jsx } from "@classic/html/jsx-runtime";
+import { ClassicRequestBase } from "@classic/server";
+import type { ClassicServer } from "@classic/server/runtime";
+import { resolveModule } from "@classic/server/plugin/build/runtime";
+import { type FileRoute, GET } from "./build.ts";
 import { layoutCssTpl, pageCssTpl } from "./page.css.ts";
-import { render } from "../render.ts";
-import { ClassicRequestBase } from "../request.ts";
-import type { JSX } from "../types.ts";
-import type { BuildContext } from "../../build/context.ts";
-import { resolveModule } from "../plugin/build-serve.ts";
-import type { ClassicServer } from "../server.ts";
+import type { FileBuild } from "./serve.ts";
 
 class LayoutContext<Params> extends ClassicRequestBase<Params> {
   constructor(

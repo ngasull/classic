@@ -1,11 +1,14 @@
-import type { Stringifiable } from "../js/stringify.ts";
-import type { Asset } from "./asset.ts";
-import type { Build } from "./build.ts";
-import type { Parameters1N } from "./context.ts";
-import type { Key } from "./key.ts";
-import type { Async } from "./mod.ts";
-import type { ClassicRequest, Middleware } from "./request.ts";
-import type { HandlerParam, Method } from "./server.ts";
+import type { Key } from "@classic/context";
+import type { Parameters1N } from "@classic/context/create";
+import type { Stringifiable } from "@classic/js/stringify";
+import type {
+  Asset,
+  Async,
+  Build,
+  ClassicRequest,
+  Middleware,
+} from "@classic/server";
+import type { HandlerParam, Method } from "@classic/server/runtime";
 
 export type RouteParams<T extends string> = T extends `${"" | "/"}:${infer P}`
   ? { [param in P]: string }

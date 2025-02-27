@@ -1,4 +1,5 @@
-import { isJSable, mkRef } from "@classic/js";
+import { isJSable } from "@classic/js";
+import { mkRef } from "./ref.ts";
 import type {
   DOMLiteral,
   IntrinsicElementProps,

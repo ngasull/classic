@@ -1,18 +1,24 @@
 {
   "workspace": [
     "./build",
+    "./context",
     "./element",
+    "./html",
     "./js",
     "./morph",
+    "./router",
     "./server",
     "./util"
   ],
   "imports": {
     "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.48",
     "@classic/build": "jsr:@classic/build@0",
+    "@classic/context": "jsr:@classic/context@0",
     "@classic/element": "jsr:@classic/element@0",
+    "@classic/html": "jsr:@classic/html@0",
     "@classic/js": "jsr:@classic/js@0",
     "@classic/morph": "jsr:@classic/morph@0",
+    "@classic/router": "jsr:@classic/router@0",
     "@classic/server": "jsr:@classic/server@0",
     "@classic/util": "jsr:@classic/util@0",
     "@hono/hono": "jsr:@hono/hono@^4.6.20",

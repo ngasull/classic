@@ -1,9 +1,9 @@
+import { Key } from "@classic/context";
 import { contentType } from "@std/media-types/content-type";
 import { extension } from "@std/media-types/extension";
 import { basename } from "@std/path/basename";
 import { extname } from "@std/path/extname";
 import type { Build } from "../build.ts";
-import { Key } from "../key.ts";
 
 const $preferredStaticRoot = new Key<string>("preferredStaticRoot");
 
@@ -59,7 +59,7 @@ export const serveAsset = (
 
   route.root(path).method(
     "GET",
-    import.meta.resolve("./serveAsset-serve.ts"),
+    import.meta.resolve("./serveAsset-runtime.ts"),
     route.asset(contents, { hint: pathHint }),
     ext,
     headers,

@@ -1,7 +1,7 @@
+import type { Context } from "@classic/context";
 import type { CustomElement, CustomElements } from "@classic/element";
 import { isJSable, type JS, type JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
-import type { Context } from "./context.ts";
 import type { VoidElement } from "./void.ts";
 
 type IntrinsicServerElement<

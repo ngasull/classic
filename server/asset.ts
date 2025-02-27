@@ -1,4 +1,4 @@
-import type { Stringifiable } from "../js/stringify.ts";
+import type { Stringifiable } from "@classic/js/stringify";
 import type { Async } from "./mod.ts";
 
 export enum AssetKind {
@@ -7,20 +7,16 @@ export enum AssetKind {
   STRING = 2,
 }
 
-export type AssetContents<
-  T extends Stringifiable | Uint8Array = Stringifiable | Uint8Array,
-> = () => Async<T>;
-
 export const $asset = Symbol("asset");
 
 export class Asset<
   T extends Stringifiable | Uint8Array = Stringifiable | Uint8Array,
 > {
   readonly [$asset] = true;
-  readonly #contents: AssetContents<T>;
+  readonly #contents: () => Async<T>;
   readonly hint?: string;
 
-  constructor(contents: AssetContents<T>, opts?: { hint?: string }) {
+  constructor(contents: () => Async<T>, opts?: { hint?: string }) {
     this.#contents = contents;
     Object.defineProperty(this, "hint", { value: opts?.hint, writable: false });
   }

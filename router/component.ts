@@ -1,10 +1,8 @@
 import type { AppBuild } from "@classic/build";
-import { Fragment, jsx } from "./jsx-runtime.ts";
-import type { JSX } from "./types.ts";
+import { type Context, Key } from "@classic/context";
+import type { JSX, VoidElement } from "@classic/html";
+import { Fragment, jsx } from "@classic/html/jsx-runtime";
 import { transform as transformCss } from "lightningcss";
-import type { VoidElement } from "./void.ts";
-import type { Context } from "./context.ts";
-import { Key } from "./key.ts";
 
 export const $build = new Key<AppBuild>("build");
 

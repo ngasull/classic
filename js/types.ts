@@ -1,12 +1,3 @@
-/**
- * Tuple holding refs attached to a jsx tree render.
- * First holds node index, second represents: children if present, otherwise (undefined) means next ref is associated.
- */
-export type Activation = ([number] | [number, Activation])[];
-
-export type RefTree =
-  ([JSable<EventTarget>] | [JSable<EventTarget>, RefTree])[];
-
 export type JS<T> = _JS<T, []>;
 
 type _JS<T, Depth extends unknown[]> =
@@ -67,19 +58,21 @@ export type JSable<T = unknown> =
   & { readonly [jsSymbol]: JSMeta }
   & JSableType<T, boolean>;
 
-export type JSMeta<Context = unknown> = {
-  scope: JSMeta<Context> | null;
+export type JSMeta<T = unknown, R = false> = Readonly<JSableType<T, R>> & {
+  readonly [jsSymbol]: JSMeta<T, R>;
+  scope: JSMeta | null;
   template(
-    context: Context,
-  ): (string | JSMeta<Context>)[] | Promise<(string | JSMeta<Context>)[]>;
-  thenable?: JSMeta<Context>;
+    context: unknown,
+  ): (string | JSMeta)[] | Promise<(string | JSMeta)[]>;
+  thenable?: JSMeta;
   isAwaited?: boolean;
   isntAssignable?: boolean;
+  mustDeclare?: boolean;
   readonly hasResources?: boolean;
   readonly isOptional?: boolean;
 };
 
-declare const typeSymbol: unique symbol;
+export declare const typeSymbol: unique symbol;
 
 export type JSableType<T, R = false> = {
   [typeSymbol]: T;
@@ -105,7 +98,7 @@ export type JSStatementsReturn<S extends JSStatements<unknown>> = S extends
 
 export type JSReturn = { [returnSymbol]: true };
 export type JSNoReturn = { [returnSymbol]: false };
-declare const returnSymbol: unique symbol;
+export declare const returnSymbol: unique symbol;
 
 export type ResourceGroup<
   T extends Readonly<Record<string, JSONable>>,

@@ -1,3 +1,5 @@
+import { createContext } from "@classic/context/create";
+import { type Context, Key } from "@classic/context";
 import {
   type Fn,
   indexedUris,
@@ -7,14 +9,12 @@ import {
   js,
   type JSable,
   jsResources,
-  mkRef,
   type RefTree,
   type Resolver,
   toJS,
   unsafe,
 } from "@classic/js";
-import { type Context, createContext } from "./context.ts";
-import { Key } from "./key.ts";
+import { initRefs, mkRef } from "./ref.ts";
 import {
   type DOMLiteral,
   type DOMNode,
@@ -25,8 +25,6 @@ import {
   type JSXRef,
 } from "./types.ts";
 import { voidElements } from "./void.ts";
-import { expectedRefsArg, setIndicativeOrder } from "../js/js.ts";
-import { type Activation, jsSymbol } from "../js/types.ts";
 
 const camelRegExp = /[A-Z]/g;
 
@@ -103,63 +101,40 @@ const activate = async (
     write: (chunk: Uint8Array) => void;
   },
 ): Promise<DOMNode | void> => {
-  const { effects, resolve } = opts;
+  const { resolve } = opts;
+  const effects = opts.effects.splice(0, opts.effects.length);
+
   if (effects.length) {
     if (!resolve) {
-      effects.splice(0, effects.length);
       return console.error(
         `Can't attach JS to refs: no module resolver is provided`,
       );
     }
 
-    let order = 0;
-    const indicateRefs = (refs: RefTree) =>
-      refs.forEach(([ref, subTree]) => {
-        setIndicativeOrder(ref, order);
-        if (subTree) indicateRefs(subTree);
-      });
-    indicateRefs(refs);
-
     const effectsFn = js`_=>{${
       effects.length > 1 ? effects.reduce((a, b) => js`${a};${b}`) : effects[0]
     }}`;
-    const { js: activationScript, expectedRefs } = await toJS(
+
+    const context = createContext();
+    context.use(initRefs, refs, "$");
+
+    const { js: activationScript } = await toJS(
       () => [
         js`$.ownerDocument==d?setTimeout(${effectsFn}):d.addEventListener("patch",${effectsFn})`,
       ],
-      { resolve },
+      { resolve, context },
     );
-
-    const expectedRefsSet = new Set(expectedRefs);
-    const filterRefs = (refs: RefTree): Activation =>
-      refs.flatMap(([r, subRefs], i) => {
-        const activation: Activation = [];
-        if (expectedRefsSet.has(r[jsSymbol])) activation.push([i]);
-        if (subRefs) {
-          const subActivation = filterRefs(subRefs);
-          if (subActivation.length) activation.push([i, subActivation]);
-        }
-        return activation;
-      });
-
-    // refsJS[jsSymbol],
-    // "(",
-    // this.currentScript,
-    // ",",
-    // this.refs.length.toString(),
-    // ",",
-    // JSON.stringify(this.#activateReferenced(this.refs)),
-    // ")",
-
-    effects.splice(0, effects.length);
 
     const s = new TextEncoderStream();
     const writer = s.writable.getWriter();
-    writer.write(
-      `{let d=document,$=d.currentScript,n=$,i=0,w=(n,a)=>a.flatMap(([c,s])=>{for(;i<c;i++)n=n.nextSibling;return s?w(n.firstChild,s):n}),${expectedRefsArg};for(;i<${refs.length};i++)n=n.previousSibling;i=0;${expectedRefsArg}=w(n,${
-        JSON.stringify(filterRefs(refs))
-      });(async()=>{${activationScript}})()}`,
-    );
+    // Find refs tree entry node
+    writer.write(`{let d=document,$=d.currentScript;for(let i=0;i<`);
+    writer.write(refs.length.toString());
+    writer.write(`;i++)$=$.previousSibling;`);
+    // Open an async closure to launch effecs into
+    writer.write(`(async()=>{`);
+    writer.write(activationScript);
+    writer.write(`})()}`);
     writer.close();
 
     await writeDOMTree([{
@@ -175,37 +150,6 @@ const activate = async (
     }], opts);
   }
 };
-
-/*
-Inline compact JS version of the following TS code:
-
-const refs = (
-  node: ChildNode,
-  activatedLength: number,
-  activation: Activation,
-): readonly EventTarget[] => {
-  for (i = 0; i < activatedLength; i++) node = node.previousSibling!;
-  i = 0;
-  return walkRefs(node, activation);
-};
-
-const walkRefs = (
-  node: ChildNode,
-  activation: Activation,
-): readonly EventTarget[] =>
-  activation.flatMap(([childIndex, sub]) => {
-    for (; i! < childIndex; i!++) node = node.nextSibling!;
-    return sub ? walkRefs(node.firstChild!, sub) : node;
-  });
-*/
-// const refsJS: JS<
-//   (
-//     node: ChildNode,
-//     activatedLength: number,
-//     activation: Activation,
-//   ) => readonly EventTarget[]
-// > =
-//   js`(n,l,a)=>{let i=0;for(;i<l;i++)n=n.previousSibling;i=0;let w=(n,a)=>a.flatMap(([c,s])=>{for(;i<c;i++)n=n.nextSibling;return s?w(n.firstChild,s):n});return w(n,a)}`;
 
 const writeDOMTree = async (
   tree: Iterable<DOMNode> | AsyncIterable<DOMNode>,

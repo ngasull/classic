@@ -1,7 +1,7 @@
-import type { Context, Parameters1N } from "./context.ts";
-import { Key } from "./key.ts";
+import { type Context, Key } from "@classic/context";
+import type { Parameters1N } from "@classic/context/create";
 import type { Async } from "./mod.ts";
-import type { ClassicServer } from "./server.ts";
+import type { ClassicServer } from "./runtime.ts";
 
 const $url = new Key<URL>("url");
 
@@ -115,8 +115,10 @@ export const runMiddlewares = <Params>(
       context,
       server,
       req,
-      () => next ? runMiddlewares(next, after, context, server, req) : notFound,
+      next ? () => runMiddlewares(next, after, context, server, req) : notFound,
     ),
   );
 
-export const notFound = new Response(`Not found`, { status: 404 });
+const notFoundResponse = new Response(`Not found`, { status: 404 });
+
+export const notFound = () => notFoundResponse.clone();

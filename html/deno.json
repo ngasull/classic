@@ -1,0 +1,16 @@
+{
+  "name": "@classic/html",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./mod.ts",
+    "./jsx-runtime": "./jsx-runtime.ts"
+  },
+  "compilerOptions": {
+    "lib": [
+      "deno.ns",
+      "DOM",
+      "DOM.Iterable",
+      "ES2021"
+    ]
+  }
+}

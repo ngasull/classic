@@ -1,14 +1,14 @@
-import { RegExpRouter } from "@hono/hono/router/reg-exp-router";
-import { exists } from "@std/fs/exists";
-import { join } from "@std/path/join";
+import { createContext } from "@classic/context/create";
 import {
   type Stringifiable,
   type StringifiableExt,
   stringify,
   type StringifyOpts,
-} from "../js/stringify.ts";
+} from "@classic/js/stringify";
+import { RegExpRouter } from "@hono/hono/router/reg-exp-router";
+import { exists } from "@std/fs/exists";
+import { join } from "@std/path/join";
 import { $asset, type Asset, AssetKind } from "./asset.ts";
-import { createContext } from "./context.ts";
 import type { Async } from "./mod.ts";
 import {
   $matchedPattern,
@@ -79,7 +79,7 @@ export class ClassicServer {
     );
 
     return await runMiddlewares(first, next, context, this, req) ??
-      notFound;
+      notFound();
   };
 
   async write(
@@ -163,7 +163,8 @@ export class ClassicServer {
 
     await Deno.writeTextFile(
       join(buildDirectory, "server.js"),
-      `import { ClassicServer, PrebuildContext } from ${
+      `import { ClassicServer } from ${JSON.stringify(import.meta.url)};
+import { PrebuildContext } from ${
         JSON.stringify(import.meta.resolve("./prebuilt.ts"))
       };
 const c = new PrebuildContext(import.meta.dirname, ${stringify(assetsMeta)});

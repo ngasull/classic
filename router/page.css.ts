@@ -1,13 +1,12 @@
+import type { Build, Middleware } from "@classic/server";
+import { serveAsset } from "@classic/server/plugin/serveAsset";
 import { create as createHash } from "@jabr/xxhash64";
 import { concat } from "@std/bytes";
 import { encodeBase64 } from "@std/encoding";
 import { basename } from "@std/path";
 import { transform as transformCss } from "lightningcss";
-import type { Build } from "../build.ts";
-import { $addCss } from "../component.ts";
-import type { FileBuild } from "../file-router.ts";
-import { serveAsset } from "../plugin/serveAsset.ts";
-import type { Middleware } from "../request.ts";
+import { $addCss } from "./component.ts";
+import type { FileBuild } from "./serve.ts";
 
 const makeTpl =
   <T>(cb: (css: Uint8Array) => T) =>

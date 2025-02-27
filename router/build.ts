@@ -1,19 +1,22 @@
+import type { Key } from "@classic/context";
+import { createContext, type Parameters1N } from "@classic/context/create";
+import type { Stringifiable } from "@classic/js/stringify";
 import { join, relative, resolve, toFileUrl } from "@std/path";
-import type { Stringifiable } from "../js/stringify.ts";
-import { Asset, type AssetContents } from "./asset.ts";
-import { type Build, Queue } from "./build.ts";
-import { createContext, type Parameters1N } from "./context.ts";
-import { pageCss } from "./file-router/page.css.ts";
+import {
+  Asset,
+  type Async,
+  type Build,
+  type ClassicRequest,
+} from "@classic/server";
+import { Queue } from "@classic/server/queue";
+import type { Method, RequestMapping } from "@classic/server/runtime";
+import { pageCss } from "./page.css.ts";
 import {
   type FileBuild,
   FileBuildNode,
   type FileBuildNodeMeta,
   type RouteParams,
-} from "./file-router-serve.ts";
-import type { Key } from "./key.ts";
-import type { Async } from "./mod.ts";
-import type { ClassicRequest } from "./request.ts";
-import type { Method, RequestMapping } from "./server.ts";
+} from "./serve.ts";
 
 export const fileRouter = async (
   route: Build,
@@ -262,7 +265,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
   }
 
   asset<T extends Stringifiable | Uint8Array>(
-    contents: AssetContents<T>,
+    contents: () => Async<T>,
     opts?: { hint?: string },
   ): Asset<T> {
     const asset = this.#build.asset(contents, opts);
@@ -302,7 +305,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
     this.#queue.queue(() => {
       this.#build.method(
         method,
-        import.meta.resolve("./file-router-serve.ts"),
+        import.meta.resolve("./serve.ts"),
         this.#context.modulePath,
         this.#context.metaAsset,
         [...this.#handlerPath, this.#node.handlerIndex++],

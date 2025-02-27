@@ -1,6 +1,5 @@
-import type { Resolver } from "../../js/types.ts";
-import type { Context } from "../context.ts";
-import { Key } from "../key.ts";
+import type { Resolver } from "@classic/js";
+import { type Context, Key } from "@classic/context";
 import type { ClassicRequest } from "../request.ts";
 
 const $moduleMap = new Key<Record<string, string>>(

@@ -6,6 +6,8 @@ export type * from "./props.ts";
 
 export type { CustomElement, ElementProps } from "./element.ts";
 
+export type { CustomElements } from "./jsx.ts";
+
 export { onChange, signal, track } from "./signal.ts";
 
 export type { Signal } from "./signal.ts";

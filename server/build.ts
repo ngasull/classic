@@ -1,14 +1,15 @@
-import type { Stringifiable } from "../js/stringify.ts";
-import type { Context, Parameters1N } from "./context.ts";
-import type { Key } from "./key.ts";
+import type { Context, Key } from "@classic/context";
+import type { Parameters1N } from "@classic/context/create";
+import type { Stringifiable } from "@classic/js/stringify";
 import {
   ClassicServer,
   type HandlerParam,
   type Method,
   type RequestMapping,
-} from "./server.ts";
+} from "./runtime.ts";
 import type { Async } from "./mod.ts";
-import { Asset, type AssetContents } from "./asset.ts";
+import { Asset } from "./asset.ts";
+import { Queue } from "./queue.ts";
 
 /**
  * @module
@@ -131,25 +132,6 @@ export const defineServer = (
 //   }
 // }
 
-export class Queue {
-  #closed = false;
-  #last: Promise<unknown> = Promise.resolve();
-
-  queue<T>(cb: () => T): Promise<Awaited<T>> {
-    if (this.#closed) throw Error(`Queue is closed`);
-    return this.#last = this.#last.then(cb) as Promise<Awaited<T>>;
-  }
-
-  async close(): Promise<void> {
-    this.#closed = true;
-    await this.#last;
-  }
-
-  get closed(): boolean {
-    return this.#closed;
-  }
-}
-
 export interface Build extends Omit<Context, "use" | "root"> {
   use<B extends (build: Build, ...args: never[]) => unknown>(
     use: B,
@@ -161,7 +143,7 @@ export interface Build extends Omit<Context, "use" | "root"> {
   segment(segment?: string): Build;
 
   asset<T extends Stringifiable | Uint8Array>(
-    contents: AssetContents<T>,
+    contents: () => Async<T>,
     opts?: { hint?: string },
   ): Asset<T>;
 
@@ -244,7 +226,7 @@ export class BaseBuild implements Build {
   }
 
   asset<T extends Stringifiable | Uint8Array>(
-    contents: AssetContents<T>,
+    contents: () => Async<T>,
     opts?: { hint?: string },
   ): Asset<T> {
     return new Asset(contents, opts);

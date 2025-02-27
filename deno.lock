@@ -867,9 +867,12 @@
     "dependencies": [
       "jsr:@b-fuze/deno-dom@~0.1.48",
       "jsr:@classic/build@0",
+      "jsr:@classic/context@0",
       "jsr:@classic/element@0",
+      "jsr:@classic/html@0",
       "jsr:@classic/js@0",
       "jsr:@classic/morph@0",
+      "jsr:@classic/router@0",
       "jsr:@classic/server@0",
       "jsr:@classic/util@0",
       "jsr:@hono/hono@^4.6.20",

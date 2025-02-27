@@ -1,7 +1,7 @@
 import {
   buildModules as _buildModules,
   devModules as _devModules,
-} from "../../build/modules.ts";
+} from "@classic/build/modules";
 import type { Build } from "../build.ts";
 import { serveAsset } from "../plugin/serveAsset.ts";
 
@@ -32,7 +32,7 @@ export const devModules = async (
 
   build.root("/*").method(
     "GET",
-    import.meta.resolve("./build-serve.ts"),
+    import.meta.resolve("./build-runtime.ts"),
     moduleMap,
   );
 

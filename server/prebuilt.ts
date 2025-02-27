@@ -2,8 +2,6 @@ import { join } from "@std/path/join";
 import { toFileUrl } from "@std/path/to-file-url";
 import { Asset, AssetKind } from "./asset.ts";
 
-export { ClassicServer } from "./server.ts";
-
 export class PrebuildContext {
   constructor(buildDirectory: string, assets: [AssetKind, string][]) {
     this.#buildDirectory = buildDirectory;

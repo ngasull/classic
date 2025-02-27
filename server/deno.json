@@ -4,8 +4,13 @@
   "exports": {
     ".": "./mod.ts",
     "./prebuilt": "./prebuilt.ts",
+    "./runtime": "./runtime.ts",
     "./client/router": "./client-router.ts",
-    "./jsx-runtime": "./jsx-runtime.ts"
+    "./plugin/build": "./plugin/build.ts",
+    "./plugin/build/runtime": "./plugin/build-runtime.ts",
+    "./plugin/serveAsset": "./plugin/serveAsset.ts",
+    "./plugin/serveAsset/runtime": "./plugin/serveAsset-runtime.ts",
+    "./queue": "./queue.ts"
   },
   "compilerOptions": {
     "lib": [
