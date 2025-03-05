@@ -5,9 +5,10 @@ import type { Key } from "./key.ts";
  *
  * Represents values that are exepected given provided {@linkcode Key}
  */
-export interface Context extends BaseContext {}
+export interface Context extends ClassicContext {}
 
-export type Parameters1N<Fn extends (_: never, ...args: never[]) => unknown> =
+/** Utility to infer arguments of a context use function */
+export type UseArgs<Fn extends (_: never, ...args: never[]) => unknown> =
   Fn extends (_: never, ...args: infer Args) => unknown ? Args : never;
 
 /**
@@ -20,10 +21,8 @@ export const createContext = (parent?: Context): Context =>
 
 /**
  * Base {@linkcode Context} implementation
- *
- * Can be extended to expose a richer API
  */
-export abstract class BaseContext {
+class ClassicContext {
   /**
    * @param parent Optionally provide a parent {@linkcode Context}
    */
@@ -58,7 +57,7 @@ export abstract class BaseContext {
    */
   use<Use extends (context: this, ...args: never[]) => unknown>(
     use: Use,
-    ...args: Parameters1N<Use>
+    ...args: UseArgs<Use>
   ): ReturnType<Use>;
   use<T, Args extends unknown[]>(
     keyOrUse: Key<T> | ((context: this, ...args: Args) => T),
@@ -127,7 +126,7 @@ export abstract class BaseContext {
    *
    * @returns Top-level context
    */
-  get root(): BaseContext {
+  get root(): ClassicContext {
     return this.#root;
   }
 
@@ -140,5 +139,3 @@ export abstract class BaseContext {
     this.#store.delete(key);
   }
 }
-
-class ClassicContext extends BaseContext {}

@@ -1,5 +1,4 @@
-import type { Context, Key } from "@classic/context";
-import type { Parameters1N } from "@classic/context/create";
+import type { Context, Key, UseArgs } from "@classic/context";
 import type { Stringifiable } from "@classic/js/stringify";
 import {
   ClassicServer,
@@ -135,7 +134,7 @@ export const defineServer = (
 export interface Build extends Omit<Context, "use" | "root"> {
   use<B extends (build: Build, ...args: never[]) => unknown>(
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): ReturnType<B>;
 
   root(pattern: string): Build;
@@ -196,7 +195,7 @@ export class BaseBuild implements Build {
 
   use<B extends (build: Build, ...args: never[]) => unknown>(
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): ReturnType<B> {
     const [used, mappings] = BaseBuild.use(
       this.#context,
@@ -257,7 +256,7 @@ export class BaseBuild implements Build {
     context: Map<Key<unknown>, unknown>,
     pattern: string,
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): [ReturnType<B>, Promise<RequestMapping[]>] {
     const mappings: RequestMapping[] = [];
     const queue = new Queue();

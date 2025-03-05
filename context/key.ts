@@ -1,10 +1,12 @@
+/** @import { Context } from "./context.ts" */
+
 declare const $type: unique symbol;
 
 /**
  * Abstract key identifying data to be provided contextually.
  *
  * Acts like `Symbol` but contains type information.
- * @see {@linkcode ./context | Context}
+ * @see {@linkcode Context}
  */
 export class Key<T> {
   /**
@@ -13,3 +15,7 @@ export class Key<T> {
   constructor(public readonly description?: string) {}
   declare private [$type]: T;
 }
+
+/** Utility to infer arguments of a context use function */
+export type UseArgs<Fn extends (_: never, ...args: never[]) => unknown> =
+  Fn extends (_: never, ...args: infer Args) => unknown ? Args : never;

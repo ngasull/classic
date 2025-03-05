@@ -1,5 +1,4 @@
-import { type Context, Key } from "@classic/context";
-import type { Parameters1N } from "@classic/context/create";
+import { type Context, Key, type UseArgs } from "@classic/context";
 import type { Async } from "./mod.ts";
 import type { ClassicServer } from "./runtime.ts";
 
@@ -67,7 +66,7 @@ export class ClassicRequestBase<
   use<T>(key: Key<T>): T;
   use<Use extends (context: Context, ...args: never[]) => unknown>(
     use: Use,
-    ...args: Parameters1N<Use>
+    ...args: UseArgs<Use>
   ): ReturnType<Use>;
   use(...args: never[]) {
     // @ts-ignore forward to context

@@ -1,5 +1,4 @@
-import type { Key } from "@classic/context";
-import type { Parameters1N } from "@classic/context/create";
+import type { Key, UseArgs } from "@classic/context";
 import type { Stringifiable } from "@classic/js/stringify";
 import type {
   Asset,
@@ -66,12 +65,12 @@ export interface FileBuild<Params> {
     B extends (build: Build, ...args: never[]) => Async<Stringifiable | void>,
   >(
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): Promise<Awaited<ReturnType<B>>>;
 
   use<B extends (build: FileBuild<Params>, ...args: never[]) => unknown>(
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): ReturnType<B>;
 
   method(
@@ -142,7 +141,7 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
     B extends (build: Build, ...args: never[]) => Async<Stringifiable | void>,
   >(
     _use: B,
-    ..._args: Parameters1N<B>
+    ..._args: UseArgs<B>
   ): Promise<Awaited<ReturnType<B>>> {
     return this.asset<Awaited<ReturnType<B>>>(null!).contents();
   }
@@ -156,7 +155,7 @@ class FileBuildRuntime<Params> implements FileBuild<Params> {
 
   use<B extends (build: FileBuild<Params>, ...args: never[]) => unknown>(
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): ReturnType<B> {
     const useIndex = this.#node.useIndex++;
     const nodeMeta = this.#node.uses[useIndex];

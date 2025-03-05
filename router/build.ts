@@ -1,5 +1,5 @@
-import type { Key } from "@classic/context";
-import { createContext, type Parameters1N } from "@classic/context/create";
+import type { Key, UseArgs } from "@classic/context";
+import { createContext } from "@classic/context/create";
 import type { Stringifiable } from "@classic/js/stringify";
 import { join, relative, resolve, toFileUrl } from "@std/path";
 import {
@@ -257,7 +257,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
     B extends (build: Build, ...args: never[]) => Async<Stringifiable | void>,
   >(
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): Promise<Awaited<ReturnType<B>>> {
     const meta = this.#queue.queue(() => this.#build.use(use, ...args));
     this.asset(() => meta);
@@ -275,7 +275,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
 
   use<B extends (build: FileBuild<Params>, ...args: never[]) => unknown>(
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): ReturnType<B> {
     const [used, built] = FileBuildBuild.use<Params, B>(
       this.#context,
@@ -325,7 +325,7 @@ class FileBuildBuild<Params> implements FileBuild<Params> {
     build: Build,
     handlerPath: number[],
     use: B,
-    ...args: Parameters1N<B>
+    ...args: UseArgs<B>
   ): [ReturnType<B>, Promise<[RequestMapping[], FileBuildNodeMeta]>] {
     const node = new FileBuildNode();
     const queue = new Queue();
