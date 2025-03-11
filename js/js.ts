@@ -758,9 +758,9 @@ const jsUtils = {
     & JSWindowOverrides,
 };
 
-export const js = Object.assign(jsTpl, jsUtils) as
+export const js = Object.freeze(Object.assign(jsTpl, jsUtils)) as
   & typeof jsTpl
-  & typeof jsUtils;
+  & Readonly<typeof jsUtils>;
 
 type JSWindowOverrides = {
   readonly Promise: {
