@@ -1,14 +1,19 @@
 import type { BuildContext } from "@classic/build";
 import { type Context, Key } from "@classic/context";
-import { render } from "@classic/html";
-import type { JSX } from "@classic/html";
-import { jsx } from "@classic/html/jsx-runtime";
-import { ClassicRequestBase } from "@classic/server";
+import { type JSX, render } from "@classic/html";
+import { Fragment, jsx } from "@classic/html/jsx-runtime";
+import { type Build, ClassicRequestBase } from "@classic/server";
 import type { ClassicServer } from "@classic/server/runtime";
-import { resolveModule } from "@classic/server/plugin/build/runtime";
-import { type FileRoute, GET } from "./build.ts";
-import { layoutCssTpl, pageCssTpl } from "./page.css.ts";
+import { serveAsset } from "@classic/server/plugin/asset-serve";
+import { resolveModule } from "@classic/server/plugin/bundle/runtime";
+import { create as createHash } from "@jabr/xxhash64";
+import { concat } from "@std/bytes";
+import { encodeBase64 } from "@std/encoding";
+import { basename } from "@std/path";
+import { transform as transformCss } from "lightningcss";
+import { GET } from "./build.ts";
 import type { FileBuild } from "./serve.ts";
+import { $styleSheets } from "./stylesheets.ts";
 
 class LayoutContext<Params> extends ClassicRequestBase<Params> {
   constructor(
@@ -21,6 +26,11 @@ class LayoutContext<Params> extends ClassicRequestBase<Params> {
   }
 }
 
+/**
+ * Declare a layout
+ *
+ * @param layout JSX component that receives a page or sub-layout in the `children` property of its `context` parameter. Embedded in parent layout if any
+ */
 export const layout:
   & (
     <Params>(
@@ -29,10 +39,24 @@ export const layout:
     ) => void
   )
   & {
+    /**
+     * Template function to build a style sheet to link to current layout
+     *
+     * @example Declare a style sheet that sets dark grey text color for every page of a layout
+     * ```ts
+     * const layoutStyleSheet = route.use(layout.css`
+     *   body {
+     *     color: #666;
+     *   }
+     * `);
+     * ```
+     */
     css: (
       tpl: TemplateStringsArray,
       ...values: Array<string | Uint8Array>
-    ) => FileRoute<{ [n in never]: never }>;
+    ) => (
+      route: FileBuild<{ [n in never]: never }>,
+    ) => Promise<ServedStyleSheet>;
   } = (r, userLayout) => {
     r.segment("/*").use(GET, async (ctx) => {
       const layouts = ctx.get($layouts) ?? ctx.provide($layouts, []);
@@ -52,10 +76,13 @@ export const layout:
 
 const $layouts = new Key<JSX.PFC[]>("layouts");
 
-layout.css = layoutCssTpl;
-
 export const $buildContext = new Key<BuildContext>("build context");
 
+/**
+ * Declare a page
+ *
+ * @param page JSX component to embed in parent layout if any
+ */
 export const page:
   & (
     <Params>(
@@ -64,10 +91,24 @@ export const page:
     ) => Promise<void>
   )
   & {
+    /**
+     * Template function to build a style sheet to link to current page
+     *
+     * @example Declare a style sheet that sets dark grey text color for every page of a layout
+     * ```ts
+     * const layoutStyleSheet = route.use(layout.css`
+     *   body {
+     *     color: #666;
+     *   }
+     * `);
+     * ```
+     */
     css: (
       tpl: TemplateStringsArray,
       ...values: Array<string | Uint8Array>
-    ) => FileRoute<{ [n in never]: never }>;
+    ) => (
+      route: FileBuild<{ [n in never]: never }>,
+    ) => Promise<void>;
   } = async (r, userPage) => {
     r.use(GET, async (ctx) => {
       const layouts = ctx.get($layouts) ?? [];
@@ -90,6 +131,105 @@ export const page:
     });
   };
 
-page.css = pageCssTpl as (
-  tpl: TemplateStringsArray,
-) => FileRoute<{ [n in never]: never }>;
+const makeTpl =
+  <T>(cb: (css: Uint8Array) => T) =>
+  (tpl: TemplateStringsArray, ...values: Array<string | Uint8Array>): T => {
+    const parts = values.flatMap((v, i) => [
+      typeof v === "string" ? encoder.encode(v) : v,
+      encoder.encode(tpl[i + 1]),
+    ]);
+    parts.unshift(encoder.encode(tpl[0]));
+    return cb(concat(parts));
+  };
+
+layout.css = makeTpl((css) => async (r) =>
+  new ServedStyleSheet(
+    await r.build(pageCss, {
+      css,
+      fileName: "/layout.css",
+    }),
+  )
+);
+
+page.css = makeTpl((css) => async (r) => {
+  r.build(async (build) => {
+    const path = await build.use(pageCss, {
+      css,
+      fileName: "/index.css",
+    });
+
+    build.method(
+      "GET",
+      import.meta.resolve("./stylesheets.ts"),
+      path,
+    );
+  });
+});
+
+/** API to link a style sheet */
+class ServedStyleSheet {
+  #path: string;
+
+  #Html?: JSX.FC;
+  #linkElement?: JSX.Element;
+
+  constructor(path: string) {
+    this.#path = path;
+  }
+
+  /** Public path to the style sheet */
+  get path(): string {
+    return this.#path;
+  }
+
+  /** JSX component linking the stylesheet to the page */
+  get Html(): JSX.FC {
+    return this.#Html ??= (_, context) => {
+      const styleSheets = context.get($styleSheets)?.slice() ?? [];
+      styleSheets.unshift(
+        this.#linkElement ??= jsx("link", {
+          rel: "stylesheet",
+          href: this.#path,
+        }),
+      );
+      return Fragment({ children: styleSheets });
+    };
+  }
+}
+
+export const pageCss = async (build: Build, { css, fileName }: {
+  css: Uint8Array;
+  fileName: string;
+}): Promise<string> => {
+  const { code, map } = transformCss({
+    filename: fileName,
+    code: css,
+    sourceMap: true,
+  });
+
+  const cssFileName = `${basename(fileName, ".css")}.${await encodeHash(
+    code,
+  )}.css`;
+
+  const path = build.use(serveAsset, {
+    pathHint: cssFileName,
+    contents: () => code,
+  });
+
+  if (map) {
+    build.use(serveAsset, {
+      path: path + ".map",
+      contents: () => map,
+    });
+  }
+
+  return path;
+};
+
+const encoder = new TextEncoder();
+
+export const encodeHash = async (data: Uint8Array) => {
+  const hasher = await createHash();
+  hasher.update(data);
+  return encodeBase64(hasher.digest() as Uint8Array);
+};

@@ -6,10 +6,10 @@
     "./prebuilt": "./prebuilt.ts",
     "./runtime": "./runtime.ts",
     "./client/router": "./client-router.ts",
-    "./plugin/build": "./plugin/build.ts",
-    "./plugin/build/runtime": "./plugin/build-runtime.ts",
-    "./plugin/serveAsset": "./plugin/serveAsset.ts",
-    "./plugin/serveAsset/runtime": "./plugin/serveAsset-runtime.ts",
+    "./plugin/bundle": "./plugin/bundle-build.ts",
+    "./plugin/bundle/runtime": "./plugin/bundle-runtime.ts",
+    "./plugin/asset-serve": "./plugin/asset-serve-build.ts",
+    "./plugin/asset-serve/runtime": "./plugin/asset-serve-runtime.ts",
     "./queue": "./queue.ts"
   },
   "compilerOptions": {

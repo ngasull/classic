@@ -11,9 +11,10 @@ import { Asset } from "./asset.ts";
 import { Queue } from "./queue.ts";
 
 /**
- * @module
  * Build system designed for backends.
  * No need for a central config like other tools such as Vite.
+ *
+ * @module
  */
 
 const throwIfRelative = (module: string) => {
@@ -50,6 +51,11 @@ export class ServerBuilder {
   }
 }
 
+/**
+ * Define a buildable server application
+ *
+ * @param builder The root builder
+ */
 export const defineServer = (
   builder: (build: Build) => Async<void>,
 ): ServerBuilder => {
@@ -131,31 +137,72 @@ export const defineServer = (
 //   }
 // }
 
+/**
+ * User-facing builder API to interact with current build
+ *
+ * A `Build` is attached to a relative URL pattern
+ */
 export interface Build extends Omit<Context, "use" | "root"> {
+  /**
+   * Senquentially register a builder to run on the build
+   *
+   * @param builder Builder function
+   * @params args `builder`'s extra arguments
+   */
   use<B extends (build: Build, ...args: never[]) => unknown>(
-    use: B,
+    builder: B,
     ...args: UseArgs<B>
   ): ReturnType<B>;
 
+  /**
+   * Interact with the build from an absolute pattern
+   *
+   * @param segment Absolute pattern
+   */
   root(pattern: string): Build;
 
+  /**
+   * Interact with the build from a relative segment
+   *
+   * @param segment Relative segment to append to current pattern
+   */
   segment(segment?: string): Build;
 
+  /**
+   * Register an asset in the build to be required at runtime
+   *
+   * @param contents Asset loading logic
+   * @param options Options
+   */
   asset<T extends Stringifiable | Uint8Array>(
     contents: () => Async<T>,
-    opts?: { hint?: string },
+    options?: BuildAssetOptions,
   ): Asset<T>;
 
+  /**
+   * Register a handler in the build to be required at runtime
+   *
+   * @param method HTTP method
+   * @param module URL to the lazy-loaded handler module
+   * @params params Parameters to pass to the handler
+   */
   method(
     method: Method,
     module: string,
     ...params: Readonly<HandlerParam>[]
   ): void;
 
+  /** Current pattern */
   readonly pattern: string;
 }
 
-export class BaseBuild implements Build {
+/** Options for {@linkcode Build.asset} */
+export interface BuildAssetOptions {
+  /** Hint describing the asset (maintainance purpose) */
+  hint?: string;
+}
+
+class BaseBuild implements Build {
   constructor(
     context: Map<Key<unknown>, unknown>,
     pattern: string,

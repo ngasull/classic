@@ -2,8 +2,8 @@ import {
   buildModules as _buildModules,
   devModules as _devModules,
 } from "@classic/build/modules";
-import type { Build } from "../build.ts";
-import { serveAsset } from "../plugin/serveAsset.ts";
+import type { Build } from "@classic/server";
+import { serveAsset } from "@classic/server/plugin/asset-serve";
 
 export const devModules = async (
   build: Build,
@@ -32,7 +32,7 @@ export const devModules = async (
 
   build.root("/*").method(
     "GET",
-    import.meta.resolve("./build-runtime.ts"),
+    import.meta.resolve("./bundle-runtime.ts"),
     moduleMap,
   );
 
