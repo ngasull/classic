@@ -1,9 +1,9 @@
 import { Key } from "@classic/context";
-import type { Build } from "@classic/server";
 import { contentType } from "@std/media-types/content-type";
 import { extension } from "@std/media-types/extension";
 import { basename } from "@std/path/basename";
 import { extname } from "@std/path/extname";
+import type { Build } from "../build.ts";
 
 const $preferredStaticRoot = new Key<string>("preferredStaticRoot");
 

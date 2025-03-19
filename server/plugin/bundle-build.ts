@@ -1,6 +1,6 @@
 import { devModules as _devModules } from "@classic/build/modules";
-import type { Build } from "@classic/server";
-import { serveAsset } from "@classic/server/plugin/asset-serve";
+import type { Build } from "../build.ts";
+import { serveAsset } from "./asset-serve-build.ts";
 
 export const devModules = async (
   build: Build,

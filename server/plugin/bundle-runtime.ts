@@ -1,6 +1,6 @@
 import { type Context, Key } from "@classic/context";
 import type { Resolver } from "@classic/js";
-import type { Middleware } from "@classic/server";
+import type { Middleware } from "../request.ts";
 
 const $moduleMap = new Key<Record<string, string>>(
   "module map",
