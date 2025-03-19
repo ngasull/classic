@@ -49,7 +49,7 @@ export class Asset<
   }
 
   /** @ignore */
-  [Symbol.for("Deno.customInspect")](_opts: Deno.InspectOptions) {
+  [Symbol.for("Deno.customInspect")](_opts: Deno.InspectOptions): string {
     return `Asset(${this.hint || ""})`;
   }
 }

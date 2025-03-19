@@ -155,7 +155,7 @@ const initRoot = (root: EventTarget | null) => {
   }
 };
 
-export const init = () => {
+export const init = (): void => {
   if (needsInit) {
     needsInit = 0;
     initRoot(document.body);

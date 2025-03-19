@@ -6,12 +6,7 @@ import {
   NULL,
   UNDEFINED,
 } from "@classic/util";
-import {
-  $extends,
-  type $props,
-  type Children,
-  type CustomElement,
-} from "./element.ts";
+import { $extends, type Children, type CustomElement } from "./element.ts";
 import type { JSXInternal } from "./jsx-dom.d.ts";
 import { callOrReturn, onChange, track } from "./signal.ts";
 
@@ -38,15 +33,13 @@ declare namespace JSX {
     };
 
   type Element = NativeElement;
-
-  type ElementAttributesProperty = { [$props]: unknown };
 }
 
 export interface CustomElements {}
 
 export type { JSX };
 
-export const render = (el: ParentNode, children: Children) =>
+export const render = (el: ParentNode, children: Children): void =>
   el.replaceChildren(
     ...deepMap(children, (c) => {
       let node: Node;

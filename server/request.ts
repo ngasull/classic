@@ -61,7 +61,7 @@ export class ClassicRequestBase<
   /**
    * Raw {@linkcode Request}
    */
-  get request() {
+  get request(): Request {
     return this.#request;
   }
 

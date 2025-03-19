@@ -177,7 +177,7 @@ export const writeClientBindings = async (
 export const generateClientBindings = (
   context: BuildContext,
   outputDir: string,
-) => {
+): string => {
   const dir = toPosix(outputDir);
   return `import "@classic/js";
 

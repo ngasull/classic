@@ -58,7 +58,7 @@ export const bundleJs = async ({
 export const writeElementBindings = async (
   elementsDir: string,
   outputFile: string,
-) => {
+): Promise<void> => {
   const newBindings = await generateElementBindings(
     elementsDir,
     dirname(outputFile),
@@ -71,7 +71,7 @@ export const writeElementBindings = async (
 export const generateElementBindings = async (
   elementsDir: string,
   outputDir: string,
-) => {
+): Promise<string> => {
   const relativeBase = "./" +
     toPosix(relative(outputDir, elementsDir));
   const elementToSrc: [string, string][] = [];
@@ -176,7 +176,7 @@ const transformCssPlugin = (transformCss: CSSTransformer) => ({
           }
           return {
             errors: [{
-              text: e instanceof TransformCSSError ? e.text : e.toString(),
+              text: e instanceof TransformCSSError ? e.text : String(e),
               location: e instanceof TransformCSSError
                 ? {
                   file: args.path,

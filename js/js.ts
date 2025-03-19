@@ -17,6 +17,7 @@ import type {
   typeSymbol,
 } from "./types.ts";
 import { isJSable, jsSymbol } from "./types.ts";
+import { StoreAPI } from "./dom/store.ts";
 
 // https://graphemica.com/categories/letter-number/page/2
 export const argn = (n: number) => `𐏒${n}`;
@@ -994,9 +995,9 @@ class JSMetaModuleStore extends JSMetaBase {
   }
 }
 
-export const { store } = js.module<typeof import("./dom/store.ts")>(
+export const store: JS<StoreAPI> = js.module<typeof import("./dom/store.ts")>(
   import.meta.resolve("./dom/store.ts"),
-);
+).store;
 
 class JSMetaResource<T extends JSONable = JSONable> extends JSMetaBase<T> {
   override readonly hasResources: boolean = true;
