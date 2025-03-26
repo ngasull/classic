@@ -12,15 +12,15 @@
   ],
   "imports": {
     "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.48",
-    "@classic/build": "jsr:@classic/build@0",
-    "@classic/context": "jsr:@classic/context@0",
-    "@classic/element": "jsr:@classic/element@0",
-    "@classic/html": "jsr:@classic/html@0",
-    "@classic/js": "jsr:@classic/js@0",
-    "@classic/morph": "jsr:@classic/morph@0",
-    "@classic/router": "jsr:@classic/router@0",
-    "@classic/server": "jsr:@classic/server@0",
-    "@classic/util": "jsr:@classic/util@0",
+    "@classic/build": "jsr:@classic/build@0.1",
+    "@classic/context": "jsr:@classic/context@0.1",
+    "@classic/element": "jsr:@classic/element@0.1",
+    "@classic/html": "jsr:@classic/html@0.1",
+    "@classic/js": "jsr:@classic/js@0.1",
+    "@classic/morph": "jsr:@classic/morph@0.1",
+    "@classic/router": "jsr:@classic/router@0.1",
+    "@classic/server": "jsr:@classic/server@0.1",
+    "@classic/util": "jsr:@classic/util@0.1",
     "@hono/hono": "jsr:@hono/hono@^4.6.20",
     "@jabr/xxhash64": "jsr:@jabr/xxhash64@^2.0.0",
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader@^0.10.3",
@@ -37,6 +37,7 @@
   "tasks": {
     "npm": "deno run -A script/build_npm.ts",
     "test": "deno test --allow-read --allow-env --allow-run",
+    "bump": "deno run -A jsr:@deno/bump-workspaces@0.1.22/cli",
     "clean": "rm -rf npm"
   },
   "exclude": [
