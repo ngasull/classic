@@ -1,7 +1,7 @@
 import { join } from "./deps/std/path.ts";
 
 const fetches = fetch(
-  "https://api.github.com/repos/ngasull/classic/branches/master",
+  "https://api.github.com/repos/ngasull/classic/branches/main",
 )
   .then((res) => res.json())
   .then(({ commit: { sha } }) => sha)
@@ -16,7 +16,7 @@ const fetches = fetch(
             join(path, "deno.jsonc"),
             denoJson.replaceAll(
               /("classic-web\/(jsx-runtime)?": "[^"]+")/g,
-              (_, row) => row.replace("master", sha),
+              (_, row) => row.replace("main", sha),
             ),
           )
         ),

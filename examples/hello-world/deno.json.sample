@@ -15,8 +15,8 @@
     ]
   },
   "imports": {
-    "classic-web/": "https://raw.githubusercontent.com/ngasull/classic/master/",
-    "classic-web/jsx-runtime": "https://raw.githubusercontent.com/ngasull/classic/master/jsx-runtime.ts",
+    "classic-web/": "https://raw.githubusercontent.com/ngasull/classic/main/",
+    "classic-web/jsx-runtime": "https://raw.githubusercontent.com/ngasull/classic/main/jsx-runtime.ts",
     "hono/": "https://deno.land/x/hono@v3.12.11/"
   }
 }
