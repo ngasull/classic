@@ -5,11 +5,7 @@
     ".": "./mod.ts"
   },
   "compilerOptions": {
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
+    "jsx": "react-jsx",
+    "jsxImportSource": "@classic/html"
   }
 }

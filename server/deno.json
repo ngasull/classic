@@ -11,13 +11,5 @@
     "./plugin/asset-serve": "./plugin/asset-serve-build.ts",
     "./plugin/asset-serve/runtime": "./plugin/asset-serve-runtime.ts",
     "./queue": "./queue.ts"
-  },
-  "compilerOptions": {
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
   }
 }

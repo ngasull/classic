@@ -3,13 +3,5 @@
   "version": "0.1.1",
   "exports": {
     ".": "./util.ts"
-  },
-  "compilerOptions": {
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
   }
 }
