@@ -32,7 +32,7 @@
     "@std/media-types": "jsr:@std/media-types@^1.0.2",
     "@std/path": "jsr:@std/path@^0.225.2",
     "esbuild": "npm:esbuild@^0.23.0",
-    "lightningcss": "npm:lightningcss@^1.25.1"
+    "lightningcss": "npm:lightningcss-wasm@^1.29.3"
   },
   "tasks": {
     "npm": "deno run -A script/build_npm.ts",
