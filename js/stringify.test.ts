@@ -143,17 +143,11 @@ Deno.test({
       [Symbol.for("poulet")]: "ninja",
       [Symbol("burger")]: "Hi",
       foo: "bar",
+      stringify: (o: unknown) => {
+        assertEquals(o, obj);
+        return "custom code";
+      },
     };
-    assertEquals(
-      stringify(obj, {
-        replace: {
-          [Symbol.for("poulet")]: (o) => {
-            assertEquals(o, obj);
-            return "custom code";
-          },
-        },
-      }),
-      `custom code`,
-    );
+    assertEquals(stringify(obj), `custom code`);
   },
 });
