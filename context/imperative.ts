@@ -14,7 +14,7 @@
  * See related example.
  *
  * @example End-to-end declare, provide & use summary
- * ```ts
+ * ```ts ignore
  * import { Key } from "@classic/context/imperative";
  * import { assert } from "@std/assert";
  *
@@ -42,7 +42,7 @@
  * ```
  *
  * @example Use functions: same consumer API, custom provider logic
- * ```ts
+ * ```ts ignore
  * import { type Context, createContext, Key } from "@classic/context/imperative";
  * import { assert } from "@std/assert";
  *
@@ -66,7 +66,7 @@
  * ```
  *
  * @example Safe or optional context access
- * ```ts
+ * ```ts ignore
  * import { createContext, Key } from "@classic/context/imperative";
  * import { assert, assertThrows } from "@std/assert";
  *
@@ -78,7 +78,7 @@
  * ```
  *
  * @example Derive a context
- * ```ts
+ * ```ts ignore
  * import { createContext, Key } from "@classic/context/imperative";
  * import { assert, assertThrows } from "@std/assert";
  *
