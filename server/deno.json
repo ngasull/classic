@@ -3,8 +3,8 @@
   "version": "0.1.2",
   "exports": {
     ".": "./mod.ts",
-    "./prebuilt": "./prebuilt.ts",
-    "./runtime": "./runtime.ts",
+    "./build": "./build/mod.ts",
+    "./runtime": "./runtime/mod.ts",
     "./client/router": "./client-router.ts",
     "./plugin/bundle": "./plugin/bundle-build.ts",
     "./plugin/bundle/runtime": "./plugin/bundle-runtime.ts",

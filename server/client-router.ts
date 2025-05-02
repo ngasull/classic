@@ -67,9 +67,10 @@ const submit = async (
     res = await Promise.race([
       timeout(suspenseDelay).then(() => 0),
       resQ = Promise.resolve(
-        fetch((url.searchParams.set("location", location.pathname), url), {
+        fetch(url, {
           method: "post",
           body,
+          headers: { "Classic-Route": "1" },
         }).then((res): Promise<Document | void> =>
           res.redirected
             ? Promise.reject(submit(form, res.url, body))

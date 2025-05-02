@@ -1,25 +1,27 @@
-import type { Middleware } from "@classic/server";
-import type { FileBuild } from "./serve.ts";
+import type { Middleware } from "@classic/server/runtime";
+import { type RouteParams, usePOST, useRedirect } from "./serve.ts";
 
-export const mutation: <Params>(
-  r: FileBuild<Params>,
-  handler: Middleware<Params>,
-) => void = (r, handler): void => {
-  r.method("POST", async (ctx) => {
-    let res = await handler(ctx);
-    if (!res) {
-      const requestedLocation = ctx.url.searchParams.get("location");
-      const contentLocation = requestedLocation
-        ? requestedLocation
-        : new URL(".", ctx.request.url).pathname.slice(0, -1);
-      res = await ctx.runtime.fetch(
-        new Request(new URL(contentLocation, ctx.request.url)),
-      );
-      if (res) {
-        res.headers.set("Content-Location", contentLocation);
-      }
-    }
+export const declareMutation: {
+  <Segment extends string>(
+    segment: Segment,
+    handler: Middleware<RouteParams<Segment>>,
+  ): void;
+  <Params = Record<never, string>>(handler: Middleware<Params>): void;
+} = <Segment extends string, Params extends Record<string, string>>(
+  segment?: Segment | Middleware<Params>,
+  handler?: Middleware<Params>,
+): void => {
+  if (handler) {
+    segment = segment as Segment;
+  } else {
+    handler = segment as Middleware<Params>;
+    segment = undefined;
+  }
 
-    return res;
+  usePOST<Params>(segment, async (req) => {
+    let handlerResponse = await handler(req);
+    if (handlerResponse) return handlerResponse;
+
+    return useRedirect(new URL(".", req.url).pathname.slice(0, -1));
   });
 };

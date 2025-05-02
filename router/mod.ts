@@ -55,7 +55,7 @@
  *
  * ### Entry point
  *
- * ```ts
+ * ```ts ignore
  * import { fileRouter } from "@classic/router"
  * import { defineServer } from "@classic/server"
  *
@@ -71,12 +71,12 @@
  * ```tsx
  * // src/route.tsx
  *
- * import { layout, page, route } from "@classic/server";
+ * import { declareLayout, declarePage } from "@classic/router";
  *
- * export default route(async (root) => {
+ * export default () => {
  *
  *   // Apply a layout to this route and every nested route
- *   root.use(layout, (req) => {
+ *   declareLayout((req, children) => {
  *     return (
  *       <html>
  *         <head>
@@ -84,20 +84,20 @@
  *           <meta charset="utf-8" />
  *         </head>
  *         <body>
- *           {req.children}
+ *           {children}
  *         </body>
  *       </html>
  *     );
  *   });
  *
  *   // Current page (_root "/"_)
- *   root.use(page, (req) => (
+ *   declarePage((req) => (
  *     <>
  *       <h1>Root page</h1>
  *       <p>It works!</p>
  *     </>
  *   ));
- * });
+ * };
  * ```
  *
  * ### Nested route
@@ -105,12 +105,12 @@
  * ```tsx
  * // src/hello.route.tsx or src/hello/route.tsx
  *
- * import { page, route } from "@classic/server";
+ * import { declarePage } from "@classic/router";
  *
- * export default route(async (hello) => {
+ * export default () => {
  *
  *   // Current page (_"/hello"_)
- *   hello.use(page, (req) => {
+ *   declarePage((req) => {
  *     return (
  *       <>
  *         <h1>Hello world!</h1>
@@ -119,7 +119,7 @@
  *       </>
  *     );
  *   });
- * });
+ * };
  * ```
  *
  * ## Linking CSS
@@ -144,15 +144,15 @@
  * ```tsx
  * // src/route.tsx
  *
- * import { layout, page, route } from "@classic/server";
+ * import { declareLayout, declarePage } from "@classic/router";
  *
- * export default route(async (root) => {
+ * export default () => {
  *
  *   // Embed and/or write layout-level CSS
  *   // Compiled into an optimized stylesheet
- *   const styleSheet = root.use(layout.css`
- *     ${await Deno.readFile("asset/pico.css")}
- *     ${await Deno.readFile("asset/tailwind.css")}
+ *   const styleSheet = declareLayout.css`
+ *     ${() => Deno.readFile("asset/pico.css")}
+ *     ${() => Deno.readFile("asset/tailwind.css")}
  *
  *     :root {
  *       --pico-border-radius: 2rem;
@@ -161,9 +161,9 @@
  *       font-family: Pacifico, cursive;
  *       font-weight: 400;
  *     }
- *   `);
+ *   `;
  *
- *   root.use(layout, (req) => {
+ *   declareLayout((req, children) => {
  *     return (
  *       <html>
  *         <head>
@@ -172,14 +172,14 @@
  *           <styleSheet.Html />
  *         </head>
  *         <body>
- *           {req.children}
+ *           {children}
  *         </body>
  *       </html>
  *     );
  *   });
  *
  *   // ... //
- * });
+ * };
  * ```
  *
  * ### Ad-hoc styling without a utility-based framework
@@ -187,29 +187,29 @@
  * In some cases, page-specific CSS may be needed. Not recommended for the general use case.
  *
  * ```tsx
- * import { page, route } from "@classic/server";
+ * import { declarePage } from "@classic/router";
  *
- * export default route(async (hello) => {
+ * export default () => {
  *
  *   // Page-specific CSS rules
  *   // Compiled into an optimized stylesheet
  *   // Embedded in layout's PageStyle automatically
- *   hello.use(page.css`
- *     ${await Deno.readFile("asset/supergraphlib.css")}
+ *   declarePage.css`
+ *     ${() => Deno.readFile("asset/supergraphlib.css")}
  *
  *     h1.hellover:hover {
  *       background: red;
  *     }
- *   `);
+ *   `;
  *
  *   // Declare current page (_/hello_)
- *   hello.use(page, (req) => (
+ *   declarePage((req) => (
  *     <>
  *       <h1 class="hellover">Hello world!</h1>;
  *       <svg class="supergraph">...</svg>
  *     </>
  *   ));
- * });
+ * };
  * ```
  *
  * ## Ad-Hoc client-side JS
@@ -219,7 +219,7 @@
  * @module
  */
 
-export { fileRouter, route } from "./build.ts";
-export { mutation } from "./mutation.ts";
-export { layout, page } from "./page.ts";
-export type { FileBuild } from "./serve.ts";
+export { fileRouter } from "./build.ts";
+export { declareMutation } from "./mutation.ts";
+export { declareLayout, declarePage } from "./page.ts";
+export { useRedirect } from "./serve.ts";

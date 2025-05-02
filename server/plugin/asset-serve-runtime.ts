@@ -1,6 +1,6 @@
 import { contentType } from "@std/media-types/content-type";
-import type { Asset } from "../asset.ts";
-import type { Middleware } from "../request.ts";
+import type { Asset } from "../build/mod.ts";
+import type { Middleware } from "../runtime/mod.ts";
 
 export default (
   asset: Asset<Uint8Array>,

@@ -10,13 +10,3 @@
  *
  * @module
  */
-
-/** A generic type where `T` could have to be awaited */
-export type Async<T> = T | PromiseLike<T>;
-
-export { Asset } from "./asset.ts";
-export type { NewAssetOptions } from "./asset.ts";
-export type { Build, BuildAssetOptions } from "./build.ts";
-export { defineServer } from "./build.ts";
-export { ClassicRequestBase } from "./request.ts";
-export type { ClassicRequest, Middleware } from "./request.ts";

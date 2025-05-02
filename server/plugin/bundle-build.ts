@@ -1,40 +1,38 @@
 import { devModules as _devModules } from "@classic/build/modules";
-import type { Build } from "../build.ts";
+import { useBuild, useRoute } from "../build/mod.ts";
 import { serveAsset } from "./asset-serve-build.ts";
 
-export const devModules = async (
-  build: Build,
-): Promise<Record<string, string>> => {
-  const root = build.root("/");
-
-  const modules = await _devModules({
-    modules: [
-      "@classic/server/client/router",
-    ],
-    moduleBase: "client",
-  });
-
-  // root.segment("/.hmr").method("GET", );
-  const moduleMap: Record<string, string> = {};
-  for (const { name, path } of modules.context.modules()) {
-    const module = modules.context.get(path)!;
-    root.use(serveAsset, {
-      path: module.publicPath,
-      contents: () => module.load(),
-      contentType: "text/javascript",
+export const devModules = (): Promise<Record<string, string>> =>
+  useBuild(async () => {
+    const modules = await _devModules({
+      modules: [
+        "@classic/server/client/router",
+      ],
+      moduleBase: "client",
     });
 
-    if (name) moduleMap[name] = module.publicPath;
-  }
+    // root.segment("/.hmr").method("GET", );
+    const moduleMap: Record<string, string> = {};
+    for (const { name, path } of modules.context.modules()) {
+      const module = modules.context.get(path)!;
+      serveAsset({
+        path: module.publicPath,
+        contents: () => module.load(),
+        contentType: "text/javascript",
+      });
 
-  build.root("/*").method(
-    "GET",
-    import.meta.resolve("./bundle-runtime.ts"),
-    moduleMap,
-  );
+      if (name) moduleMap[name] = module.publicPath;
+    }
 
-  return moduleMap;
-};
+    useRoute(
+      "GET",
+      "*",
+      import.meta.resolve("./bundle-runtime.ts"),
+      moduleMap,
+    );
+
+    return moduleMap;
+  });
 
 // export const buildModules = async <Params>(
 //   route: Build,

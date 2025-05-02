@@ -1,12 +1,13 @@
-import { Key } from "@classic/context";
 import type { JSX } from "@classic/html";
 import { jsx } from "@classic/html/jsx-runtime";
-import type { Middleware } from "@classic/server";
+import { type Middleware, RequestContext } from "@classic/server/runtime";
 
-export const $styleSheets = new Key<JSX.Element[]>("styleSheets");
+const $styleSheets = new RequestContext<JSX.Element[]>();
 
-export default (href: string): Middleware => (ctx) => {
-  const styleSheets = ctx.get($styleSheets) ?? ctx.provide($styleSheets, []);
+export const getStyleSheets = (): JSX.Element[] =>
+  $styleSheets.get()?.slice() ?? [];
+
+export default (href: string): Middleware => () => {
+  const styleSheets = $styleSheets.get() ?? $styleSheets.set([]);
   styleSheets.push(jsx("link", { rel: "stylesheet", href }));
-  return ctx.next();
 };
