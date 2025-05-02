@@ -57,6 +57,22 @@ export const useRequest = <Params>(): TypedRequest<Params> =>
 export const useFetch = (req: Request): Promise<Response> =>
   $request.use().server.fetch(req);
 
+/**
+ * Redirects to requested path, preferrably softly when
+ * current request comes from classic router.
+ *
+ * @param pathname The from which to send the {@linkcode Response}
+ */
+export const useRedirect = async (pathname: string): Promise<Response> => {
+  const req = useRequest();
+  const isClassicRoute = req.headers.has("Classic-Route");
+  const contentLocation = new URL(pathname, req.url);
+
+  return isClassicRoute
+    ? useFetch(new Request(contentLocation))
+    : Response.redirect(contentLocation);
+};
+
 export class RuntimeServer implements ClassicServer {
   constructor(mappings: readonly Route[]) {
     this.#mappings = mappings;

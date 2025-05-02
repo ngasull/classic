@@ -1,5 +1,5 @@
-import type { Middleware } from "@classic/server/runtime";
-import { type RouteParams, usePOST, useRedirect } from "./serve.ts";
+import { type Middleware, useRedirect } from "@classic/server/runtime";
+import { declarePOST, type RouteParams } from "./serve.ts";
 
 export const declareMutation: {
   <Segment extends string>(
@@ -18,7 +18,7 @@ export const declareMutation: {
     segment = undefined;
   }
 
-  usePOST<Params>(segment, async (req) => {
+  declarePOST<Params>(segment, async (req) => {
     let handlerResponse = await handler(req);
     if (handlerResponse) return handlerResponse;
 

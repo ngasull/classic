@@ -6,13 +6,7 @@ import {
   restoreBuild,
   useRoute,
 } from "@classic/server/build";
-import {
-  type Method,
-  type Middleware,
-  type TypedRequest,
-  useFetch,
-  useRequest,
-} from "@classic/server/runtime";
+import type { Method, Middleware, TypedRequest } from "@classic/server/runtime";
 
 export type RouteParams<T extends string> = T extends
   `${infer Before}:${infer Body}`
@@ -44,7 +38,7 @@ export class RouteBuild {
   handlers: Array<Middleware<never>> = [];
 }
 
-export const useMethod: {
+export const declareMethod: {
   (method: Method, handler: Middleware<Record<never, string>>): void;
   <Segment extends string>(
     method: Method,
@@ -87,7 +81,7 @@ export const useMethod: {
   }
 };
 
-export const useGET: {
+export const declareGET: {
   <Params = Record<never, string>>(handler: Middleware<Params>): void;
   <Segment extends string, Params = Record<never, string>>(
     segment: Segment | undefined,
@@ -99,9 +93,9 @@ export const useGET: {
   ): void;
 } = (...args: unknown[]): Async<void> =>
   // @ts-ignore forward dynamically
-  useMethod("GET", ...args);
+  declareMethod("GET", ...args);
 
-export const usePOST: {
+export const declarePOST: {
   <Params = Record<never, string>>(handler: Middleware<Params>): void;
   <Segment extends string, Params = Record<never, string>>(
     segment: Segment | undefined,
@@ -113,23 +107,7 @@ export const usePOST: {
   ): void;
 } = (...args: unknown[]): Async<void> =>
   // @ts-ignore forward dynamically
-  useMethod("POST", ...args);
-
-/**
- * Redirects to requested path, preferrably softly when
- * current request comes from classic router.
- *
- * @param pathname The from which to send the {@linkcode Response}
- */
-export const useRedirect = async (pathname: string): Promise<Response> => {
-  const req = useRequest();
-  const isClassicRoute = req.headers.has("Classic-Route");
-  const contentLocation = new URL(pathname, req.url);
-
-  return isClassicRoute
-    ? useFetch(new Request(contentLocation))
-    : Response.redirect(contentLocation);
-};
+  declareMethod("POST", ...args);
 
 // NB: this handler is specific to hooks usage (`defineRoute`)
 export default async (

@@ -56,13 +56,13 @@
  * ### Entry point
  *
  * ```ts ignore
- * import { fileRouter } from "@classic/router"
- * import { defineServer } from "@classic/server"
+ * import { useFileRouter } from "@classic/router"
+ * import { defineServer } from "@classic/server/build"
  *
  * export default defineServer((build) => {
  *
  *   // Enable file-based routing on ./src
- *   build.use(fileRouter, "src");
+ *   useFileRouter("src");
  * });
  * ```
  *
@@ -219,7 +219,6 @@
  * @module
  */
 
-export { fileRouter } from "./build.ts";
+export { useFileRouter } from "./build.ts";
 export { declareMutation } from "./mutation.ts";
 export { declareLayout, declarePage } from "./page.ts";
-export { useRedirect } from "./serve.ts";

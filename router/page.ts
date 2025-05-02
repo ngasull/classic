@@ -9,7 +9,7 @@ import { concat } from "@std/bytes";
 import { encodeBase64 } from "@std/encoding";
 import { basename } from "@std/path";
 import { transform as transformCss } from "lightningcss";
-import { type RouteParams, useGET } from "./serve.ts";
+import { declareGET, type RouteParams } from "./serve.ts";
 import { getStyleSheets } from "./stylesheets.ts";
 
 type Layout<Params> = (
@@ -67,7 +67,7 @@ export const declareLayout: {
     segment = undefined;
   }
 
-  useGET("*", () => {
+  declareGET("*", () => {
     let layouts = $layouts.get();
     if (!layouts) $layouts.set(layouts = []);
     layouts.push(({ children, req }) => userLayout(children, req));
@@ -121,7 +121,7 @@ export const declarePage: {
     segment = undefined;
   }
 
-  useGET<Segment, Params>(segment, (req) => {
+  declareGET<Segment, Params>(segment, (req) => {
     const layouts = $layouts.get() ?? [];
     const el = layouts.reduceRight(
       (el, Layout) => jsx(Layout, { req: req as TypedRequest<never> }, el),

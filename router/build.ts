@@ -8,7 +8,12 @@ import {
 import { pageCss } from "./page.ts";
 import { $routeBuild, RouteBuild } from "./serve.ts";
 
-export const fileRouter = (base: string): Promise<void> =>
+/**
+ * Use a file routing system from provivded base path
+ *
+ * @param base Base path to scan routes from
+ */
+export const useFileRouter = (base: string): Promise<void> =>
   useBuild(() => scanDir(base, []));
 
 const routeRegExp = /^((?:(.+)\.)?route)\.(tsx?|css)$/;
