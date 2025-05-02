@@ -2,7 +2,7 @@
   "name": "@classic/context",
   "version": "0.1.0",
   "exports": {
-    ".": "./mod.ts",
-    "./create": "./create.ts"
+    ".": "./hook.ts",
+    "./option": "./option.ts"
   }
 }
