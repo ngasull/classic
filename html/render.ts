@@ -1,5 +1,4 @@
-import { createContext } from "@classic/context/create";
-import { type Context, Key } from "@classic/context";
+import { Context } from "@classic/context";
 import {
   type Fn,
   indexedUris,
@@ -68,9 +67,6 @@ const encoder = new TextEncoder();
  * `render` options
  */
 interface RenderOpts {
-  /** Initial context to provide to rendered components */
-  context?: Context;
-
   /** Module resolver: server specifier to public specifier */
   resolve?: Resolver;
 
@@ -92,35 +88,29 @@ export const render = (
 ): ReadableStream<Uint8Array> =>
   new ReadableStream<Uint8Array>({
     start(controller) {
-      const context = createContext(opts.context);
-      if (!context.get($effects)) context.provide($effects, []);
-      const effects = context.use($effects);
-      const resolve = opts.resolve ?? context.get($resolve);
-
       const write = (chunk: Uint8Array) => controller.enqueue(chunk);
-      const tree = domNodes(root, context);
+      const tree = domNodes(root);
 
-      writeDOMTree(tree, { resolve, effects, write, ...opts }, true)
+      $effects.provide([], writeDOMTree, tree, { write, ...opts }, true)
         .finally(() => {
           controller.close();
         });
     },
   });
 
-export const $effects = new Key<JSable<void>[]>("effect");
-
-export const $resolve = new Key<Resolver>("resolver");
+const $effects = Context<JSable<void>[]>("classic.effects");
 
 const activate = async (
   refs: RefTree,
   opts: {
     resolve?: Resolver;
-    effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },
 ): Promise<DOMNode | void> => {
   const { resolve } = opts;
-  const effects = opts.effects.splice(0, opts.effects.length);
+
+  const effectsContext = $effects.use();
+  const effects = effectsContext.splice(0, effectsContext.length);
 
   if (effects.length) {
     if (!resolve) {
@@ -133,14 +123,14 @@ const activate = async (
       effects.length > 1 ? effects.reduce((a, b) => js`${a};${b}`) : effects[0]
     }}`;
 
-    const context = createContext();
-    context.use(initRefs, refs, "$");
-
-    const { js: activationScript } = toJS(
+    const { js: activationScript } = initRefs(
+      refs,
+      "$",
+      toJS,
       () => [
         js`$.ownerDocument==d?setTimeout(${effectsFn}):d.addEventListener("patch",${effectsFn})`,
       ],
-      { resolve, context },
+      { resolve },
     );
 
     const s = new TextEncoderStream();
@@ -174,7 +164,6 @@ const writeDOMTree = async (
   opts: {
     doctype?: boolean;
     resolve?: Resolver;
-    effects: JSable<void>[];
     write: (chunk: Uint8Array) => void;
   },
   root?: boolean,
@@ -288,25 +277,23 @@ const writeDOMTree = async (
 
 const domNodes = async function* (
   nodeLike: JSX.Element,
-  ctx: Context,
 ): AsyncIterable<DOMNode> {
   const node = nodeLike && "then" in nodeLike ? await nodeLike : nodeLike;
   if (!node) return;
 
-  const effects = ctx.use($effects);
+  const effects = $effects.use();
 
   switch (node.kind) {
     case ElementKind.Fragment: {
       for (const e of node.children) {
-        yield* domNodes(e, ctx);
+        yield* domNodes(e);
       }
       return;
     }
 
     case ElementKind.Component: {
       const { Component, props } = node;
-      const subCtx = createContext(ctx);
-      yield* domNodes(Component(props, subCtx), subCtx);
+      yield* domNodes(Component(props));
       return;
     }
 
@@ -376,7 +363,7 @@ const domNodes = async function* (
         kind: DOMNodeKind.Tag,
         tag,
         attributes,
-        children: disambiguateText(node.children, ctx),
+        children: disambiguateText(node.children),
         ref: node.ref,
       };
     }
@@ -424,12 +411,11 @@ const domNodes = async function* (
 
 async function* disambiguateText(
   children: readonly JSXElement[],
-  ctx: Context,
 ): AsyncIterable<DOMNode> {
   let prev: DOMNode | null = null;
 
   for (const child of children) {
-    for await (const c of domNodes(child, ctx)) {
+    for await (const c of domNodes(child)) {
       if (
         prev && c.kind === DOMNodeKind.Text &&
         prev.kind === DOMNodeKind.Text
@@ -496,9 +482,9 @@ export const Effect: JSX.FC<{
     | readonly string[]
     | JSable<readonly string[]>
     | readonly JSable<string>[];
-}> = ({ js: cb, uris }, context) => {
+}> = ({ js: cb, uris }) => {
   const ref = mkRef<Comment>();
-  context.use($effects).push(cb() as JSable<void>);
+  $effects.use().push(cb() as JSable<void>);
   // context.use($effects).push(
   //   js.fn(() => {
   //     const effectJs = js.fn(cb);

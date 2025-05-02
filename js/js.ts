@@ -1,5 +1,5 @@
-import type { Context } from "@classic/context";
-import { createContext } from "@classic/context/create";
+import { Context } from "@classic/context";
+import type { StoreAPI } from "./dom/store.ts";
 import type {
   Fn,
   ImplicitlyJSable,
@@ -17,7 +17,6 @@ import type {
   typeSymbol,
 } from "./types.ts";
 import { isJSable, jsSymbol } from "./types.ts";
-import { StoreAPI } from "./dom/store.ts";
 
 // https://graphemica.com/categories/letter-number/page/2
 export const argn = (n: number) => `𐏒${n}`;
@@ -43,7 +42,7 @@ export abstract class JSMetaBase<T = unknown, R = false>
       null,
   ) {}
 
-  template(_context: JSMetaContext): Array<string | JSMetaBase> {
+  template(): Array<string | JSMetaBase> {
     throw "unimplemented";
   }
 }
@@ -60,7 +59,6 @@ type JSMetaContext = {
   resources?: JSMetaResources;
   resolve?: Resolver;
   moduleCache: Record<string, JSMetaModule>;
-  user: Context;
 };
 
 const targetSymbol = Symbol("target");
@@ -205,8 +203,9 @@ const implicit = (
     return undefinedMeta;
   } else if ((typeof expr === "object" || typeof expr === "function")) {
     if (jsSymbol in expr && expr[jsSymbol]) return expr[jsSymbol];
-    return new JSMetaVar((context) => {
-      const existing = context.implicitRefs.get(expr);
+    return new JSMetaVar(() => {
+      const { implicitRefs } = $context.use();
+      const existing = implicitRefs.get(expr);
       if (existing) return [existing];
 
       const newImplicit: JSMetaBase = typeof expr === "function"
@@ -214,7 +213,7 @@ const implicit = (
         : Array.isArray(expr)
         ? new JSMetaArray(expr, { scope })
         : new JSMetaObject(expr, { scope });
-      context.implicitRefs.set(expr, newImplicit);
+      implicitRefs.set(expr, newImplicit);
       return [newImplicit];
     }, { scope });
   } else {
@@ -227,7 +226,7 @@ const implicit = (
 
 class JSMetaVar<T = unknown> extends JSMetaBase<T> {
   constructor(
-    private readonly cb: (context: JSMetaContext) => Array<string | JSMetaBase>,
+    private readonly cb: () => Array<string | JSMetaBase>,
     { scope, isntAssignable }: {
       scope?: JSMetaBase | null;
       isntAssignable?: boolean;
@@ -237,10 +236,8 @@ class JSMetaVar<T = unknown> extends JSMetaBase<T> {
     this.isntAssignable = isntAssignable;
   }
 
-  override template(
-    context: JSMetaContext,
-  ): Array<string | JSMetaBase> {
-    return this.cb(context);
+  override template(): Array<string | JSMetaBase> {
+    return this.cb();
   }
 
   [Symbol.for("Deno.customInspect")](): string {
@@ -258,7 +255,8 @@ class JSMetaURIs extends JSMetaBase<string[]> {
     super();
   }
 
-  override template(context: JSMetaContext): (string | JSMetaBase)[] {
+  override template(): (string | JSMetaBase)[] {
+    const context: JSMetaContext = $context.use();
     return Array.isArray(this.uris)
       ? context.resources
         ? [
@@ -405,7 +403,8 @@ class JSMetaCall extends JSMetaBase {
     this.hasResources = values.some((v) => v.hasResources);
   }
 
-  override template(context: JSMetaContext): (string | JSMetaBase)[] {
+  override template(): (string | JSMetaBase)[] {
+    const context: JSMetaContext = $context.use();
     return [
       ...(context.declaredNames.has(this.callable) ||
           !(this.callable instanceof JSMetaFunction)
@@ -445,161 +444,170 @@ type ToJSResult<A extends string[]> = {
   args: A;
 };
 
+const $context = Context<JSMetaContext>("classic.js.context");
+
 export const toJS = <A extends readonly unknown[]>(
   f: Fn<A, unknown>,
-  { resolve, isServer = false, context: user }: {
+  { resolve, isServer = false }: {
     resolve?: Resolver;
     isServer?: boolean;
-    context?: Context;
   } = {},
 ): ToJSResult<{ -readonly [I in keyof A]: string }> => {
-  const globalFn = new JSMetaFunction(f as Fn<readonly never[], unknown>, {
-    scoped: false,
-  });
-  const globalBody = globalFn.body;
+  const context = mkMetaContext(isServer, resolve);
+  return $context.provide(context, () => {
+    const globalFn = new JSMetaFunction(f as Fn<readonly never[], unknown>, {
+      scoped: false,
+    });
+    const globalBody = globalFn.body;
 
-  let lastVarId = -1;
-  const context: JSMetaContext = mkMetaContext(isServer, resolve, user);
+    let lastVarId = -1;
 
-  const scopeToRefs = new Map<JSMetaBase | null, Set<JSMetaBase>>();
-  const refToParentReuse = new Map<
-    JSMetaBase,
-    Map<JSMetaBase | undefined, { reused?: boolean; outOfScope: boolean }>
-  >();
-  const refToChildren = new Map<JSMetaBase, readonly JSMetaBase[]>();
-  {
-    type Job = readonly [
+    const scopeToRefs = new Map<JSMetaBase | null, Set<JSMetaBase>>();
+    const refToParentReuse = new Map<
       JSMetaBase,
-      JSMetaBase | undefined,
-      JSMetaFunction | null,
-    ];
-    const jobs: Job[] = [[globalBody, undefined, null]];
-    for (let job; (job = jobs.shift());) {
-      const [meta, parent, enclosing] = job;
+      Map<JSMetaBase | undefined, { reused?: boolean; outOfScope: boolean }>
+    >();
+    const refToChildren = new Map<JSMetaBase, readonly JSMetaBase[]>();
+    {
+      type Job = readonly [
+        JSMetaBase,
+        JSMetaBase | undefined,
+        JSMetaFunction | null,
+      ];
+      const jobs: Job[] = [[globalBody, undefined, null]];
+      for (let job; (job = jobs.shift());) {
+        const [meta, parent, enclosing] = job;
 
-      const refParentReuse = refToParentReuse.get(meta) ??
-        new Map<
-          JSMetaBase | undefined,
-          { reused?: boolean; outOfScope: boolean }
-        >();
-      refToParentReuse.set(meta, refParentReuse);
+        const refParentReuse = refToParentReuse.get(meta) ??
+          new Map<
+            JSMetaBase | undefined,
+            { reused?: boolean; outOfScope: boolean }
+          >();
+        refToParentReuse.set(meta, refParentReuse);
 
-      const def = refParentReuse.get(parent) ?? { outOfScope: false };
-      def.reused = def.reused != null;
-      def.outOfScope ||= enclosing !== meta.scope;
-      refParentReuse.set(parent, def);
+        const def = refParentReuse.get(parent) ?? { outOfScope: false };
+        def.reused = def.reused != null;
+        def.outOfScope ||= enclosing !== meta.scope;
+        refParentReuse.set(parent, def);
 
-      scopeToRefs.set(
-        meta.scope,
-        (scopeToRefs.get(meta.scope) ?? new Set()).add(meta),
-      );
-
-      if (meta.isAwaited) {
-        context.asyncScopes.add(meta.scope as JSMetaFunction);
-      }
-
-      if (!refToChildren.has(meta)) {
-        const children: JSMetaBase[] = [];
-        for (const c of meta.template(context)) {
-          if (typeof c !== "string") children.push(c);
-        }
-        refToChildren.set(meta, children);
-
-        const subEnclosing = meta instanceof JSMetaFunction ? meta : enclosing;
-        jobs.unshift(...children.map((c) => [c, meta, subEnclosing] as const));
-      }
-    }
-  }
-
-  const visitedRefs = new Set<JSMetaBase>();
-  const declaredRefs = new Set<JSMetaBase>();
-  const shouldDeclare = (meta: JSMetaBase): boolean => {
-    let used = false;
-    if (meta.mustDeclare) return true;
-    if (meta.isntAssignable) return false;
-
-    for (
-      const [parent, { reused, outOfScope }] of refToParentReuse.get(meta)!
-    ) {
-      if (reused) return true;
-      if (!(parent && declaredRefs.has(parent))) {
-        if (
-          used || (outOfScope && (!parent || !hasAssignedParentInScope(parent)))
-        ) return true;
-        used = true;
-      }
-    }
-
-    return false;
-  };
-  const hasAssignedParentInScope = (meta: JSMetaBase): boolean => {
-    for (const parent of refToParentReuse.get(meta)!.keys()) {
-      if (parent && parent.scope === meta.scope) {
-        if (declaredRefs.has(parent) || hasAssignedParentInScope(parent)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-
-  const declareIfNeeded = (meta: JSMetaBase): boolean => {
-    if (visitedRefs.has(meta)) return false;
-    visitedRefs.add(meta);
-
-    if (shouldDeclare(meta)) {
-      declaredRefs.add(meta);
-    }
-    let assignedChildren = false;
-
-    // Try declare contained expressions, pretending current is declared
-    for (const c of refToChildren.get(meta)!) {
-      if (!visitedRefs.has(c) && declareIfNeeded(c)) assignedChildren = true;
-    }
-
-    // Ensure current should still be declared
-    if (declaredRefs.has(meta) && (!assignedChildren || shouldDeclare(meta))) {
-      context.declaredNames.set(meta, `${varArg}${++lastVarId}`);
-      const ds = context.scopedDeclarations.get(
-        (meta.scope as JSMetaFunction ?? globalFn).body.fnBody,
-      );
-      if (ds) ds.push(meta);
-      else {
-        context.scopedDeclarations.set(
-          (meta.scope as JSMetaFunction ?? globalFn).body.fnBody,
-          [meta],
+        scopeToRefs.set(
+          meta.scope,
+          (scopeToRefs.get(meta.scope) ?? new Set()).add(meta),
         );
+
+        if (meta.isAwaited) {
+          context.asyncScopes.add(meta.scope as JSMetaFunction);
+        }
+
+        if (!refToChildren.has(meta)) {
+          const children: JSMetaBase[] = [];
+          for (const c of meta.template()) {
+            if (typeof c !== "string") children.push(c);
+          }
+          refToChildren.set(meta, children);
+
+          const subEnclosing = meta instanceof JSMetaFunction
+            ? meta
+            : enclosing;
+          jobs.unshift(
+            ...children.map((c) => [c, meta, subEnclosing] as const),
+          );
+        }
       }
-      return true;
-    } else {
-      declaredRefs.delete(meta);
     }
-    return false;
-  };
 
-  for (const refs of scopeToRefs.values()) {
-    for (const meta of refs) {
-      declareIfNeeded(meta);
+    const visitedRefs = new Set<JSMetaBase>();
+    const declaredRefs = new Set<JSMetaBase>();
+    const shouldDeclare = (meta: JSMetaBase): boolean => {
+      let used = false;
+      if (meta.mustDeclare) return true;
+      if (meta.isntAssignable) return false;
+
+      for (
+        const [parent, { reused, outOfScope }] of refToParentReuse.get(meta)!
+      ) {
+        if (reused) return true;
+        if (!(parent && declaredRefs.has(parent))) {
+          if (
+            used ||
+            (outOfScope && (!parent || !hasAssignedParentInScope(parent)))
+          ) return true;
+          used = true;
+        }
+      }
+
+      return false;
+    };
+    const hasAssignedParentInScope = (meta: JSMetaBase): boolean => {
+      for (const parent of refToParentReuse.get(meta)!.keys()) {
+        if (parent && parent.scope === meta.scope) {
+          if (declaredRefs.has(parent) || hasAssignedParentInScope(parent)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    const declareIfNeeded = (meta: JSMetaBase): boolean => {
+      if (visitedRefs.has(meta)) return false;
+      visitedRefs.add(meta);
+
+      if (shouldDeclare(meta)) {
+        declaredRefs.add(meta);
+      }
+      let assignedChildren = false;
+
+      // Try declare contained expressions, pretending current is declared
+      for (const c of refToChildren.get(meta)!) {
+        if (!visitedRefs.has(c) && declareIfNeeded(c)) assignedChildren = true;
+      }
+
+      // Ensure current should still be declared
+      if (
+        declaredRefs.has(meta) && (!assignedChildren || shouldDeclare(meta))
+      ) {
+        context.declaredNames.set(meta, `${varArg}${++lastVarId}`);
+        const ds = context.scopedDeclarations.get(
+          (meta.scope as JSMetaFunction ?? globalFn).body.fnBody,
+        );
+        if (ds) ds.push(meta);
+        else {
+          context.scopedDeclarations.set(
+            (meta.scope as JSMetaFunction ?? globalFn).body.fnBody,
+            [meta],
+          );
+        }
+        return true;
+      } else {
+        declaredRefs.delete(meta);
+      }
+      return false;
+    };
+
+    for (const refs of scopeToRefs.values()) {
+      for (const meta of refs) {
+        declareIfNeeded(meta);
+      }
     }
-  }
 
-  const argsName = globalFn.args.map((a) =>
-    (a.template(context) as string[]).join("")
-  ) as { -readonly [I in keyof A]: string };
-  const globalBodyStr = metaToJS(context, globalBody);
+    const argsName = globalFn.args.map((a) =>
+      (a.template() as string[]).join("")
+    ) as { -readonly [I in keyof A]: string };
+    const globalBodyStr = metaToJS(globalBody);
 
-  return {
-    js: globalBody.isExpression(context)
-      ? `return ${globalBodyStr};`
-      : globalBodyStr.slice(1, -1) + ";",
-    args: argsName,
-  };
+    return {
+      js: globalBody.isExpression(context)
+        ? `return ${globalBodyStr};`
+        : globalBodyStr.slice(1, -1) + ";",
+      args: argsName,
+    };
+  });
 };
 
 const mkMetaContext = (
   isServer = true,
   resolve?: Resolver,
-  user?: Context,
 ): JSMetaContext => ({
   isServer,
   argn: -1,
@@ -610,12 +618,10 @@ const mkMetaContext = (
   asyncScopes: new Set(),
   modules: new JSMetaModuleStore(isServer),
   moduleCache: {},
-  user: user ?? createContext(),
   resolve,
 });
 
 const metaToJS = (
-  context: JSMetaContext,
   meta: JSMetaBase,
   declare?: boolean,
 ): string => {
@@ -626,13 +632,13 @@ const metaToJS = (
     if (typeof first === "string") {
       parts.push(first);
     } else {
-      const d = context.declaredNames.get(first);
+      const d = $context.use().declaredNames.get(first);
       if (d && !declare) {
         if (first.hasResources) parts.push(d, "()");
         else parts.push(d);
       } else {
         declare = false;
-        templates.unshift(...first.template(context));
+        templates.unshift(...first.template());
       }
     }
   }
@@ -640,23 +646,23 @@ const metaToJS = (
   return parts.join("");
 };
 
-export const jsResources = (expr: JSable): string[] => {
-  const context: JSMetaContext = mkMetaContext();
-  const r = new Set<string>();
-  const visited = new Set<JSMetaBase>();
-  const children: (JSMetaBase | string)[] = [expr[jsSymbol]];
-  for (let meta; (meta = children.pop());) {
-    if (typeof meta !== "string" && !visited.has(meta)) {
-      visited.add(meta);
-      if (meta instanceof JSMetaResource) r.add(meta.uri);
-      else {
-        const tpl = meta.template(context);
-        if (!(tpl instanceof Promise)) children.push(...tpl);
+export const jsResources = (expr: JSable): string[] =>
+  $context.provide(mkMetaContext(), () => {
+    const r = new Set<string>();
+    const visited = new Set<JSMetaBase>();
+    const children: (JSMetaBase | string)[] = [expr[jsSymbol]];
+    for (let meta; (meta = children.pop());) {
+      if (typeof meta !== "string" && !visited.has(meta)) {
+        visited.add(meta);
+        if (meta instanceof JSMetaResource) r.add(meta.uri);
+        else {
+          const tpl = meta.template();
+          if (!(tpl instanceof Promise)) children.push(...tpl);
+        }
       }
     }
-  }
-  return [...r];
-};
+    return [...r];
+  });
 
 export interface Module {}
 
@@ -694,7 +700,8 @@ const jsUtils = {
 
   module: ((name: string) =>
     mkJS(
-      new JSMetaVar((context) => {
+      new JSMetaVar(() => {
+        const context = $context.use();
         if (!context.resolve) throw Error(`Must configure JS modules`);
         const publicPath = context.resolve(name);
         if (publicPath == null) {
@@ -716,7 +723,8 @@ const jsUtils = {
 
   resolve: ((name: string) =>
     mkJS(
-      new JSMetaVar<string>((context) => {
+      new JSMetaVar<string>(() => {
+        const context = $context.use();
         if (!context.resolve) throw Error(`Must configure JS modules`);
         const publicPath = context.resolve(name);
         return [publicPath ? JSON.stringify(publicPath) : "void 0"];
@@ -822,12 +830,12 @@ class JSMetaFunction extends JSMetaBase {
     return this._body;
   }
 
-  override template(context: JSMetaContext): (string | JSMetaBase)[] {
+  override template(): (string | JSMetaBase)[] {
     const args: (string | JSMetaBase)[] = this.args.length === 1
       ? [this.args[0]]
       : ["(", ...this.args.flatMap((a, i) => i ? [",", a] : a), ")"];
 
-    if (context.asyncScopes.has(this)) {
+    if ($context.use().asyncScopes.has(this)) {
       args.unshift("async ");
     }
 
@@ -859,15 +867,15 @@ class JSMetaFunctionBody extends JSMetaBase {
       !context.scopedDeclarations.get(this.fnBody)?.length;
   }
 
-  override template(context: JSMetaContext): Array<string | JSMetaBase> {
-    const { scopedDeclarations, declaredNames } = context;
+  override template(): Array<string | JSMetaBase> {
+    const { scopedDeclarations, declaredNames } = $context.use();
     const parts: (string | JSMetaBase)[] = ["{"];
 
     const assignments: string[] = [];
     for (const scoped of scopedDeclarations.get(this.fnBody) ?? []) {
       assignments.push(
         `${declaredNames.get(scoped)}=${scoped.hasResources ? "()=>" : ""}${
-          metaToJS(context, scoped, true)
+          metaToJS(scoped, true)
         }`,
       );
     }
@@ -889,8 +897,8 @@ class JSMetaFunctionBody extends JSMetaBase {
           let firstBodyMeta: string | JSMetaBase | undefined =
             this.fnBody[jsSymbol];
           firstBodyMeta && typeof firstBodyMeta !== "string" &&
-          !context.declaredNames.has(firstBodyMeta);
-          firstBodyMeta = firstBodyMeta.template(context)
+          !declaredNames.has(firstBodyMeta);
+          firstBodyMeta = firstBodyMeta.template()
             .find((t) => t !== "")
         ) {
           if (firstBodyMeta instanceof JSMetaObject) {
@@ -925,7 +933,8 @@ class JSMetaArgument extends JSMetaBase<never> {
     super();
   }
 
-  override template(context: JSMetaContext): (string | JSMetaBase)[] {
+  override template(): (string | JSMetaBase)[] {
+    const context = $context.use();
     const existing = context.args.get(this);
     if (existing) return [existing];
 
@@ -947,7 +956,8 @@ class JSMetaModule extends JSMetaBase {
     super();
   }
 
-  override template(context: JSMetaContext): (string | JSMetaBase)[] {
+  override template(): (string | JSMetaBase)[] {
+    const context = $context.use();
     return [
       context.modules,
       `[${
@@ -974,7 +984,7 @@ class JSMetaModuleStore extends JSMetaBase {
     super();
   }
 
-  override template(_: JSMetaContext): (string | JSMetaBase)[] {
+  override template(): (string | JSMetaBase)[] {
     return [
       `(await Promise.all(${
         JSON.stringify(
@@ -1010,7 +1020,8 @@ class JSMetaResource<T extends JSONable = JSONable> extends JSMetaBase<T> {
     super();
   }
 
-  override template(context: JSMetaContext): Array<string | JSMetaBase> {
+  override template(): Array<string | JSMetaBase> {
+    const context = $context.use();
     context.resources ??= new JSMetaResources(context);
     return [context.resources.peek<T>(this.uri, this.fetch)];
   }
@@ -1091,11 +1102,12 @@ class JSMetaReassign<T> extends JSMetaBase<T> {
     super();
     if (expr === varMut) {
       // Re-evaluate
-      this.expr = new JSMetaVar((context) => expr.template(context));
+      this.expr = new JSMetaVar(() => expr.template());
     }
   }
 
-  override template(context: JSMetaContext): (string | JSMetaBase)[] {
+  override template(): (string | JSMetaBase)[] {
+    const context: JSMetaContext = $context.use();
     const varMeta = this.varMut;
     return context.declaredNames.has(varMeta) ||
         varMeta instanceof JSMetaArgument

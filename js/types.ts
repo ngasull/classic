@@ -61,7 +61,7 @@ export type JSable<T = unknown> =
 export type JSMeta<T = unknown, R = false> = Readonly<JSableType<T, R>> & {
   readonly [jsSymbol]: JSMeta<T, R>;
   scope: JSMeta | null;
-  template(_context: unknown): Array<string | JSMeta>;
+  template(): Array<string | JSMeta>;
   thenable?: JSMeta;
   isAwaited?: boolean;
   isntAssignable?: boolean;
