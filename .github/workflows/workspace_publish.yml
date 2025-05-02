@@ -1,9 +1,9 @@
 name: Publish
 
 on:
-  push:
-    branches:
-      - master
+  release:
+    types: [published]
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -16,5 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Publish package
-        run: npx jsr publish
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: canary
+
+      - name: Format
+        run: deno fmt --check
+
+      - name: Test
+        run: deno test --doc --ignore=README.md,element/README.md,server/README.md
+
+      - name: Publish to JSR
+        run: deno publish

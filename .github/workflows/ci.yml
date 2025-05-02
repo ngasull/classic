@@ -1,0 +1,39 @@
+name: ci
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        deno:
+          - v2.x
+        os:
+          - ubuntu-latest
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: canary
+
+      - name: Run tests
+        run: |
+          deno task test --doc --coverage --clean --ignore=README.md,element/README.md,server/README.md
+
+      - name: Publish dry run
+        run: deno publish --dry-run
+        if: matrix.os == 'ubuntu-latest'
