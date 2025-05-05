@@ -189,18 +189,18 @@ export class PrebuildContext {
 }
 
 export const $buildRestore = Context.for<
-  Stringifiable[]
+  () => Stringifiable
 >("classic.buildRestore");
 
 /**
- * Provides prebuilt data to restore to a server
+ * Provides prebuilt data restoration logic to a server
  *
- * @param restored Prebuilt data
+ * @param restore Function that returns next prebuilt data
  * @param cb Arbitrary closure
  * @params args `cb`'s arguments
  */
 export const restoreBuild = <Args extends unknown[], R>(
-  restored: Stringifiable[],
+  restore: () => Stringifiable,
   cb: (...args: Args) => R,
   ...args: Args
-): R => $buildRestore.provide(restored, cb, ...args);
+): R => $buildRestore.provide(restore, cb, ...args);

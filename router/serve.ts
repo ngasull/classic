@@ -133,9 +133,10 @@ export default async (
     const res = Promise.withResolvers<Response | void | undefined>();
 
     restored ??= metaAsset.contents();
+    const restoreQueue = (await restored).slice();
 
     await restoreBuild(
-      (await restored).slice(),
+      () => restoreQueue.shift(),
       () =>
         $routeBuild.provide(
           new RouteBuild(

@@ -229,8 +229,8 @@ export const useBuild: {
 } = <T extends Async<Stringifiable>>(
   ...args: [() => T] | [string, (() => T)]
 ): T => {
-  const restored = $buildRestore.get();
-  if (restored) return restored.shift() as T;
+  const restore = $buildRestore.get();
+  if (restore) return restore() as T;
 
   return new Build(...args).run().use();
 };
