@@ -36,7 +36,8 @@
   },
   "tasks": {
     "npm": "deno run -A script/build_npm.ts",
-    "test": "deno test --allow-read --allow-env --allow-run",
+    "test": "deno test --doc --ignore=README.md,element/README.md,server/README.md",
+    "coverage": "deno test --doc --coverage --clean --ignore=README.md,element/README.md,server/README.md",
     "bump": "deno run -A jsr:@deno/bump-workspaces@0.1.22/cli",
     "clean": "rm -rf npm"
   },
