@@ -17,7 +17,7 @@ type JSPrimitive =
   | symbol
   | RegExp;
 
-type JSValue = JSPrimitive | Date | URL;
+type JSValue = JSPrimitive | Date | URL | Uint8Array;
 
 /** A value that can be converted to a JavaScript expression */
 export type Stringifiable =
@@ -87,6 +87,12 @@ const walk = (
         write("new URL(");
         write(JSON.stringify(value.href));
         write(")");
+      } else if (value instanceof Uint8Array) {
+        write('new Uint8Array(Array.from("');
+        value.forEach((c) => {
+          write(String.fromCharCode(c + 22));
+        });
+        write('").map(c=>c.charCodeAt(0)-22))');
       } else if (value instanceof Set) {
         write("new Set(");
         walk([...value.values()], write);

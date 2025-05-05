@@ -22,6 +22,10 @@ Deno.test({
       stringify(new URL("http://deno.land")),
       `new URL("http://deno.land/")`,
     );
+    assertEquals(
+      eval(stringify(new Uint8Array([1, 2, 3]))).toString(),
+      new Uint8Array([1, 2, 3]).toString(),
+    );
   },
 });
 
