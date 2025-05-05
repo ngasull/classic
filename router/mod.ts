@@ -76,7 +76,7 @@
  * export default () => {
  *
  *   // Apply a layout to this route and every nested route
- *   declareLayout((req, children) => {
+ *   declareLayout((children) => {
  *     return (
  *       <html>
  *         <head>
@@ -91,7 +91,7 @@
  *   });
  *
  *   // Current page (_root "/"_)
- *   declarePage((req) => (
+ *   declarePage(() => (
  *     <>
  *       <h1>Root page</h1>
  *       <p>It works!</p>
@@ -110,7 +110,7 @@
  * export default () => {
  *
  *   // Current page (_"/hello"_)
- *   declarePage((req) => {
+ *   declarePage(() => {
  *     return (
  *       <>
  *         <h1>Hello world!</h1>
@@ -163,7 +163,7 @@
  *     }
  *   `;
  *
- *   declareLayout((req, children) => {
+ *   declareLayout((children) => {
  *     return (
  *       <html>
  *         <head>
@@ -203,7 +203,7 @@
  *   `;
  *
  *   // Declare current page (_/hello_)
- *   declarePage((req) => (
+ *   declarePage(() => (
  *     <>
  *       <h1 class="hellover">Hello world!</h1>;
  *       <svg class="supergraph">...</svg>
