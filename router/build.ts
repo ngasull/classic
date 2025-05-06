@@ -1,11 +1,10 @@
-import { join, relative, resolve, toFileUrl } from "@std/path";
+import { join, resolve, toFileUrl } from "@std/path";
 import {
   type Async,
   Build,
   BuildResult,
   useBuild,
 } from "@classic/server/build";
-import { pageCss } from "./page.ts";
 import { $routeBuild, RouteBuild } from "./serve.ts";
 
 /**
@@ -16,17 +15,15 @@ import { $routeBuild, RouteBuild } from "./serve.ts";
 export const useFileRouter = (base: string): Promise<void> =>
   useBuild(() => scanDir(base, []));
 
-const routeRegExp = /^((?:(.+)\.)?route)\.(tsx?|css)$/;
+const routeRegExp = /^((?:(.+)\.)?route)\.tsx?$/;
 
 const scanDir = async (
   baseDir: string,
   parentSegments: string[],
 ) => {
   const routeFiles = new Set<[string, string]>();
-  const cssRouteFiles = new Set<[string, string]>();
   const directories = new Set<string>();
   let indexFile: string | undefined;
-  let cssIndexFile: string | undefined;
 
   const dir = join(baseDir, ...parentSegments);
   for await (const { isDirectory, name } of Deno.readDir(dir)) {
@@ -35,31 +32,18 @@ const scanDir = async (
     } else {
       const match = name.match(routeRegExp);
       if (match) {
-        const [
-          ,
-          baseName,
-          routeName,
-          ext,
-        ] = match as [string, string, string, string];
+        const [, baseName, routeName] = match as [string, string, string];
 
-        if (ext === "css") {
-          if (baseName === "route") {
-            cssIndexFile = name;
+        if (baseName === "route") {
+          if (indexFile) {
+            throw Error(
+              `Two route files defined in ${dir} : ${indexFile} and ${name}`,
+            );
           } else {
-            cssRouteFiles.add([name, routeName]);
+            indexFile = name;
           }
         } else {
-          if (baseName === "route") {
-            if (indexFile) {
-              throw Error(
-                `Two route files defined in ${dir} : ${indexFile} and ${name}`,
-              );
-            } else {
-              indexFile = name;
-            }
-          } else {
-            routeFiles.add([name, routeName]);
-          }
+          routeFiles.add([name, routeName]);
         }
       }
     }
@@ -90,10 +74,10 @@ const scanDir = async (
 
       const result = build.run();
 
-      routeBuild.built.push(...await result.built);
+      result.built.then((built) => routeBuild.built.push(...built));
 
       new BuildResult(
-        undefined,
+        result.value,
         Promise.resolve([]),
         result.routes,
         result.options,
@@ -103,27 +87,30 @@ const scanDir = async (
 
   if (indexFile) {
     // ! \\ CSS First
-    if (cssIndexFile) {
-      const path = join(dir, cssIndexFile);
-      pageCss({
-        css: await Deno.readFile(path),
-        fileName: relative(baseDir, path),
-      });
-    }
+    // if (cssIndexFile) {
+    //   const path = join(dir, cssIndexFile);
+    //   pageCss({
+    //     css: await Deno.readFile(path),
+    //     fileName: relative(baseDir, path),
+    //   });
+    //   const ss = new BuiltStyleSheet();
+    //   ss.css`${() => Deno.readFile(path)}`
+    //   ss.usePath(relative(baseDir, path))
+    // }
 
     addRouteFile(indexFile);
   }
 
   // ! \\ CSS First
-  for (const [name] of cssRouteFiles) {
-    const path = join(dir, name);
-    await useBuild(async () =>
-      pageCss({
-        css: await Deno.readFile(path),
-        fileName: relative(baseDir, path),
-      })
-    );
-  }
+  // for (const [name] of cssRouteFiles) {
+  //   const path = join(dir, name);
+  //   await useBuild(async () =>
+  //     pageCss({
+  //       css: await Deno.readFile(path),
+  //       fileName: relative(baseDir, path),
+  //     })
+  //   );
+  // }
 
   for (const [name, routeName] of routeFiles) {
     useBuild(

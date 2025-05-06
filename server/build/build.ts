@@ -154,8 +154,9 @@ export class Build<T extends Async<Stringifiable> = Async<Stringifiable>> {
       };
       for (const o of instance.options) {
         if (o instanceof BuildResult) {
-          (await o.options).entries()
-            .forEach(([k, vs]) => vs.forEach((v) => addEntry(k, v)));
+          (await o.options).forEach((vs, k) =>
+            vs.forEach((v) => addEntry(k, v))
+          );
         } else {
           addEntry(o[0], o[1]);
         }

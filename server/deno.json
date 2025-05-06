@@ -4,6 +4,7 @@
   "exports": {
     ".": "./mod.ts",
     "./build": "./build/mod.ts",
+    "./css": "./css/mod.ts",
     "./runtime": "./runtime/mod.ts",
     "./client/router": "./client-router.ts",
     "./plugin/bundle": "./plugin/bundle-build.ts",

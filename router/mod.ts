@@ -139,18 +139,25 @@
  *
  * As long as they share the same design system, stacking both approches allows you write HTML that is well-styled by default while keeping per-page flexibitly.
  *
- * ### Stylesheet
+ * ### Constructing stylesheets
+ *
+ * Stylesheets are declared at static level so they can be referenced during any build.
+ * Some layout may retrieve its public path for HTML linking.
+ * Warning: awaiting should be done at the last moment so the build isn't blocked.
  *
  * ```tsx
  * // src/route.tsx
  *
  * import { declareLayout, declarePage } from "@classic/router";
+ * import { BuiltStyleSheet } from "@classic/server/css";
+ *
+ * const styles = new BuiltStyleSheet()
  *
  * export default () => {
  *
  *   // Embed and/or write layout-level CSS
- *   // Compiled into an optimized stylesheet
- *   const styleSheet = declareLayout.css`
+ *   // Will be compiled into an optimized stylesheet
+ *   styles.css`
  *     ${() => Deno.readFile("asset/pico.css")}
  *     ${() => Deno.readFile("asset/tailwind.css")}
  *
@@ -163,13 +170,15 @@
  *     }
  *   `;
  *
- *   declareLayout((children) => {
+ *   const stylesPath = styles.usePath()
+ *
+ *   declareLayout(async (children) => {
  *     return (
  *       <html>
  *         <head>
  *           <title>Hello world</title>
  *           <meta charset="utf-8" />
- *           <styleSheet.Html />
+ *           <link rel="stylesheet" href={await stylesPath} />
  *         </head>
  *         <body>
  *           {children}
@@ -179,36 +188,6 @@
  *   });
  *
  *   // ... //
- * };
- * ```
- *
- * ### Ad-hoc styling without a utility-based framework
- *
- * In some cases, page-specific CSS may be needed. Not recommended for the general use case.
- *
- * ```tsx
- * import { declarePage } from "@classic/router";
- *
- * export default () => {
- *
- *   // Page-specific CSS rules
- *   // Compiled into an optimized stylesheet
- *   // Embedded in layout's PageStyle automatically
- *   declarePage.css`
- *     ${() => Deno.readFile("asset/supergraphlib.css")}
- *
- *     h1.hellover:hover {
- *       background: red;
- *     }
- *   `;
- *
- *   // Declare current page (_/hello_)
- *   declarePage(() => (
- *     <>
- *       <h1 class="hellover">Hello world!</h1>;
- *       <svg class="supergraph">...</svg>
- *     </>
- *   ));
  * };
  * ```
  *

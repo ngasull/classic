@@ -32,12 +32,12 @@
     "@std/media-types": "jsr:@std/media-types@^1.0.2",
     "@std/path": "jsr:@std/path@^0.225.2",
     "esbuild": "npm:esbuild@^0.23.0",
-    "lightningcss": "npm:lightningcss-wasm@^1.29.3"
+    "lightningcss": "npm:lightningcss@^1.29.3"
   },
   "tasks": {
     "npm": "deno run -A script/build_npm.ts",
-    "test": "deno test --doc --ignore=README.md,element/README.md,server/README.md",
-    "coverage": "deno test --doc --coverage --clean --ignore=README.md,element/README.md,server/README.md",
+    "test": "deno test --doc --allow-sys --allow-ffi --ignore=README.md,element/README.md,server/README.md",
+    "coverage": "deno test --doc --allow-sys --allow-ffi --coverage --clean --ignore=README.md,element/README.md,server/README.md",
     "bump": "deno run -A jsr:@deno/bump-workspaces@0.1.22/cli",
     "clean": "rm -rf npm"
   },
