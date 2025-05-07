@@ -1,6 +1,6 @@
 {
   "workspace": [
-    "./build",
+    "./compile",
     "./context",
     "./element",
     "./html",
@@ -12,7 +12,7 @@
   ],
   "imports": {
     "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.48",
-    "@classic/build": "jsr:@classic/build@0.1",
+    "@classic/compile": "jsr:@classic/compile@0.1",
     "@classic/context": "jsr:@classic/context@0.1",
     "@classic/element": "jsr:@classic/element@0.1",
     "@classic/html": "jsr:@classic/html@0.1",

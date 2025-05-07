@@ -1,4 +1,4 @@
-import { devModules as _devModules } from "@classic/build/modules";
+import { devModules as _devModules } from "@classic/compile/modules";
 import { useBuild, useRoute } from "../build/mod.ts";
 import { serveAsset } from "./asset-serve-build.ts";
 

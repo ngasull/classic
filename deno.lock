@@ -2,7 +2,6 @@
   "version": "4",
   "specifiers": {
     "jsr:@b-fuze/deno-dom@~0.1.48": "0.1.48",
-    "jsr:@classic/build@0.1": "0.1.2",
     "jsr:@classic/context@0.1": "0.1.0",
     "jsr:@classic/element@0.1": "0.1.6",
     "jsr:@classic/html@0.1": "0.1.0",
@@ -14,7 +13,6 @@
     "jsr:@denosaurs/plug@1.0.3": "1.0.3",
     "jsr:@hono/hono@^4.6.20": "4.6.20",
     "jsr:@jabr/xxhash64@2": "2.0.0",
-    "jsr:@luca/esbuild-deno-loader@~0.10.3": "0.10.3",
     "jsr:@luca/esbuild-deno-loader@~0.11.1": "0.11.1",
     "jsr:@std/assert@*": "1.0.9",
     "jsr:@std/assert@0.226": "0.226.0",
@@ -35,8 +33,6 @@
     "jsr:@std/fs@~0.229.3": "0.229.3",
     "jsr:@std/http@~0.224.5": "0.224.5",
     "jsr:@std/internal@^1.0.5": "1.0.5",
-    "jsr:@std/json@~0.213.1": "0.213.1",
-    "jsr:@std/jsonc@0.213": "0.213.1",
     "jsr:@std/media-types@^1.0.0-rc.1": "1.1.0",
     "jsr:@std/media-types@^1.0.2": "1.1.0",
     "jsr:@std/net@~0.224.3": "0.224.5",
@@ -57,15 +53,6 @@
       "integrity": "bf5b591aef2e9e9c59adfcbb93a9ecd45bab5b7c8263625beafa5c8f1662e7da",
       "dependencies": [
         "jsr:@denosaurs/plug"
-      ]
-    },
-    "@classic/build@0.1.2": {
-      "integrity": "a4f9535b9e298611ff7beabd730171142cc89e7bd225e7e9e7d9d60b858380c1",
-      "dependencies": [
-        "jsr:@luca/esbuild-deno-loader@~0.10.3",
-        "jsr:@std/fs@~0.229.3",
-        "jsr:@std/path@~0.225.2",
-        "npm:esbuild"
       ]
     },
     "@classic/context@0.1.0": {
@@ -118,14 +105,6 @@
     },
     "@jabr/xxhash64@2.0.0": {
       "integrity": "a109e902abb6787816112ac71fd9145d39f8fccb45f96d1707c82197bd8fbfbd"
-    },
-    "@luca/esbuild-deno-loader@0.10.3": {
-      "integrity": "32fc93f7e7f78060234fd5929a740668aab1c742b808c6048b57f9aaea514921",
-      "dependencies": [
-        "jsr:@std/encoding@0.213",
-        "jsr:@std/jsonc",
-        "jsr:@std/path@0.213"
-      ]
     },
     "@luca/esbuild-deno-loader@0.11.1": {
       "integrity": "dc020d16d75b591f679f6b9288b10f38bdb4f24345edb2f5732affa1d9885267",
@@ -199,16 +178,6 @@
     },
     "@std/internal@1.0.5": {
       "integrity": "54a546004f769c1ac9e025abd15a76b6671ddc9687e2313b67376125650dc7ba"
-    },
-    "@std/json@0.213.1": {
-      "integrity": "f572b1de605d07c4a5602445dac54bfc51b1fb87a3710a17aed2608bfca54e68"
-    },
-    "@std/jsonc@0.213.1": {
-      "integrity": "5578f21aa583b7eb7317eed077ffcde47b294f1056bdbb9aacec407758637bfe",
-      "dependencies": [
-        "jsr:@std/assert@~0.213.1",
-        "jsr:@std/json"
-      ]
     },
     "@std/media-types@1.1.0": {
       "integrity": "c9d093f0c05c3512932b330e3cc1fe1d627b301db33a4c2c2185c02471d6eaa4"
@@ -484,7 +453,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@b-fuze/deno-dom@~0.1.48",
-      "jsr:@classic/build@0.1",
+      "jsr:@classic/compile@0.1",
       "jsr:@classic/context@0.1",
       "jsr:@classic/element@0.1",
       "jsr:@classic/html@0.1",
