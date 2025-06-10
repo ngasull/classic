@@ -88,11 +88,18 @@ const walk = (
         write(JSON.stringify(value.href));
         write(")");
       } else if (value instanceof Uint8Array) {
-        write('new Uint8Array(Array.from("');
+        write(
+          // Encode bytes to the first UTF-16 non-invisible characters
+          // First non-invisible character is space ' ' === String.fromCharCode(32)
+          // From 127 to 160, the 34 characters are not printable so we skip them
+          'new Uint8Array((s=>{let a=Array(s.length);for(let i=0;i<s.length;i++){let c=s.charCodeAt(i)-32;a[i]=c<127?c:c-34}return a})("',
+        );
         value.forEach((c) => {
-          write(String.fromCharCode(c + 22));
+          const encoded = String.fromCharCode(c + 32 + (c < 127 ? 0 : 34));
+          if (encoded === '"' || encoded === "\\") write("\\");
+          write(encoded);
         });
-        write('").map(c=>c.charCodeAt(0)-22))');
+        write('"))');
       } else if (value instanceof Set) {
         write("new Set(");
         walk([...value.values()], write);

@@ -22,9 +22,11 @@ Deno.test({
       stringify(new URL("http://deno.land")),
       `new URL("http://deno.land/")`,
     );
+
+    const everyByte = Array(256).fill(0).map((_, i) => i);
     assertEquals(
-      eval(stringify(new Uint8Array([1, 2, 3]))).toString(),
-      new Uint8Array([1, 2, 3]).toString(),
+      eval(stringify(new Uint8Array(everyByte))).toString(),
+      new Uint8Array(everyByte).toString(),
     );
   },
 });
