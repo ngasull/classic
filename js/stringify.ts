@@ -88,18 +88,22 @@ const walk = (
         write(JSON.stringify(value.href));
         write(")");
       } else if (value instanceof Uint8Array) {
-        write(
-          // Encode bytes to the first UTF-16 non-invisible characters
-          // First non-invisible character is space ' ' === String.fromCharCode(32)
-          // From 127 to 160, the 34 characters are not printable so we skip them
-          'new Uint8Array((s=>{let a=Array(s.length);for(let i=0;i<s.length;i++){let c=s.charCodeAt(i)-32;a[i]=c<127?c:c-34}return a})("',
-        );
-        value.forEach((c) => {
-          const encoded = String.fromCharCode(c + 32 + (c < 127 ? 0 : 34));
-          if (encoded === '"' || encoded === "\\") write("\\");
-          write(encoded);
-        });
-        write('"))');
+        if (value.length > 0) {
+          write(
+            // Encode bytes to the first UTF-16 non-invisible characters
+            // First non-invisible character is space ' ' === String.fromCharCode(32)
+            // From 127 to 160, the 34 characters are not printable so we skip them
+            'new Uint8Array((s=>{let a=Array(s.length);for(let i=0;i<s.length;i++){let c=s.charCodeAt(i)-32;a[i]=c<127?c:c-34}return a})("',
+          );
+          value.forEach((c) => {
+            const encoded = String.fromCharCode(c + 32 + (c < 127 ? 0 : 34));
+            if (encoded === '"' || encoded === "\\") write("\\");
+            write(encoded);
+          });
+          write('"))');
+        } else {
+          write("new Uint8Array()");
+        }
       } else if (value instanceof Set) {
         write("new Set(");
         walk([...value.values()], write);

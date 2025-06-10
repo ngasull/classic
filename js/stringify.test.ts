@@ -28,6 +28,7 @@ Deno.test({
       eval(stringify(new Uint8Array(everyByte))).toString(),
       new Uint8Array(everyByte).toString(),
     );
+    assertEquals(stringify(new Uint8Array([])), "new Uint8Array()");
   },
 });
 
