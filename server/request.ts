@@ -1,8 +1,10 @@
 import { Context } from "@classic/context";
-import type { Async } from "../build/mod.ts";
+import type { RouteModule } from "./module.ts";
 import type { ClassicServer } from "./runtime.ts";
 
-export const $request = Context.for<ClassicRequest<unknown>>(
+export type Method = "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
+
+export const $moduleRequest = Context.for<ModuleRequest<unknown>>(
   "classic.request",
 );
 
@@ -13,9 +15,7 @@ const $next = Context.for<Next>("classic.next");
 /**
  * Execute next middlewares immediately to work on returned {@linkcode Response}.
  */
-export const useNext = (): Promise<Response> => {
-  return $next.use()();
-};
+export const useNext = (): Promise<Response> => $next.use()();
 
 /**
  * Request context in the classic runtime
@@ -42,18 +42,34 @@ export class ClassicRequest<Params> {
   }
 }
 
-export class RequestPattern {
+export class ModuleRequest<Params> {
   constructor(
+    /** Initiating server instance */
+    public readonly server: ClassicServer,
+    /** Module declared by the request */
+    public readonly module: RouteModule<unknown[]>,
+    /** Classic request */
+    public readonly request: ClassicRequest<Params>,
     /** Groups resolved from matched {@linkcode URLPattern} */
     public readonly groups: Record<string, string>,
     /** Matched {@linkcode URLPattern}'s pattern */
     public readonly matchedPattern: string,
-  ) {}
+  ) {
+    Object.defineProperty(this, "module", freezeProperty);
+    Object.defineProperty(this, "request", freezeProperty);
+    Object.defineProperty(this, "groups", freezeProperty);
+    Object.defineProperty(this, "matchedPattern", freezeProperty);
+  }
 }
 
-export const $requestPattern = Context.for<RequestPattern>(
-  "classic.requestPattern",
-);
+/** {@linkcode Request} but typed with parameter groups */
+export type TypedRequest<Params> = Request & { "_@@params": Params };
+
+/**
+ * Retrieves the active {@linkcode Request} from current context
+ */
+export const useRequest = <Params>(): TypedRequest<Params> =>
+  $moduleRequest.use().request.request as TypedRequest<Params>;
 
 /**
  * Use current request's matched parameter groups
@@ -66,27 +82,49 @@ export const useParams: {
   ): R extends TypedRequest<infer Params> ? Params : never;
   <T>(req: TypedRequest<T>): T;
   <Params extends Record<string, string> = Record<string, string>>(): Params;
-} = <T>(_req?: TypedRequest<T>): T => $requestPattern.get()!.groups as T;
+} = <T>(_req?: TypedRequest<T>): T => $moduleRequest.use().groups as T;
 
 /**
  * Use current request's matched router pattern
  */
 export const useMatchedPattern = (): string =>
-  $requestPattern.get()!.matchedPattern;
+  $moduleRequest.use().matchedPattern;
 
-export type TypedRequest<Params> = Request & { "_@@params": Params };
+/**
+ * Fetch a {@linkcode Response} in current server's context
+ *
+ * @param req The {@linkcode Request} to send
+ */
+export const useFetch = (req: Request): Promise<Response> =>
+  $moduleRequest.use().server.fetch(req);
+
+/**
+ * Redirects to requested path, preferrably softly when
+ * current request comes from classic router.
+ *
+ * @param pathname The from which to send the {@linkcode Response}
+ */
+export const useRedirect = async (pathname: string): Promise<Response> => {
+  const req = useRequest();
+  const isClassicRoute = req.headers.has("Classic-Route");
+  const contentLocation = new URL(pathname, req.url);
+
+  return isClassicRoute
+    ? useFetch(new Request(contentLocation))
+    : Response.redirect(contentLocation);
+};
 
 /**
  * Middleware or handler function
  */
 export type Middleware<Params = Record<never, string>> = (
   req: TypedRequest<Params>,
-) => Async<Response | void | undefined>;
+) => Response | void | null | PromiseLike<Response | void | null>;
 
 export const runMiddlewares = <Params>(
   [first, ...after]: Middleware<Params>[],
   req: Request,
-): Async<Response> => {
+): Response | PromiseLike<Response> => {
   if (!first) return notFound();
 
   let hasNextBeenCalled = false;
@@ -123,6 +161,16 @@ export const notFound = async () => notFoundResponse.clone();
  * API to set and get request-level arbitrary context
  */
 export class RequestContext<T> {
+  readonly #init?: () => T;
+
+  /**
+   * @constructor
+   * @param init Lazy initializer
+   */
+  constructor(init?: () => T) {
+    this.#init = init;
+  }
+
   /**
    * Set an arbitrary value to this context to be available
    * everywhere during current request
@@ -131,7 +179,7 @@ export class RequestContext<T> {
    * @returns Passed `value`
    */
   set(value: T): T {
-    $request.use().context.set(this, value);
+    $moduleRequest.use().request.context.set(this, value);
     return value;
   }
 
@@ -139,7 +187,34 @@ export class RequestContext<T> {
    * Retrieve an arbitrary request global value
    */
   get(): T | undefined {
-    return $request.use().context.get(this) as T | undefined;
+    const context = $moduleRequest.use().request.context;
+    let value: T | undefined;
+    if (context.has(this)) {
+      value = context.get(this) as T;
+    } else if (this.#init) {
+      context.set(this, value = this.#init());
+    }
+    return value;
+  }
+
+  /**
+   * Require an arbitrary request global value
+   */
+  use(): T {
+    const context = $moduleRequest.use().request.context;
+    let value: T;
+    if (context.has(this)) {
+      value = context.get(this) as T;
+    } else {
+      if (this.#init) {
+        context.set(this, value = this.#init());
+      } else {
+        throw Error(
+          `RequestContext can't be used as it hasn't been set and has no initializer`,
+        );
+      }
+    }
+    return value;
   }
 }
 

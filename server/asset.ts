@@ -1,7 +1,8 @@
 import { Context } from "@classic/context";
 import { type Stringifiable, stringify } from "@classic/js/stringify";
 import { join } from "@std/path/join";
-import type { Async } from "./mod.ts";
+
+type Async<T> = T | PromiseLike<T>;
 
 export enum AssetKind {
   JS = 0,
@@ -28,7 +29,7 @@ export class Asset<
 > {
   /** @ignore */
   readonly [$asset] = true;
-  readonly #contents: () => Async<T>;
+  readonly #contents: Async<T> | (() => Async<T>);
   readonly #hint?: string;
 
   /**
@@ -36,7 +37,7 @@ export class Asset<
    * @param options
    */
   constructor(contents: Async<T> | (() => Async<T>), options?: AssetOptions) {
-    this.#contents = typeof contents === "function" ? contents : () => contents;
+    this.#contents = contents;
     this.#hint = options?.hint;
   }
 
@@ -47,7 +48,9 @@ export class Asset<
 
   /** Data to retrieve */
   async contents(): Promise<T> {
-    return this.#contents();
+    return typeof this.#contents === "function"
+      ? this.#contents()
+      : this.#contents;
   }
 
   /** @ignore */

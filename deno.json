@@ -25,25 +25,25 @@
     "@jabr/xxhash64": "jsr:@jabr/xxhash64@^2.0.0",
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader@^0.11.1",
     "@std/assert": "jsr:@std/assert@^1.0.7",
-    "@std/bytes": "jsr:@std/bytes@^1.0.5",
+    "@std/bytes": "jsr:@std/bytes@^1.0.6",
     "@std/encoding": "jsr:@std/encoding@^1.0.4",
     "@std/fs": "jsr:@std/fs@^0.229.3",
     "@std/http": "jsr:@std/http@^0.224.5",
     "@std/media-types": "jsr:@std/media-types@^1.0.2",
     "@std/path": "jsr:@std/path@^0.225.2",
+    "@std/testing": "jsr:@std/testing@^1.0.11",
     "esbuild": "npm:esbuild@^0.23.0",
     "lightningcss": "npm:lightningcss@^1.29.3"
   },
   "tasks": {
     "npm": "deno run -A script/build_npm.ts",
-    "test": "deno test --doc --allow-sys --allow-ffi --ignore=README.md,element/README.md,server/README.md",
-    "coverage": "deno test --doc --allow-sys --allow-ffi --coverage --clean --ignore=README.md,element/README.md,server/README.md",
+    "test": "deno test --doc -A --ignore=README.md,element/README.md,js/README.md,server/README.md,examples",
+    "coverage": "deno test --doc -A --coverage --clean --ignore=README.md,element/README.md,js/README.md,server/README.md,examples",
     "bump": "deno run -A jsr:@deno/bump-workspaces@0.1.22/cli",
     "clean": "rm -rf npm"
   },
   "exclude": [
-    ".git",
-    "examples"
+    ".git"
   ],
   "publish": {
     "include": [

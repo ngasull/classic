@@ -1,1 +1,1 @@
-export { BuiltStyleSheet } from "./css.ts";
+export { styled } from "./css.ts";

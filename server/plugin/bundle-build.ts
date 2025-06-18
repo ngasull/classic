@@ -1,38 +1,52 @@
 import { devModules as _devModules } from "@classic/compile/modules";
-import { useBuild, useRoute } from "../build/mod.ts";
-import { serveAsset } from "./asset-serve-build.ts";
+import { Buildable } from "@classic/server";
+import { ServedAsset } from "./asset-serve-build.ts";
 
-export const devModules = (): Promise<Record<string, string>> =>
-  useBuild(async () => {
-    const modules = await _devModules({
-      modules: [
-        "@classic/server/client/router",
-      ],
-      moduleBase: "client",
-    });
+class BuildModules extends Buildable<Promise<Record<string, string>>> {
+  #modules?: Awaited<ReturnType<typeof _devModules>>;
 
-    // root.segment("/.hmr").method("GET", );
-    const moduleMap: Record<string, string> = {};
-    for (const { name, path } of modules.context.modules()) {
-      const module = modules.context.get(path)!;
-      serveAsset({
-        path: module.publicPath,
-        contents: () => module.load(),
-        contentType: "text/javascript",
+  constructor() {
+    super(async (exported) => {
+      this.#modules = await _devModules({
+        modules: [
+          "@classic/router",
+        ],
+        moduleBase: "client",
       });
 
-      if (name) moduleMap[name] = module.publicPath;
-    }
+      // root.segment("/.hmr").method("GET", );
+      const moduleMap: Record<string, string> = {};
+      for (const { name, path } of this.#modules.context.modules()) {
+        const module = this.#modules.context.get(path)!;
+        exported.build(
+          new ServedAsset({
+            path: module.publicPath,
+            contents: () => module.load(),
+            contentType: "text/javascript",
+          }),
+        );
 
-    useRoute(
-      "GET",
-      "*",
-      import.meta.resolve("./bundle-runtime.ts"),
-      moduleMap,
-    );
+        if (name) moduleMap[name] = module.publicPath;
+      }
 
-    return moduleMap;
-  });
+      exported.route({
+        pattern: "*",
+        moduleUrl: new URL(import.meta.resolve("./bundle-runtime.ts")),
+        params: [moduleMap],
+      });
+
+      return moduleMap;
+    });
+  }
+
+  override stop(): void | Promise<void> {
+    const modules = this.#modules;
+    this.#modules = undefined;
+    return modules?.stop();
+  }
+}
+
+export const devModules = (): BuildModules => new BuildModules();
 
 // export const buildModules = async <Params>(
 //   route: Build,

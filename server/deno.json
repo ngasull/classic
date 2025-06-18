@@ -3,14 +3,15 @@
   "version": "0.1.2",
   "exports": {
     ".": "./mod.ts",
-    "./build": "./build/mod.ts",
+    "./build": "./build.ts",
     "./css": "./css/mod.ts",
-    "./runtime": "./runtime/mod.ts",
-    "./client/router": "./client-router.ts",
     "./plugin/bundle": "./plugin/bundle-build.ts",
     "./plugin/bundle/runtime": "./plugin/bundle-runtime.ts",
     "./plugin/asset-serve": "./plugin/asset-serve-build.ts",
-    "./plugin/asset-serve/runtime": "./plugin/asset-serve-runtime.ts",
-    "./queue": "./queue.ts"
+    "./plugin/asset-serve/runtime": "./plugin/asset-serve-runtime.ts"
+  },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@classic/html"
   }
 }
