@@ -25,10 +25,10 @@ export const onChange = <T>(
   });
 };
 
-type ReturnTypeOr<T> = T extends () => infer T ? T : T;
+type ReturnTypeOr<T> = T extends (...args: unknown[]) => infer T ? T : T;
 
 export const callOrReturn = <T>(v: T): ReturnTypeOr<T> =>
-  isFunction(v) ? v() : v;
+  isFunction(v) ? v() : v as never;
 
 export const signal = <T>(init: T | (() => T)): Signal<T> => {
   let isInit: 1 | undefined, v: T, cbs = new Set<() => void>();
