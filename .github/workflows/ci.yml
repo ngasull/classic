@@ -32,7 +32,7 @@ jobs:
 
       - name: Run tests
         run: |
-          deno task test --doc --coverage --clean --ignore=README.md,element/README.md,server/README.md
+          deno task test --coverage --clean
 
       - name: Publish dry run
         run: deno publish --dry-run
