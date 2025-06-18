@@ -1,15 +1,15 @@
-import { type Context, Key } from "@classic/context";
 import type { Resolver } from "@classic/js";
-import type { Middleware } from "../request.ts";
+import { RequestContext } from "../request.ts";
 
-const $moduleMap = new Key<Record<string, string>>(
-  "module map",
-);
+const $moduleMap = new RequestContext<Record<string, string>>();
 
-export const resolveModule = (context: Context): Resolver => (spec) =>
-  context.use($moduleMap)[spec];
+export const useResolver: () => Resolver | undefined = () => {
+  const moduleMap = $moduleMap.get();
+  return moduleMap ? (spec) => moduleMap[spec] : undefined;
+};
 
-export default (moduleMap: Record<string, string>): Middleware => (ctx) => {
-  ctx.provide($moduleMap, moduleMap);
-  return ctx.next();
+export const resolveModule: Resolver = (spec) => $moduleMap.get()![spec];
+
+export default (moduleMap: Record<string, string>): void => {
+  $moduleMap.set(moduleMap);
 };

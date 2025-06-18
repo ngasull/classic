@@ -9,6 +9,7 @@ const safeRecordKeyRegExp = /^(?:[A-z_$][\w_$]*|\d+)$/;
 type JSPrimitive =
   | null
   | undefined
+  | void
   | boolean
   | number
   | bigint
@@ -16,59 +17,47 @@ type JSPrimitive =
   | symbol
   | RegExp;
 
-type JSValue = JSPrimitive | Date | URL;
-
-export type StringifiableExt<T> =
-  | JSValue
-  | T
-  | readonly StringifiableExt<T>[]
-  | Readonly<StringifiableObject<T>>
-  | ReadonlySet<StringifiableExt<T>>
-  | ReadonlyMap<StringifiableExt<T>, StringifiableExt<T>>;
+type JSValue = JSPrimitive | Date | URL | Uint8Array;
 
 /** A value that can be converted to a JavaScript expression */
-export type Stringifiable = StringifiableExt<never>;
+export type Stringifiable =
+  | JSValue
+  | readonly Stringifiable[]
+  | Readonly<StringifiableObject>
+  | ReadonlySet<Stringifiable>
+  | ReadonlyMap<Stringifiable, Stringifiable>
+  | StringifiableManually;
 
 /** A plain JavaScript object */
-type StringifiableObject<T = never> = {
-  [k: string | symbol]: typeof k extends string ? StringifiableExt<T>
-    : unknown;
+type StringifiableObject = {
+  [k: string]: Stringifiable;
+  [k: symbol]: unknown;
 };
 
-/**
- * {@linkcode stringify} options
- */
-export interface StringifyOpts {
-  readonly replace: {
-    readonly [key: symbol]: (obj: never) => string;
-  };
-}
+/** Any object implementing a stringify function */
+type StringifiableManually = { stringify(obj: unknown): string };
 
 /**
  * Converts a JavaScript value to a JavaScript expression string
  *
  * @param value Stringifiable JS object
- * @param opts Stringification options
  *
  * WARNING: if produced code is intended to be written in an HTML
  * `<script>` tag, make sure to escape it properly in order to
  * protect your users from XSS.
  */
-export const stringify = (
-  value: Stringifiable,
-  opts?: StringifyOpts,
-): string => {
-  const replaceSymbols = opts?.replace &&
-    Object.getOwnPropertySymbols(opts.replace);
-  const replace = replaceSymbols && ((o: never) => {
-    const key = replaceSymbols.find((k) => k in o);
-    if (key != null) {
-      return opts.replace[key](o);
-    }
-  });
+export const stringify = (value: Stringifiable): string => {
+  // const replaceSymbols = opts?.replace &&
+  //   Object.getOwnPropertySymbols(opts.replace);
+  // const replace = replaceSymbols && ((o: never) => {
+  //   const key = replaceSymbols.find((k) => k in o);
+  //   if (key != null) {
+  //     return opts.replace[key](o);
+  //   }
+  // });
 
   const strs: string[] = [];
-  walk(value, replace, (str) => {
+  walk(value, (str) => {
     strs.push(str);
   });
   return strs.join("");
@@ -76,7 +65,6 @@ export const stringify = (
 
 const walk = (
   value: Stringifiable,
-  replace: ((o: never) => string | undefined) | undefined,
   write: (str: string) => void,
 ): void => {
   if (value === undefined) return write("undefined");
@@ -88,7 +76,7 @@ const walk = (
         write("[");
         value.forEach((v, i) => {
           if (i > 0) write(",");
-          walk(v, replace, write);
+          walk(v, write);
         });
         write("]");
       } else if (value instanceof Date) {
@@ -99,19 +87,37 @@ const walk = (
         write("new URL(");
         write(JSON.stringify(value.href));
         write(")");
+      } else if (value instanceof Uint8Array) {
+        if (value.length > 0) {
+          write(
+            // Encode bytes to the first UTF-16 non-invisible characters
+            // First non-invisible character is space ' ' === String.fromCharCode(32)
+            // From 127 to 160, the 34 characters are not printable so we skip them
+            'new Uint8Array((s=>{let a=Array(s.length);for(let i=0;i<s.length;i++){let c=s.charCodeAt(i)-32;a[i]=c<127?c:c-34}return a})("',
+          );
+          value.forEach((c) => {
+            const encoded = String.fromCharCode(c + 32 + (c < 127 ? 0 : 34));
+            if (encoded === '"' || encoded === "\\") write("\\");
+            write(encoded);
+          });
+          write('"))');
+        } else {
+          write("new Uint8Array()");
+        }
       } else if (value instanceof Set) {
         write("new Set(");
-        walk([...value.values()], replace, write);
+        walk([...value.values()], write);
         write(")");
       } else if (value instanceof Map) {
         write("new Map(");
-        walk([...value.entries()], replace, write);
+        walk([...value.entries()], write);
         write(")");
       } else if (value instanceof RegExp) {
         write(value.toString());
       } else {
-        const replaced = replace?.(value as never);
-        if (replaced != null) return write(replaced);
+        if ("stringify" in value && typeof value.stringify === "function") {
+          return write(value.stringify(value));
+        }
 
         write("{");
         let first = true;
@@ -120,7 +126,7 @@ const walk = (
           else write(",");
           write(safeRecordKeyRegExp.test(k) ? k : stringify(k));
           write(":");
-          walk(v, replace, write);
+          walk(v, write);
         });
         Object.getOwnPropertySymbols(value).forEach((s) => {
           const key = Symbol.keyFor(s);
@@ -130,7 +136,7 @@ const walk = (
             write("[Symbol.for(");
             write(JSON.stringify(key));
             write(")]:");
-            walk((value as Record<symbol, Stringifiable>)[s], replace, write);
+            walk((value as Record<symbol, Stringifiable>)[s], write);
           }
         });
         write("}");

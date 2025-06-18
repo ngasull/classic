@@ -1,12 +1,11 @@
+import { Context } from "@classic/context";
 import {
   type JSable,
   type JSMeta,
   JSMetaBase,
-  type JSMetaContext,
   jsSymbol,
   mkJS,
 } from "@classic/js";
-import { type Context, Key } from "@classic/context";
 
 export type RefTree =
   ([JSable<EventTarget>] | [JSable<EventTarget>, RefTree])[];
@@ -17,19 +16,23 @@ export type RefTree =
  */
 export type Activation = ([number] | [number, Activation])[];
 
-const $refs = new Key<JSMetaRefStore>("refs");
+const $refs = Context.for<JSMetaRefStore>("classic.refs");
 
 export const mkRef = <T extends EventTarget>() => mkJS(new JSMetaRef<T>());
 
 class JSMetaRef<T extends EventTarget = EventTarget> extends JSMetaBase<T> {
-  override template(context: JSMetaContext) {
-    const refs = context.user.use($refs);
+  override template() {
+    const refs = $refs.use();
     return [refs, "[", refs.get(this).toString(), "]"];
   }
 }
 
-export const initRefs = (context: Context, refs: RefTree, entry: string) =>
-  context.provide($refs, new JSMetaRefStore(refs, entry));
+export const initRefs = <Args extends unknown[], T>(
+  refs: RefTree,
+  entry: string,
+  cb: (...args: Args) => T,
+  ...args: Args
+): T => $refs.provide(new JSMetaRefStore(refs, entry), cb, ...args);
 
 class JSMetaRefStore extends JSMetaBase<number[]> {
   override readonly isntAssignable = true;
@@ -54,7 +57,7 @@ class JSMetaRefStore extends JSMetaBase<number[]> {
     indicateRefs(refs);
   }
 
-  override template(_context: JSMetaContext): (string | JSMeta)[] {
+  override template(): (string | JSMeta)[] {
     if (!this.#retainedRefs) return ["[]"];
 
     const filterRefs = (refs: RefTree): Activation =>

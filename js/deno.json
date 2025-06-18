@@ -5,13 +5,5 @@
     ".": "./mod.ts",
     "./dom": "./dom.ts",
     "./stringify": "./stringify.ts"
-  },
-  "compilerOptions": {
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
   }
 }

@@ -7,12 +7,6 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@classic/html",
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
+    "jsxImportSource": "@classic/html"
   }
 }

@@ -1,7 +1,3 @@
-import { isFunction } from "@classic/util";
-import { registerCleanup } from "./dom/lifecycle.ts";
-import { store } from "./dom/store.ts";
-
 /**
  * Tuple holding refs attached to a jsx tree render.
  * First holds node index, second represents: children if present, otherwise (undefined) means next ref is associated.
@@ -29,26 +25,7 @@ const walkRefs = (
     return sub ? walkRefs(node.firstChild!, sub) : node;
   });
 
-const sub = (
-  target: EventTarget,
-  cb: () => void | (() => void),
-  uris?: readonly string[],
-): void => {
-  let cleanup: (() => void) | void = cb(),
-    unsubStore = uris && store.sub(uris, () => {
-      isFunction(cleanup) && cleanup();
-      cleanup = cb();
-    });
-  registerCleanup(
-    target,
-    () => {
-      unsubStore?.();
-      isFunction(cleanup) && cleanup();
-    },
-  );
-};
-
 /*
  * Effect API
  */
-export { refs, store, sub };
+export { refs };

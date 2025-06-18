@@ -3,13 +3,5 @@
   "version": "0.1.0",
   "exports": {
     ".": "./morph.ts"
-  },
-  "compilerOptions": {
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
   }
 }

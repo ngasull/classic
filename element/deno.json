@@ -5,13 +5,5 @@
     ".": "./mod.ts",
     "./jsx": "./jsx.ts",
     "./jsx-runtime": "./jsx-runtime.ts"
-  },
-  "compilerOptions": {
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
   }
 }

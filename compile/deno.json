@@ -1,0 +1,9 @@
+{
+  "name": "@classic/compile",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./mod.ts",
+    "./bundle": "./bundle.ts",
+    "./modules": "./modules.ts"
+  }
+}

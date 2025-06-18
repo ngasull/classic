@@ -1,4 +1,8 @@
-/** @import { Context } from "./context.ts" */
+/** @import { Context } from "./imperative.ts" */
+
+const store: Map<string, unknown> =
+  // @ts-ignore dynamic global
+  globalThis[Symbol.for("classic.key")] ??= new Map();
 
 declare const $type: unique symbol;
 
@@ -14,6 +18,21 @@ export class Key<T> {
    */
   constructor(public readonly description?: string) {}
   declare private [$type]: T;
+
+  /**
+   * Given the same parameter, retrieves the same reference. Like {@linkcode Symbol.for}
+   *
+   * @param description Key description
+   */
+  static for<T>(description: string): Key<T> {
+    if (store.has(description)) {
+      return store.get(description) as Key<T>;
+    } else {
+      const key = new Key<T>(description);
+      store.set(description, key);
+      return key;
+    }
+  }
 }
 
 /** Utility to infer arguments of a context use function */

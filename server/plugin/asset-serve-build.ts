@@ -1,13 +1,10 @@
-import { Key } from "@classic/context";
+import { Asset, Buildable } from "@classic/server";
 import { contentType } from "@std/media-types/content-type";
 import { extension } from "@std/media-types/extension";
 import { basename } from "@std/path/basename";
 import { extname } from "@std/path/extname";
-import type { Build } from "../build.ts";
 
-const $preferredStaticRoot = new Key<string>("preferredStaticRoot");
-
-/** Options for {@linkcode serveAsset} */
+/** New {@linkcode ServedAsset} options */
 export interface ServeAssetOptions {
   /** Exact path where the server send the asset */
   path?: string;
@@ -22,13 +19,10 @@ export interface ServeAssetOptions {
 }
 
 /**
- * Declares a static asset to serve and returns its public pathname
+ * Static asset to serve
  *
+ * Manages access to its public pathname at run time.
  * Response's Content-Type is guessed from original path extension if not specified explicitly.
- *
- * @param {ServeAssetOptions} options Options for serving
- *
- * @returns The public pathname where the asset is served
  *
  * @example Serve a dark mode stylesheet and link to it
  * ```ts ignore
@@ -40,30 +34,48 @@ export interface ServeAssetOptions {
  *   `<link rel="stylesheet" href="${darkModePathname}" />`;
  * ```
  */
-export const serveAsset = (
-  route: Build,
-  options: ServeAssetOptions,
-): string => {
-  let { path, pathHint, contents, contentType: ct, headers = {} } = options;
-  path ??= (route.get($preferredStaticRoot) ?? "/static/") +
-    (pathHint ?? "asset");
-  pathHint ??= basename(path);
+export class ServedAsset extends Buildable<string> {
+  #path?: string;
 
-  let ext: string | undefined = extname(path);
-  if (ext) {
-    ct ??= contentType(ext);
-  } else if (ct) {
-    ext = extension(ct);
-    if (!ext) headers = { "Content-Type": ct, ...headers };
+  /**
+   * @constructor
+   * @param options Options for serving
+   */
+  constructor(options: ServeAssetOptions) {
+    super((exported) => {
+      let { path, pathHint, contents, contentType: ct, headers = {} } = options;
+      path ??= pathHint ?? "asset";
+      pathHint ??= basename(path);
+
+      let ext: string | undefined = extname(path);
+      if (ext) {
+        ct ??= contentType(ext);
+      } else if (ct) {
+        ext = extension(ct);
+        if (!ext) headers = { "Content-Type": ct, ...headers };
+      }
+
+      exported.route({
+        pattern: path,
+        moduleUrl: new URL(import.meta.resolve("./asset-serve-runtime.ts")),
+        params: [
+          new Asset(contents, { hint: pathHint }),
+          ext,
+          headers,
+        ],
+      });
+
+      return path;
+    });
   }
 
-  route.root(path).method(
-    "GET",
-    import.meta.resolve("./asset-serve-runtime.ts"),
-    route.asset(contents, { hint: pathHint }),
-    ext,
-    headers,
-  );
+  /** @internal */
+  override restore(value: string): void {
+    this.#path = value;
+  }
 
-  return path;
-};
+  /** The public pathname where the asset is served */
+  get path(): string {
+    return this.#path!;
+  }
+}

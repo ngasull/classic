@@ -22,6 +22,13 @@ Deno.test({
       stringify(new URL("http://deno.land")),
       `new URL("http://deno.land/")`,
     );
+
+    const everyByte = Array(256).fill(0).map((_, i) => i);
+    assertEquals(
+      eval(stringify(new Uint8Array(everyByte))).toString(),
+      new Uint8Array(everyByte).toString(),
+    );
+    assertEquals(stringify(new Uint8Array([])), "new Uint8Array()");
   },
 });
 
@@ -143,17 +150,11 @@ Deno.test({
       [Symbol.for("poulet")]: "ninja",
       [Symbol("burger")]: "Hi",
       foo: "bar",
+      stringify: (o: unknown) => {
+        assertEquals(o, obj);
+        return "custom code";
+      },
     };
-    assertEquals(
-      stringify(obj, {
-        replace: {
-          [Symbol.for("poulet")]: (o) => {
-            assertEquals(o, obj);
-            return "custom code";
-          },
-        },
-      }),
-      `custom code`,
-    );
+    assertEquals(stringify(obj), `custom code`);
   },
 });

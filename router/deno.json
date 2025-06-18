@@ -2,14 +2,6 @@
   "name": "@classic/router",
   "version": "0.1.0",
   "exports": {
-    ".": "./mod.ts"
-  },
-  "compilerOptions": {
-    "lib": [
-      "deno.ns",
-      "DOM",
-      "DOM.Iterable",
-      "ES2021"
-    ]
+    ".": "./router.ts"
   }
 }

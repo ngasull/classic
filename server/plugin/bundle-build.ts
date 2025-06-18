@@ -1,40 +1,52 @@
-import { devModules as _devModules } from "@classic/build/modules";
-import type { Build } from "../build.ts";
-import { serveAsset } from "./asset-serve-build.ts";
+import { devModules as _devModules } from "@classic/compile/modules";
+import { Buildable } from "@classic/server";
+import { ServedAsset } from "./asset-serve-build.ts";
 
-export const devModules = async (
-  build: Build,
-): Promise<Record<string, string>> => {
-  const root = build.root("/");
+class BuildModules extends Buildable<Promise<Record<string, string>>> {
+  #modules?: Awaited<ReturnType<typeof _devModules>>;
 
-  const modules = await _devModules({
-    modules: [
-      "@classic/server/client/router",
-    ],
-    moduleBase: "client",
-  });
+  constructor() {
+    super(async (exported) => {
+      this.#modules = await _devModules({
+        modules: [
+          "@classic/router",
+        ],
+        moduleBase: "client",
+      });
 
-  // root.segment("/.hmr").method("GET", );
-  const moduleMap: Record<string, string> = {};
-  for (const { name, path } of modules.context.modules()) {
-    const module = modules.context.get(path)!;
-    root.use(serveAsset, {
-      path: module.publicPath,
-      contents: () => module.load(),
-      contentType: "text/javascript",
+      // root.segment("/.hmr").method("GET", );
+      const moduleMap: Record<string, string> = {};
+      for (const { name, path } of this.#modules.context.modules()) {
+        const module = this.#modules.context.get(path)!;
+        exported.build(
+          new ServedAsset({
+            path: module.publicPath,
+            contents: () => module.load(),
+            contentType: "text/javascript",
+          }),
+        );
+
+        if (name) moduleMap[name] = module.publicPath;
+      }
+
+      exported.route({
+        pattern: "*",
+        moduleUrl: new URL(import.meta.resolve("./bundle-runtime.ts")),
+        params: [moduleMap],
+      });
+
+      return moduleMap;
     });
-
-    if (name) moduleMap[name] = module.publicPath;
   }
 
-  build.root("/*").method(
-    "GET",
-    import.meta.resolve("./bundle-runtime.ts"),
-    moduleMap,
-  );
+  override stop(): void | Promise<void> {
+    const modules = this.#modules;
+    this.#modules = undefined;
+    return modules?.stop();
+  }
+}
 
-  return moduleMap;
-};
+export const devModules = (): BuildModules => new BuildModules();
 
 // export const buildModules = async <Params>(
 //   route: Build,

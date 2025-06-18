@@ -1,4 +1,3 @@
-import type { Context } from "@classic/context";
 import { isJSable, type JS, type JSable } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
 import type { VoidElement } from "./void.ts";
@@ -63,7 +62,6 @@ declare namespace JSX {
   /** Functional component */
   type FC<O extends Record<string, unknown> = Record<never, never>> = (
     props: O,
-    context: Context,
   ) => JSX.Element;
 
   /** Parent functional component (accepts children) */
