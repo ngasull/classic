@@ -1,9 +1,9 @@
 import { Buildable } from "@classic/server";
-import { ServedAsset } from "@classic/server/plugin/asset-serve";
 import { create as createHash } from "@jabr/xxhash64";
 import { concat } from "@std/bytes";
 import { encodeBase64 } from "@std/encoding";
 import { transform } from "lightningcss";
+import { ServedAsset } from "../plugin/asset-serve-build.ts";
 
 type Async<T> = T | PromiseLike<T>;
 

@@ -1,5 +1,5 @@
-import type { Asset } from "@classic/server";
 import { contentType } from "@std/media-types/content-type";
+import type { Asset } from "../mod.ts";
 
 export default async (
   asset: Asset<Uint8Array>,

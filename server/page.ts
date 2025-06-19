@@ -1,6 +1,6 @@
 import { type JSX, render } from "@classic/html";
 import { jsx } from "@classic/html/jsx-runtime";
-import { useResolver } from "@classic/server/plugin/bundle/runtime";
+import { useResolver } from "./plugin/bundle-runtime.ts";
 import {
   Buildable,
   RequestContext,
