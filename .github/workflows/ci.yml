@@ -30,6 +30,9 @@ jobs:
         with:
           deno-version: canary
 
+      - name: Format
+        run: deno fmt --check
+
       - name: Run tests
         run: |
           deno task test --coverage --clean
