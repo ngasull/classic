@@ -1,6 +1,6 @@
 ### 2025.06.19
 
-#### @classic/compile 0.1.0 (minor)
+#### @classic/build 0.1.0 (minor)
 
 - feat(build,compile): rename build package into the more accurate compile
 
