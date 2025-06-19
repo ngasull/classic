@@ -1,4 +1,4 @@
-import { devModules as _devModules } from "@classic/compile/modules";
+import { devModules as _devModules } from "@classic/build/modules";
 import { Buildable } from "@classic/server";
 import { ServedAsset } from "./asset-serve-build.ts";
 

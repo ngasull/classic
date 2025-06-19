@@ -562,7 +562,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@b-fuze/deno-dom@~0.1.48",
-      "jsr:@classic/compile@0.1",
+      "jsr:@classic/build@0.1",
       "jsr:@classic/context@0.1",
       "jsr:@classic/element@0.1",
       "jsr:@classic/html@0.1",
