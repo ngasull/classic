@@ -1,4 +1,4 @@
-# Classic web apps on modern standards
+<!-- # Classic web apps on modern standards -->
 
 Server-side middle-end prioritizing page load times and simplicity.
 
@@ -11,7 +11,7 @@ Server-side middle-end prioritizing page load times and simplicity.
   - Manipulate and attach JS to sent HTML through JSX refs
 - **TypeScript-first**
   - Even for JS manipulation
-- **Industrial-grade navigation** *(à la Remix)*
+- **Industrial-grade navigation** _(à la Remix)_
   - Dynamic nested routes
   - Actions through `form`s to update reactive resources
   - Minimum amount of bytes sent over the wire
@@ -19,14 +19,16 @@ Server-side middle-end prioritizing page load times and simplicity.
   - Share modules exposing HTML|JS|CSS thanks to the programmatic bundling API
   - Extend functionalities and integrate in larger frameworks
 - **Programmatic workflow**
-  - Optimized bundling *([esbuild](https://esbuild.github.io/) under the hood)*
+  - Optimized bundling _([esbuild](https://esbuild.github.io/) under the hood)_
   - Buildless development
   - Simple explicit production build
 
-**Classic is not a UI library and depends on none**, but you can optionally use some.
-Classic integrates with existing technologies rather than reinventing them.
+**Classic is not a UI library and depends on none**, but you can optionally use
+some. Classic integrates with existing technologies rather than reinventing
+them.
 
 Typical Classic stack:
+
 - [Deno](https://deno.com/) - Runtime, LSP, lint, test, DB...
 - [Hono](https://hono.dev/) - Backend router
 - Classic - Reactive HTML/JS/CSS generation
@@ -42,7 +44,8 @@ deno run -r --allow-write=. --allow-net https://raw.githubusercontent.com/ngasul
 
 ## Code examples
 
-_Remember: everything runs server-side except what is explicitly wrapped in JS types!_
+_Remember: everything runs server-side except what is explicitly wrapped in JS
+types!_
 
 ### JSX Components
 
@@ -62,7 +65,7 @@ export const YourName = async ({ userId }: { userId: string }) => {
 ### Add client-side JS bits
 
 ```tsx
-import { js } from "classic-web/js.ts"
+import { js } from "classic-web/js.ts";
 
 export const YourName = () => {
   return (

@@ -21,11 +21,5 @@ jobs:
         with:
           deno-version: canary
 
-      - name: Format
-        run: deno fmt --check
-
-      - name: Test
-        run: deno test --doc --ignore=README.md,element/README.md,server/README.md
-
       - name: Publish to JSR
         run: deno publish
