@@ -1,5 +1,9 @@
 // Modified from source: https://github.com/preactjs/preact/blob/main/src/jsx.d.ts
 
+import type { Children } from "./element.ts";
+
+type Parent = { children?: Children };
+
 type Reactive<T> = { [K in keyof T]: T[K] | (() => T[K]) };
 
 type Defaultize<Props, Defaults> =
@@ -2109,6 +2113,7 @@ export namespace JSXInternal {
     RefType extends EventTarget = EventTarget,
   > extends
     // ClassAttributes<RefType>,
+    Parent,
     Reactive<HTMLAttributes>,
     DOMAttributes<RefType>,
     DataAttributes,

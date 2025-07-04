@@ -1,10 +1,82 @@
-export { css, define, element, onDisconnect, shadow } from "./element.ts";
+/**
+ * Thinnest layer over custom elements (Web Components)
+ *
+ * @example Self-incrementing counter
+ * ```tsx ignore
+ * import { css, onDisconnect, define, element, signal } from "@classic/element";
+ * import { render } from "@classic/element/jsx";
+ *
+ * define("x-counter", element({
+ *   css: css`
+ *     :host {
+ *       color: "red";
+ *     }
+ *   `,
+ *   js(host) {
+ *     const [count, setCount] = signal(0);
+ *
+ *     render(host, <>Counting {count}</>)
+ *
+ *     const t = setInterval(() => setCount(count() + 1), 1000);
+ *     onDisconnect(host, () => clearInterval(t));
+ *   },
+ * }));
+ * ```
+ *
+ * @example Custom button with SVG icon
+ * ```tsx ignore
+ * import { css, define, element } from "@classic/element";
+ * import { render, svgns } from "@classic/element/jsx";
+ *
+ * define(
+ *   "x-button",
+ *   element({
+ *     css: css`
+ *       :host {
+ *         color: "red";
+ *       }
+ *       svg {
+ *         width: 30px;
+ *         height: 30px;
+ *       }
+ *     `,
+ *     props: { circle: Boolean, type: String },
+ *     js(host) {
+ *       render(
+ *         host,
+ *         <button type={host.type}>
+ *           {svgns(() => (
+ *             <svg>
+ *               {host.circle
+ *                 ? <circle r="15" fill="blue" cx={15} cy={15} />
+ *                 : <rect cx={15} cy={15} />}
+ *             </svg>
+ *           ))}
+ *           <slot />
+ *         </button>,
+ *       );
+ *     },
+ *   }),
+ * );
+ * ```
+ *
+ * @module
+ */
+
+export {
+  css,
+  define,
+  element,
+  onAdopt,
+  onDisconnect,
+  shadow,
+} from "./element.ts";
 
 export * from "./props.ts";
 
 export type * from "./props.ts";
 
-export type { CustomElement, ElementProps } from "./element.ts";
+export type { CustomElement, ElementOptions, ElementProps } from "./element.ts";
 
 export type { CustomElements } from "./jsx.ts";
 

@@ -58,6 +58,43 @@ export type Child =
 
 type Signals<Props> = { [K in keyof Props]: Signal<Props[K]> };
 
+/** Options for {@linkcode element} */
+export interface ElementOptions<
+  PropTypes extends Record<string, PropType<unknown>>,
+  Def extends (host: TypedHost<Props>) => unknown,
+  Props extends { [P in keyof PropTypes]: ReturnType<PropTypes[P]> },
+> {
+  /**
+   * Props definition, layering on top of attributes to manage them.
+   * Attributes can natively be managed by custom elements but can only be optional strings.
+   */
+  props?: PropTypes;
+
+  /** Native element tag to extend */
+  extends?: string;
+
+  /** Generated class decorator for advanced uses */
+  class?: (clazz: { new (): HTMLElement }) => void;
+
+  /** Style(s) baked in the element */
+  css?: string | CSSStyleSheet | (string | CSSStyleSheet)[];
+
+  /** JavaScript logic to run on element connection */
+  js?: Def;
+
+  /** Whether to connect after the document is ready */
+  defer?: boolean;
+
+  /** Whether the element is a field (enables `formAssociated`, for use along [`attachInternals()`](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/attachInternals)) */
+  field?: boolean;
+}
+
+/**
+ * Define a custom element class using a declarative and code size efficient API
+ *
+ * @params opts Options as in {@linkcode ElementOptions}
+ * @returns Custom element-defining class
+ */
 export const element = <
   PropTypes extends Record<string, PropType<unknown>>,
   Def extends (host: TypedHost<Props>) => unknown,
@@ -75,15 +112,7 @@ export const element = <
     css,
     defer,
     field,
-  }: {
-    readonly props?: PropTypes;
-    readonly extends?: string;
-    readonly class?: (clazz: { new (): HTMLElement }) => void;
-    readonly css?: string | CSSStyleSheet | (string | CSSStyleSheet)[];
-    readonly js?: Def;
-    readonly defer?: boolean;
-    readonly field?: boolean;
-  },
+  }: Readonly<ElementOptions<PropTypes, Def, Props>>,
 ): CustomElement<Props, Ref> => {
   let definedStyleSheets: CSSStyleSheet[] | undefined;
   let attrToProp: Record<string, keyof Props> = {};
@@ -177,6 +206,12 @@ export const element = <
   return ElementClass as unknown as CustomElement<Props, Ref>;
 };
 
+/**
+ * Register a custom element in current window
+ *
+ * @param name Element name ([must be valid](https://html.spec.whatwg.org/multipage/custom-elements.html#valid-custom-element-name))
+ * @param ElementClass Element-defining class (see {@linkcode element})
+ */
 export const define = <
   Props extends Record<string, unknown>,
   Ref extends HTMLElement,
@@ -190,6 +225,12 @@ export const define = <
   });
 };
 
+/**
+ * Add an adoption callback to configured element
+ *
+ * @param host Configured element
+ * @param cb Adoption callback
+ */
 export const onAdopt = (
   host: TypedHost<unknown>,
   cb: () => void,
@@ -197,6 +238,12 @@ export const onAdopt = (
   !host[$setUp] && host[$adoptCallbacks].push(cb);
 };
 
+/**
+ * Add a disconnection callback to configured element
+ *
+ * @param host Configured element
+ * @param cb Disconnected callback
+ */
 export const onDisconnect = (
   host: TypedHost<unknown>,
   cb: () => void,
@@ -216,6 +263,7 @@ export type PropPrimitive =
   | Date
   | undefined;
 
+/** Template strings that returns as-is - used to write and spot CSS in-js */
 export const css = (tpl: TemplateStringsArray): string => tpl[0];
 
 const constructCSS = (
@@ -223,6 +271,12 @@ const constructCSS = (
   styleSheet = new CSSStyleSheet_(),
 ) => (styleSheet.replace(css), styleSheet);
 
+/**
+ * Attach a shadow root to configured element (open by default)
+ *
+ * @param host Configured element
+ * @param opts Options, see {@linkcode ShadowRootInit}
+ */
 export const shadow = (
   host: Element,
   opts: ShadowRootInit = { mode: "open" },

@@ -16,6 +16,7 @@ type IntrinsicElementProps<T> = T extends "" ? Record<never, never>
   : T extends keyof JSX.IntrinsicElements ? JSX.IntrinsicElements[T]
   : never;
 
+/** Infer classic element prop types */
 export type ClassicElementJSXProps<T> = T extends
   CustomElement<infer Props, infer Ref> ?
     & { [P in keyof Props]: Props[P] | (() => Props[P]) }
@@ -35,10 +36,18 @@ declare namespace JSX {
   type Element = NativeElement;
 }
 
+/** Define custom elements props by re-defining (extending) this interface */
 export interface CustomElements {}
 
+/** @ignore */
 export type { JSX };
 
+/**
+ * Render reactive children
+ *
+ * @param el Parent node
+ * @param children Reactive children
+ */
 export const render = (el: ParentNode, children: Children): void =>
   el.replaceChildren(
     ...deepMap(children, (c) => {
@@ -56,6 +65,7 @@ export const render = (el: ParentNode, children: Children): void =>
     }),
   );
 
+/** @ignore */
 export const jsx = ((
   type: string | CustomElement<Record<string, unknown>, HTMLElement>,
   { children, xmlns: _, ...props }: Record<string, unknown> & {
@@ -122,15 +132,25 @@ export const jsx = ((
   ): ChildNode;
 };
 
+/** @ignore */
 export { jsx as jsxs };
 
+/** @ignore */
 export const Fragment = "";
 
+/** Imperative element reference access */
 export const ref = <T>(initial?: T): { (el: T): T; (): T } => {
   let stored: T = initial!;
   return (el?: T) => el ? stored = el : stored;
 };
 
+/**
+ * Change XML namespace in provided scope
+ *
+ * @param xmlns Target namespace
+ * @param cb Scope affected by namespace change
+ * @returns `cb`'s result
+ */
 export const xmlns = <T>(xmlns: string, cb: () => T): T => {
   let prevNS = ns;
   try {
@@ -141,6 +161,12 @@ export const xmlns = <T>(xmlns: string, cb: () => T): T => {
   }
 };
 
+/**
+ * Set SVG namespace in provided scope
+ *
+ * @param cb Scope affected by namespace change
+ * @returns `cb`'s result
+ */
 export const svgns = <T>(cb: () => T): T =>
   xmlns("http://www.w3.org/2000/svg", cb);
 
