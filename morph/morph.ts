@@ -5,6 +5,12 @@ const DOCUMENT_FRAGMENT_NODE = 11;
 
 const { entries, keys } = Object;
 
+/**
+ * Morph a source element into a patched version
+ *
+ * @param src Source element
+ * @param patch Patch element
+ */
 export const morph = (
   src: Element | HTMLDocument,
   patch: Element | HTMLDocument,
@@ -20,6 +26,12 @@ export const morph = (
   morphChildren(src, patch);
 };
 
+/**
+ * Morph a source tree into a patched version
+ *
+ * @param src Source parent node
+ * @param patch Patch parent root
+ */
 export const morphChildren = (
   srcRoot: ParentNode,
   patchRoot: ParentNode,
