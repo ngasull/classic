@@ -1,12 +1,12 @@
 {
   "tasks": {
-    "dev": "deno run --watch-hmr --allow-read --allow-write=. --allow-env --allow-net --allow-run task.ts dev",
-    "build": "deno run --allow-read --allow-write=. --allow-env --allow-net --allow-run task.ts build",
-    "serve": "deno run --allow-read --allow-net task.ts serve"
+    "dev": "deno serve --inspect --watch -A server.ts",
+    "build": "deno run -A prebuild.ts",
+    "serve": "deno serve --allow-read --allow-net --allow-env .build/server.js"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "classic-web",
+    "jsxImportSource": "@classic/html",
     "lib": [
       "deno.ns",
       "DOM",
@@ -15,8 +15,15 @@
     ]
   },
   "imports": {
-    "classic-web/": "https://raw.githubusercontent.com/ngasull/classic/main/",
-    "classic-web/jsx-runtime": "https://raw.githubusercontent.com/ngasull/classic/main/jsx-runtime.ts",
-    "hono/": "https://deno.land/x/hono@v3.12.11/"
+    "@classic/build": "jsr:@classic/build@0.1",
+    "@classic/context": "jsr:@classic/context@0.1",
+    "@classic/element": "jsr:@classic/element@0.1",
+    "@classic/html": "jsr:@classic/html@0.1",
+    "@classic/js": "jsr:@classic/js@0.1",
+    "@classic/morph": "jsr:@classic/morph@0.1",
+    "@classic/router": "jsr:@classic/router@0.1",
+    "@classic/server": "jsr:@classic/server@^0.1.3",
+    "@classic/util": "jsr:@classic/util@0.1",
+    "@hono/hono": "jsr:@hono/hono@^4.6.20"
   }
 }

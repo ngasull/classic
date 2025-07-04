@@ -1,8 +1,11 @@
-import { createContext } from "classic-web/jsx/render.ts";
+import { RequestContext } from "@classic/server";
 
 type DB = {
   hello: string;
   multiverseNo: number;
 };
 
-export const dbContext = createContext<DB>("db");
+export const dbContext = new RequestContext<DB>(() => ({
+  hello: "hi",
+  multiverseNo: 42,
+}));
