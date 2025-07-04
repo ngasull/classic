@@ -1,5 +1,5 @@
 import { Context } from "@classic/context";
-import type { RouteModule } from "./module.ts";
+import type { HandlerResult, RouteModule } from "./module.ts";
 import type { ClassicServer } from "./runtime.ts";
 
 export type Method = "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
@@ -25,41 +25,29 @@ export class ClassicRequest<Params> {
     /**  Server attached to the request */
     public readonly server: ClassicServer,
     /** Raw {@linkcode Request} */
-    public readonly request: TypedRequest<Params>,
-  ) {
-    Object.defineProperty(this, "server", freezeProperty);
-    Object.defineProperty(this, "request", freezeProperty);
-  }
+    public readonly raw: TypedRequest<Params>,
+  ) {}
 
   readonly context = new Map<RequestContext<unknown>, unknown>();
 
   #url?: URL;
-  /**
-   * Requested {@linkcode URL}
-   */
+  /** Requested {@linkcode URL} */
   get url(): URL {
-    return this.#url ??= new URL(this.request.url);
+    return this.#url ??= new URL(this.raw.url);
   }
 }
 
 export class ModuleRequest<Params> {
   constructor(
-    /** Initiating server instance */
-    public readonly server: ClassicServer,
-    /** Module declared by the request */
-    public readonly module: RouteModule<unknown[]>,
     /** Classic request */
     public readonly request: ClassicRequest<Params>,
+    /** Module declared by the request */
+    public readonly module: RouteModule,
     /** Groups resolved from matched {@linkcode URLPattern} */
     public readonly groups: Record<string, string>,
     /** Matched {@linkcode URLPattern}'s pattern */
     public readonly matchedPattern: string,
-  ) {
-    Object.defineProperty(this, "module", freezeProperty);
-    Object.defineProperty(this, "request", freezeProperty);
-    Object.defineProperty(this, "groups", freezeProperty);
-    Object.defineProperty(this, "matchedPattern", freezeProperty);
-  }
+  ) {}
 }
 
 /** {@linkcode Request} but typed with parameter groups */
@@ -69,7 +57,7 @@ export type TypedRequest<Params> = Request & { "_@@params": Params };
  * Retrieves the active {@linkcode Request} from current context
  */
 export const useRequest = <Params>(): TypedRequest<Params> =>
-  $moduleRequest.use().request.request as TypedRequest<Params>;
+  $moduleRequest.use().request.raw as TypedRequest<Params>;
 
 /**
  * Use current request's matched parameter groups
@@ -81,7 +69,7 @@ export const useParams: {
     req: R,
   ): R extends TypedRequest<infer Params> ? Params : never;
   <T>(req: TypedRequest<T>): T;
-  <Params extends Record<string, string> = Record<string, string>>(): Params;
+  <Params = Record<string, string>>(): Params;
 } = <T>(_req?: TypedRequest<T>): T => $moduleRequest.use().groups as T;
 
 /**
@@ -96,7 +84,7 @@ export const useMatchedPattern = (): string =>
  * @param req The {@linkcode Request} to send
  */
 export const useFetch = (req: Request): Promise<Response> =>
-  $moduleRequest.use().server.fetch(req);
+  $moduleRequest.use().request.server.fetch(req);
 
 /**
  * Redirects to requested path, preferrably softly when
@@ -114,16 +102,8 @@ export const useRedirect = async (pathname: string): Promise<Response> => {
     : Response.redirect(contentLocation);
 };
 
-/**
- * Middleware or handler function
- */
-export type Middleware<Params = Record<never, string>> = (
-  req: TypedRequest<Params>,
-) => Response | void | null | PromiseLike<Response | void | null>;
-
-export const runMiddlewares = <Params>(
-  [first, ...after]: Middleware<Params>[],
-  req: Request,
+export const runMiddlewares = (
+  [first, ...after]: Array<() => HandlerResult>,
 ): Response | PromiseLike<Response> => {
   if (!first) return notFound();
 
@@ -134,14 +114,14 @@ export const runMiddlewares = <Params>(
         `useNext() has already been called`,
       );
     } else {
-      return runMiddlewares(after, req);
+      return runMiddlewares(after);
     }
   };
 
   return $next.provide(
     next,
     async () => {
-      const res = await first(req as TypedRequest<Params>);
+      const res = await first();
       if (res) return res;
       if (hasNextBeenCalled) {
         throw Error(
@@ -202,23 +182,16 @@ export class RequestContext<T> {
    */
   use(): T {
     const context = $moduleRequest.use().request.context;
-    let value: T;
     if (context.has(this)) {
-      value = context.get(this) as T;
+      return context.get(this) as T;
+    } else if (this.#init) {
+      const value = this.#init();
+      context.set(this, value);
+      return value;
     } else {
-      if (this.#init) {
-        context.set(this, value = this.#init());
-      } else {
-        throw Error(
-          `RequestContext can't be used as it hasn't been set and has no initializer`,
-        );
-      }
+      throw Error(
+        `RequestContext can't be used as it hasn't been set and has no initializer`,
+      );
     }
-    return value;
   }
 }
-
-const freezeProperty = {
-  configurable: false,
-  writable: false,
-} satisfies PropertyDescriptor;

@@ -5,10 +5,8 @@
     ".": "./mod.ts",
     "./build": "./build.ts",
     "./css": "./css/mod.ts",
-    "./plugin/bundle": "./plugin/bundle-build.ts",
-    "./plugin/bundle/runtime": "./plugin/bundle-runtime.ts",
-    "./plugin/asset-serve": "./plugin/asset-serve-build.ts",
-    "./plugin/asset-serve/runtime": "./plugin/asset-serve-runtime.ts"
+    "./bundle": "./bundle/mod.ts",
+    "./asset-serve": "./asset-serve/mod.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsx",

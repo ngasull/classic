@@ -1,12 +1,14 @@
 import { type JSX, render } from "@classic/html";
 import { jsx } from "@classic/html/jsx-runtime";
-import { useResolver } from "./plugin/bundle-runtime.ts";
 import {
-  Buildable,
-  RequestContext,
+  type BuildableOptions,
+  specifierToUrl,
   type TypedRequest,
+  urlToSpecifier,
   useRequest,
 } from "./mod.ts";
+
+const $layout = Symbol.for("classic.page.layout");
 
 type LayoutFn<Params> = (
   children: JSX.Children,
@@ -23,22 +25,31 @@ export const declareLayout = <Params = Record<never, string>>(
   layout: LayoutFn<Params>,
 ): Layout<Params> => new Layout(layout);
 
-const $layouts = new RequestContext<JSX.PFC<{ req: TypedRequest<never> }>[]>();
-
-class Layout<Params> extends Buildable<void> {
-  readonly #layout: LayoutFn<Params>;
-
+class Layout<Params> {
   constructor(layout: LayoutFn<Params>) {
-    super((exported) => {
-      exported.route({ pattern: "*" });
-    });
-    this.#layout = layout;
+    this[$layout] = layout;
   }
 
   /** @internal */
-  override handle(): void {
-    const layouts = $layouts.get() ?? $layouts.set([]);
-    layouts.push(({ children, req }) => this.#layout(children, req));
+  [$layout]: LayoutFn<Params>;
+
+  /** @ignore */
+  [Symbol.for("classic.buildable")](): BuildableOptions {
+    return {
+      build: (exported) => {
+        const layouts =
+          exported.context.get<Array<[string, string]>>($layout) ?? [];
+        exported.context.set($layout, [
+          ...layouts,
+          [urlToSpecifier(exported.url), exported.name],
+        ]);
+      },
+    };
+  }
+
+  /** @ignore */
+  [Symbol.for("Deno.customInspect")](_opts: Deno.InspectOptions): string {
+    return `Layout`;
   }
 }
 
@@ -52,32 +63,49 @@ export const declarePage = <Params>(
   page: (req: TypedRequest<Params>) => JSX.Element,
 ): Page<Params> => new Page(page);
 
-class Page<Params> extends Buildable<void> {
+class Page<Params> {
   readonly #page: (req: TypedRequest<Params>) => JSX.Element;
 
   constructor(page: (req: TypedRequest<Params>) => JSX.Element) {
-    super((exported) => {
-      exported.route();
-    });
     this.#page = page;
   }
 
-  /** @internal */
-  override handle(): Response {
-    const req = useRequest<never>();
-    const layouts = $layouts.get() ?? [];
-    const el = layouts.reduceRight(
-      (el, Layout) => jsx(Layout, { req }, el),
-      jsx(() => this.#page(req)),
-    );
-    return new Response(
-      render(el, { resolve: useResolver() }),
-      {
-        headers: {
-          "Content-Type": "text/html; charset=UTF-8",
-          "Content-Location": new URL(useRequest().url).pathname,
-        },
+  /** @ignore */
+  [Symbol.for("classic.buildable")](): BuildableOptions {
+    return ({
+      build: (exported) => {
+        exported.route({
+          params: [
+            exported.context.get<ReadonlyArray<[string, string]>>($layout),
+          ],
+        });
       },
-    );
+
+      handle: async (layoutKeys) => {
+        const req = useRequest<never>();
+        const layouts = await Promise.all(
+          (layoutKeys as ReadonlyArray<[string, string]>)
+            .map(async ([spec, name]) => {
+              const module = await import(specifierToUrl(spec).href);
+              return module[name] as Layout<Params>;
+            }),
+        );
+        const el = layouts.reduceRight<JSX.Element>(
+          (el, layout) => layout[$layout](el, req),
+          jsx(() => this.#page(req)),
+        );
+        return new Response(render(el), {
+          headers: {
+            "Content-Type": "text/html; charset=UTF-8",
+            "Content-Location": new URL(useRequest().url).pathname,
+          },
+        });
+      },
+    });
+  }
+
+  /** @ignore */
+  [Symbol.for("Deno.customInspect")](_opts: Deno.InspectOptions): string {
+    return `Page`;
   }
 }

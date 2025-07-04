@@ -136,7 +136,6 @@
  *
  * ```tsx
  * // src/route.tsx
- *
  * import { declareLayout, declarePage } from "@classic/server";
  * import { styled } from "@classic/server/css";
  *
@@ -179,8 +178,8 @@
  */
 
 export { Asset } from "./asset.ts";
-export { Buildable } from "./module.ts";
-export type { Exported } from "./module.ts";
+export { specifierToUrl, urlToSpecifier } from "./module.ts";
+export type { BuildableOptions, Exported, HandlerResult } from "./module.ts";
 export { declareMutation } from "./mutation.ts";
 export { declareLayout, declarePage } from "./page.ts";
 export {
@@ -190,7 +189,7 @@ export {
   useParams,
   useRequest,
 } from "./request.ts";
-export type { Method, Middleware, Next, TypedRequest } from "./request.ts";
+export type { Method, Next, TypedRequest } from "./request.ts";
 export { useFetch, useRedirect } from "./runtime.ts";
-export { declareGET, declareMethod, declarePOST } from "./serve.ts";
+export { httpGET, httpMethod, httpPOST } from "./serve.ts";
 export type { DeclareMethod, RouteParams } from "./serve.ts";
