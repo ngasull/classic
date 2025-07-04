@@ -8,9 +8,8 @@ import {
   js,
   type JSable,
   jsResources,
-  type Resolver,
   store,
-  toJS,
+  toJs,
   unsafe,
 } from "@classic/js";
 import { initRefs, mkRef, type RefTree } from "./ref.ts";
@@ -67,9 +66,6 @@ const encoder = new TextEncoder();
  * `render` options
  */
 interface RenderOpts {
-  /** Module resolver: server specifier to public specifier */
-  resolve?: Resolver;
-
   /**
    * Prepend HTML5 doctype to the stream
    * @default true
@@ -103,34 +99,22 @@ const $effects = Context<JSable<void>[]>("classic.effects");
 const activate = async (
   refs: RefTree,
   opts: {
-    resolve?: Resolver;
     write: (chunk: Uint8Array) => void;
   },
 ): Promise<DOMNode | void> => {
-  const { resolve } = opts;
-
   const effectsContext = $effects.use();
   const effects = effectsContext.splice(0, effectsContext.length);
 
   if (effects.length) {
-    if (!resolve) {
-      return console.error(
-        `Can't attach JS to refs: no module resolver is provided`,
-      );
-    }
-
     const effectsFn = js`_=>{${
       effects.length > 1 ? effects.reduce((a, b) => js`${a};${b}`) : effects[0]
     }}`;
 
-    const { js: activationScript } = initRefs(
+    const activationScript = initRefs(
       refs,
       "$",
-      toJS,
-      () => [
-        js`$.ownerDocument==d?setTimeout(${effectsFn}):d.addEventListener("patch",${effectsFn})`,
-      ],
-      { resolve },
+      toJs,
+      [js`$.ownerDocument==d?setTimeout(${effectsFn}):d.addEventListener("patch",${effectsFn})`],
     );
 
     const s = new TextEncoderStream();
@@ -163,7 +147,6 @@ const writeDOMTree = async (
   tree: Iterable<DOMNode> | AsyncIterable<DOMNode>,
   opts: {
     doctype?: boolean;
-    resolve?: Resolver;
     write: (chunk: Uint8Array) => void;
   },
   root?: boolean,
