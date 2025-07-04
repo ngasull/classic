@@ -5,5 +5,9 @@
     ".": "./mod.ts",
     "./jsx": "./jsx.ts",
     "./jsx-runtime": "./jsx-runtime.ts"
+  },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@classic/element"
   }
 }

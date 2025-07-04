@@ -10,13 +10,13 @@ import type {
   JSONable,
   JSReturn,
   ParamKeys,
-  Resolver,
   ResourceGroup,
   Resources,
   returnSymbol,
   typeSymbol,
 } from "./types.ts";
 import { isJSable, jsSymbol } from "./types.ts";
+import { isDirectlyStringifiable, stringify } from "./stringify.ts";
 
 // https://graphemica.com/categories/letter-number/page/2
 export const argn = (n: number) => `𐏒${n}`;
@@ -24,6 +24,9 @@ export const varArg = "𐏑";
 
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
+/**
+ * Abstract base class to extend for custom JS behavior
+ */
 export abstract class JSMetaBase<T = unknown, R = false>
   implements JSMeta<T, R> {
   readonly [jsSymbol] = this;
@@ -37,27 +40,36 @@ export abstract class JSMetaBase<T = unknown, R = false>
   readonly hasResources?: boolean;
   readonly isOptional?: boolean;
 
+  readonly isFunction?: boolean;
+  readonly isArgument?: boolean;
+  readonly isObject?: boolean;
+
+  /**
+   * @param scope Specific scope in which the expression lives. Uses tracked scope by default
+   * @constructor
+   */
   constructor(
     public readonly scope: JSMetaBase | null = trackedScopes[0] as JSMetaBase ??
       null,
   ) {}
 
+  /**
+   * Code to generate, interpolable with sub-expressions
+   */
   template(): Array<string | JSMetaBase> {
     throw "unimplemented";
   }
 }
 
 type JSMetaContext = {
-  isServer?: boolean;
   asyncScopes: Set<JSMetaFunction | null>;
   scopedDeclarations: Map<JSFnBody, JSMetaBase[]>;
   declaredNames: Map<JSMetaBase, string>;
-  implicitRefs: Map<ImplicitlyJSable, JSMetaBase>;
+  implicitRefs: Map<unknown, JSMetaBase>;
   argn: number;
   args: Map<JSMetaArgument, string>;
   modules: JSMetaModuleStore;
   resources?: JSMetaResources;
-  resolve?: Resolver;
   moduleCache: Record<string, JSMetaModule>;
 };
 
@@ -125,10 +137,26 @@ class JSMetaRaw extends JSMetaBase {
   override template() {
     return this.#tpl;
   }
+
+  [Symbol.for("Deno.customInspect")](_opts: Deno.InspectOptions) {
+    return this.#tpl[0];
+  }
 }
 
+/**
+ * Create a JSable expression which contains provided JavaScript
+ *
+ * @param js JavaScript to directly make `JSable` - MUST CHECKED AS SAFE
+ * @returns `JSable` from raw `js`
+ */
 export const unsafe = (js: string): JSable<unknown> => new JSMetaRaw(js);
 
+/**
+ * Force expression to be inlined and not assigned in scope
+ *
+ * @param expr Expression to inline
+ * @returns Inlined expression
+ */
 export const inline = <T extends JSable<unknown>>(expr: T): T => {
   expr[jsSymbol].isntAssignable = true;
   return expr;
@@ -136,7 +164,7 @@ export const inline = <T extends JSable<unknown>>(expr: T): T => {
 
 const jsTpl = <T>(
   tpl: ReadonlyArray<string>,
-  ...exprs: ImplicitlyJSable[]
+  ...exprs: unknown[]
 ): JS<T> => mkJS(new JSMetaTemplate(tpl, exprs) as JSable<T>);
 
 class JSMetaTemplate extends JSMetaBase {
@@ -145,7 +173,7 @@ class JSMetaTemplate extends JSMetaBase {
 
   constructor(
     readonly tpl: readonly string[],
-    readonly exprs: ImplicitlyJSable[],
+    readonly exprs: unknown[],
   ) {
     super();
     this.hasResources = this.exprs.some((e) =>
@@ -184,6 +212,10 @@ const nullMeta = new class NullMeta extends JSMetaBase {
   override template() {
     return ["null"];
   }
+
+  [Symbol.for("Deno.customInspect")](_opts: Deno.InspectOptions) {
+    return "null";
+  }
 }(null);
 
 const undefinedMeta = new class UndefinedMeta extends JSMetaBase {
@@ -191,10 +223,14 @@ const undefinedMeta = new class UndefinedMeta extends JSMetaBase {
   override template() {
     return ["void 0"];
   }
+
+  [Symbol.for("Deno.customInspect")](_opts: Deno.InspectOptions) {
+    return "void 0";
+  }
 }(null);
 
 const implicit = (
-  expr: ImplicitlyJSable,
+  expr: unknown,
   scope: JSMetaBase | null = trackedScopes[0],
 ): JSMetaBase => {
   if (expr === null) {
@@ -202,17 +238,26 @@ const implicit = (
   } else if (expr === undefined) {
     return undefinedMeta;
   } else if ((typeof expr === "object" || typeof expr === "function")) {
-    if (jsSymbol in expr && expr[jsSymbol]) return expr[jsSymbol];
+    if (jsSymbol in expr && expr[jsSymbol]) return expr[jsSymbol] as JSMeta;
     return new JSMetaVar(() => {
       const { implicitRefs } = $context.use();
       const existing = implicitRefs.get(expr);
       if (existing) return [existing];
 
       const newImplicit: JSMetaBase = typeof expr === "function"
-        ? new JSMetaFunction(expr, { scope })
+        ? new JSMetaFunction(expr as Fn<never[], unknown>, true, scope)
         : Array.isArray(expr)
-        ? new JSMetaArray(expr, { scope })
-        : new JSMetaObject(expr, { scope });
+        ? new JSMetaArray(expr, scope)
+        : expr instanceof Map
+        ? new JSMetaMap(expr, scope)
+        : expr instanceof Set
+        ? new JSMetaSet(expr, scope)
+        : isDirectlyStringifiable(expr)
+        ? new JSMetaVar(() => [stringify(expr)], {
+          scope,
+          isntAssignable: true,
+        })
+        : new JSMetaObject(expr, scope);
       implicitRefs.set(expr, newImplicit);
       return [newImplicit];
     }, { scope });
@@ -286,6 +331,8 @@ class JSMetaURIs extends JSMetaBase<string[]> {
 }
 
 class JSMetaObject extends JSMetaBase {
+  override isObject = true;
+
   private parts: (string | JSMetaBase)[];
 
   constructor(
@@ -293,7 +340,7 @@ class JSMetaObject extends JSMetaBase {
       readonly [k: string]: ImplicitlyJSable;
       readonly [jsSymbol]?: undefined;
     },
-    { scope }: { scope?: JSMetaBase | null } = {},
+    scope?: JSMetaBase | null,
   ) {
     super(scope);
     const entries = Object.entries(expr as { [k: string]: ImplicitlyJSable });
@@ -331,15 +378,54 @@ class JSMetaObject extends JSMetaBase {
   }
 }
 
+class JSMetaMap extends JSMetaBase {
+  private parts: (string | JSMetaBase)[];
+
+  constructor(
+    private readonly expr: ReadonlyMap<ImplicitlyJSable, ImplicitlyJSable>,
+    scope?: JSMetaBase | null,
+  ) {
+    super(scope);
+    if (expr.size === 0) this.parts = [`new Map()`];
+    else {
+      this.parts = Array<string | JSMetaBase>(expr.size * 4 + 1);
+      this.parts[0] = `new Map([[`;
+      expr.entries().forEach(([k, v], i) => {
+        this.parts[i * 3 + 1] = implicit(k, scope);
+        this.parts[i * 3 + 2] = `,`;
+        this.parts[i * 3 + 3] = implicit(v, scope);
+        this.parts[i * 3 + 4] = `],[`;
+      });
+      this.parts[this.parts.length - 1] = `]])`;
+    }
+  }
+
+  override template(): (string | JSMetaBase)[] {
+    return this.parts;
+  }
+
+  [Symbol.for("Deno.customInspect")]({ ...opts }: Deno.InspectOptions) {
+    opts.depth ??= 4;
+    if (--opts.depth < 0) return `Map{...}`;
+    return `Map{${
+      [
+        ...this.expr.entries().map(([k, v]) =>
+          `${Deno.inspect(k, opts)}: ${Deno.inspect(v, opts)}`
+        ),
+      ].join(", ")
+    }}`;
+  }
+}
+
 class JSMetaArray extends JSMetaBase {
   private parts: (string | JSMetaBase)[];
 
   constructor(
     private readonly expr: readonly ImplicitlyJSable[],
-    { scope }: { scope?: JSMetaBase | null } = {},
+    scope?: JSMetaBase | null,
   ) {
     super(scope);
-    if (!this.expr.length) this.parts = [`[]`];
+    if (this.expr.length === 0) this.parts = [`[]`];
     else {
       this.parts = Array<string | JSMetaBase>(this.expr.length * 2 + 1);
       this.parts[0] = `[`;
@@ -362,6 +448,48 @@ class JSMetaArray extends JSMetaBase {
   }
 }
 
+class JSMetaSet extends JSMetaBase {
+  private parts: (string | JSMetaBase)[];
+
+  constructor(
+    private readonly expr: ReadonlySet<ImplicitlyJSable>,
+    scope?: JSMetaBase | null,
+  ) {
+    super(scope);
+    if (this.expr.size === 0) this.parts = [`new Set()`];
+    else {
+      this.parts = Array<string | JSMetaBase>(this.expr.size * 2 + 1);
+      this.parts[0] = `[`;
+      let i = 0;
+      this.expr.forEach((v) => {
+        this.parts[i * 2 + 1] = implicit(v, scope);
+        this.parts[i * 2 + 2] = `,`;
+        i++;
+      });
+      this.parts[this.parts.length - 1] = `]`;
+    }
+  }
+
+  override template(): (string | JSMetaBase)[] {
+    return this.parts;
+  }
+
+  [Symbol.for("Deno.customInspect")]({ ...opts }: Deno.InspectOptions) {
+    opts.depth ??= 4;
+    if (--opts.depth < 0) return `Set[...]`;
+    return `Set[${
+      [...this.expr.values().map((e) => Deno.inspect(e, opts))].join(", ")
+    }]`;
+  }
+}
+
+/**
+ * Wraps a `JSable` into a `JS` proxy,
+ * giving access to convenient and typed JS manipulations
+ *
+ * @param expr `JSable` to proxy
+ * @return Proxied `expr`
+ */
 export const mkJS = <J extends JSable>(
   expr: J,
 ): J extends JSable<infer T> ? JS<T> & Pick<J, keyof JSable> : never => {
@@ -406,10 +534,11 @@ class JSMetaCall extends JSMetaBase {
   override template(): (string | JSMetaBase)[] {
     const context: JSMetaContext = $context.use();
     return [
-      ...(context.declaredNames.has(this.callable) ||
-          !(this.callable instanceof JSMetaFunction)
-        ? [this.callable]
-        : ["(", this.callable, ")"]),
+      ...(
+        context.declaredNames.has(this.callable) || !this.callable.isFunction
+          ? [this.callable]
+          : ["(", this.callable, ")"]
+      ),
       "(",
       ...this.values.flatMap((v, i) => i > 0 ? [",", v] : v),
       ")",
@@ -439,25 +568,25 @@ class JSMetaAwait extends JSMetaBase {
   }
 }
 
-type ToJSResult<A extends string[]> = {
-  js: string;
-  args: A;
-};
-
 const $context = Context<JSMetaContext>("classic.js.context");
 
-export const toJS = <A extends readonly unknown[]>(
-  f: Fn<A, unknown>,
-  { resolve, isServer = false }: {
-    resolve?: Resolver;
-    isServer?: boolean;
-  } = {},
-): ToJSResult<{ -readonly [I in keyof A]: string }> => {
-  const context = mkMetaContext(isServer, resolve);
+/**
+ * Generate JavaScript from `JSable` instructions or from a `JSable` expression
+ *
+ * @param body `JSable` instructions or expression
+ * @returns JavaScript instructions or expression according to `body`
+ */
+export const toJs = (body: JSable | readonly JSable[]): string => {
+  const context = mkMetaContext();
   return $context.provide(context, () => {
-    const globalFn = new JSMetaFunction(f as Fn<readonly never[], unknown>, {
-      scoped: false,
-    });
+    const isExpression = !Array.isArray(body);
+    const globalFn = new JSMetaFunction(
+      (() => isExpression ? [jsTpl`return ${body}`] : body) as Fn<
+        readonly never[],
+        unknown
+      >,
+      false,
+    );
     const globalBody = globalFn.body;
 
     let lastVarId = -1;
@@ -506,8 +635,8 @@ export const toJS = <A extends readonly unknown[]>(
           }
           refToChildren.set(meta, children);
 
-          const subEnclosing = meta instanceof JSMetaFunction
-            ? meta
+          const subEnclosing = meta.isFunction
+            ? (meta as JSMetaFunction)
             : enclosing;
           jobs.unshift(
             ...children.map((c) => [c, meta, subEnclosing] as const),
@@ -591,34 +720,23 @@ export const toJS = <A extends readonly unknown[]>(
       }
     }
 
-    const argsName = globalFn.args.map((a) =>
-      (a.template() as string[]).join("")
-    ) as { -readonly [I in keyof A]: string };
-    const globalBodyStr = metaToJS(globalBody);
-
-    return {
-      js: globalBody.isExpression(context)
-        ? `return ${globalBodyStr};`
-        : globalBodyStr.slice(1, -1) + ";",
-      args: argsName,
-    };
+    if (isExpression) {
+      return `(async()=>${metaToJS(globalBody)})()`;
+    } else {
+      return metaToJS(globalBody).slice(1, -1) + ";";
+    }
   });
 };
 
-const mkMetaContext = (
-  isServer = true,
-  resolve?: Resolver,
-): JSMetaContext => ({
-  isServer,
+const mkMetaContext = (): JSMetaContext => ({
   argn: -1,
   args: new Map(),
   scopedDeclarations: new Map(),
   declaredNames: new Map(),
   implicitRefs: new Map(),
   asyncScopes: new Set(),
-  modules: new JSMetaModuleStore(isServer),
+  modules: new JSMetaModuleStore(),
   moduleCache: {},
-  resolve,
 });
 
 const metaToJS = (
@@ -646,6 +764,7 @@ const metaToJS = (
   return parts.join("");
 };
 
+/** @internal */
 export const jsResources = (expr: JSable): string[] =>
   $context.provide(mkMetaContext(), () => {
     const r = new Set<string>();
@@ -666,6 +785,9 @@ export const jsResources = (expr: JSable): string[] =>
 
 export interface Module {}
 
+const AsyncFunction = async function () {}.constructor as typeof Function;
+const $eval = Context.for<boolean>("classic.js.eval");
+
 const jsUtils = {
   comma: <T>(...exprs: [...JSable<unknown>[], JSable<T>]): JS<T> => {
     const parts = Array(exprs.length + 1);
@@ -678,12 +800,11 @@ const jsUtils = {
   },
 
   eval: async <T>(expr: JSable<T>): Promise<T> => {
-    const { js: rawJS } = toJS(() => expr, { isServer: true });
-    const jsBody = `return(async()=>{${rawJS}})()`;
+    const rawJs = $eval.provide(true, toJs, [jsUtils.return(expr)]);
     try {
-      return new Function("document", "window", jsBody)();
+      return new AsyncFunction("document", "window", rawJs)();
     } catch (e) {
-      console.error("Failed evaluating function with the following JS", jsBody);
+      console.error("Failed evaluating function with the following JS", rawJs);
       throw e;
     }
   },
@@ -698,56 +819,87 @@ const jsUtils = {
       ? JS<(...args: Args) => T> & { [jsSymbol]: JSMetaFunction }
       : never,
 
-  module: ((name: string) =>
+  /**
+   * Declare a JS module and gain access to its exports.
+   *
+   * @param spec Source specifier or function to resolve the specifier
+   * @returns `JS` object of the modules exports
+   *
+   * @example Render a react app
+   * ```tsx
+   * import { js } from "@classic/js";
+   *
+   * import type React from "npm:react";
+   * import type { Root } from "npm:react-dom/client";
+   *
+   * const react = js.module<typeof import("npm:react-dom/client")>("npm:react-dom/client");
+   * const app = js.module<{ render: (root: Root) => void }>(import.meta.resolve("./app.tsx"));
+   *
+   * const clientJs = app.render(react.createRoot(js.window.document.body));
+   * ```
+   */
+  module: ((spec: string | (() => string)) =>
     mkJS(
       new JSMetaVar(() => {
         const context = $context.use();
-        if (!context.resolve) throw Error(`Must configure JS modules`);
-        const publicPath = context.resolve(name);
-        if (publicPath == null) {
-          throw Error(
-            `${name} needs to be added to your client modules configuration`,
-          );
-        }
+        if (typeof spec === "function") spec = spec();
         return [
-          context.moduleCache[name] ??= new JSMetaModule(
-            name,
-            publicPath,
-          ),
+          context.moduleCache[spec] ??= new JSMetaModule(spec),
         ];
       }, { isntAssignable: true }),
     )) as {
-      <M extends keyof Module>(name: M): JS<Module[M]>;
-      <T = never>(name: string): T extends never ? never : JS<T>;
+      <M extends keyof Module>(name: M, resolve?: () => string): JS<Module[M]>;
+      <T = never>(
+        spec: string | (() => string),
+      ): T extends never ? never : JS<T>;
     },
 
-  resolve: ((name: string) =>
-    mkJS(
-      new JSMetaVar<string>(() => {
-        const context = $context.use();
-        if (!context.resolve) throw Error(`Must configure JS modules`);
-        const publicPath = context.resolve(name);
-        return [publicPath ? JSON.stringify(publicPath) : "void 0"];
-      }),
-    )) as {
-      (name: keyof Module): JS<string>;
-      (name: string): JS<string | undefined>;
-    },
-
+  /**
+   * Flag an expression as optional. Accessing properties will be transcribed as `.?` accesses
+   *
+   * @param expr Expression to make optional
+   * @returns Optional expression
+   */
   optional: <T>(expr: JSable<T>): JS<NonNullable<T>> => {
     const p = js<NonNullable<T>>`${expr}`;
     (p[jsSymbol] as Writable<JSMetaBase>).isOptional = true;
     return p;
   },
 
+  /**
+   * Explicitly assign the variable associated to an expression
+   *
+   * @param varMut Expression which variable's should be assigned
+   * @param expr Value to assign
+   * @returns Assignment instruction
+   */
   reassign: <T>(varMut: JSable<T>, expr: JSable<T>): JS<T> =>
     mkJS(new JSMetaReassign<T>(varMut[jsSymbol], expr[jsSymbol])),
 
+  /**
+   * Transforms a expression into a return instruction
+   *
+   * @param expr Expression to return
+   * @returns The return instruction
+   */
   return: <T extends ImplicitlyJSable>(
     expr: T,
   ): T extends JSable<infer T> ? JS<T> & JSReturn : T =>
     js`return ${expr as JSable}` as never,
 
+  /**
+   * Helper template to generate a template string
+   *
+   * @example Generate a template interoplation that provides time
+   * ```ts
+   * const now = js<Date>`new Date()`;
+   * js.string`Time is ${now.getHours()}:${now.getMinutes()}`;
+   *
+   * // Generated code looks like
+   * // const now = new Date();
+   * // `Time is ${now.getHours()}:${now.getMinutes()}`;
+   * ```
+   */
   string: (
     tpl: ReadonlyArray<string>,
     ...exprs: ImplicitlyJSable[]
@@ -762,11 +914,18 @@ const jsUtils = {
     return jsTpl(parts, ...exprs);
   },
 
+  /** Helper to access browser globals */
   window: new Proxy({}, { get: (_, p) => jsTpl([p as string]) }) as
     & Readonly<Omit<JS<Window & typeof globalThis>, keyof JSWindowOverrides>>
     & JSWindowOverrides,
 };
 
+/**
+ * Classic JS API
+ *
+ * May be used as a template string to manipulate JavaScript and automatically interpolate `JSable`s.
+ * Also contains utility functions: comma, eval, fn, module, optional, reassign, return, string, window
+ */
 export const js = Object.freeze(Object.assign(jsTpl, jsUtils)) as
   & typeof jsTpl
   & Readonly<typeof jsUtils>;
@@ -798,13 +957,15 @@ type JSWindowOverrides = {
 const trackedScopes: JSMetaFunction[] = [];
 
 class JSMetaFunction extends JSMetaBase {
+  override readonly isFunction = true;
+
   readonly args: readonly JSMetaArgument[];
   private readonly scoped: boolean;
 
   constructor(
     private readonly cb: Fn<readonly never[], unknown>,
-    { scoped = true, scope }: { scoped?: boolean; scope?: JSMetaBase | null } =
-      {},
+    scoped = true,
+    scope?: JSMetaBase | null,
   ) {
     super(scope);
     this.args = Array(cb.length).fill(0).map(() => new JSMetaArgument());
@@ -901,7 +1062,7 @@ class JSMetaFunctionBody extends JSMetaBase {
           firstBodyMeta = firstBodyMeta.template()
             .find((t) => t !== "")
         ) {
-          if (firstBodyMeta instanceof JSMetaObject) {
+          if (firstBodyMeta.isObject) {
             return ["(", this.fnBody[jsSymbol], ")"];
           }
         }
@@ -928,6 +1089,7 @@ class JSMetaFunctionBody extends JSMetaBase {
 
 class JSMetaArgument extends JSMetaBase<never> {
   override readonly isntAssignable = true;
+  override readonly isArgument = true;
 
   constructor(private name?: string) {
     super();
@@ -950,8 +1112,7 @@ class JSMetaArgument extends JSMetaBase<never> {
 
 class JSMetaModule extends JSMetaBase {
   constructor(
-    readonly localUrl: string,
-    readonly publicUrl: string,
+    public readonly url: string,
   ) {
     super();
   }
@@ -960,17 +1121,12 @@ class JSMetaModule extends JSMetaBase {
     const context = $context.use();
     return [
       context.modules,
-      `[${
-        context.modules.index(
-          this.localUrl,
-          this.publicUrl,
-        )
-      }]`,
+      `[${context.modules.index(this.url)}]`,
     ];
   }
 
   [Symbol.for("Deno.customInspect")](): string {
-    return `import(${this.localUrl}: ${this.publicUrl})`;
+    return `import(${this.url})`;
   }
 }
 
@@ -979,10 +1135,6 @@ class JSMetaModuleStore extends JSMetaBase {
   override readonly isAwaited: boolean = true;
   #urls: Record<string, [number, string]> = {};
   #i = 0;
-
-  constructor(private readonly isServer: boolean) {
-    super();
-  }
 
   override template(): (string | JSMetaBase)[] {
     return [
@@ -994,8 +1146,7 @@ class JSMetaModuleStore extends JSMetaBase {
     ];
   }
 
-  index(localUrl: string, publicUrl: string): number {
-    const url = this.isServer ? localUrl : publicUrl;
+  index(url: string): number {
     this.#urls[url] ??= [this.#i++, url];
     return this.#urls[url][0];
   }
@@ -1005,6 +1156,7 @@ class JSMetaModuleStore extends JSMetaBase {
   }
 }
 
+/** @internal */
 export const store: JS<StoreAPI> = js.module<typeof import("./dom/store.ts")>(
   import.meta.resolve("./dom/store.ts"),
 ).store;
@@ -1070,7 +1222,7 @@ class JSMetaResources extends JSMetaBase {
       typeof fetch === "function" ? fetch() : fetch,
     ];
 
-    return this.context.isServer
+    return $eval.get()
       ? new JSMetaVar(
         () => [this.#initialResources, `[${JSON.stringify(uri)}]`],
         { isntAssignable: true },
@@ -1087,6 +1239,7 @@ class JSMetaResources extends JSMetaBase {
   }
 }
 
+/** @internal */
 export const indexedUris = (
   uris:
     | readonly string[]
@@ -1110,9 +1263,13 @@ class JSMetaReassign<T> extends JSMetaBase<T> {
     const context: JSMetaContext = $context.use();
     const varMeta = this.varMut;
     return context.declaredNames.has(varMeta) ||
-        varMeta instanceof JSMetaArgument
+        varMeta.isArgument
       ? [this.varMut, "=", this.expr]
       : [this.varMut, ",", this.expr];
+  }
+
+  [Symbol.for("Deno.customInspect")](opts: Deno.InspectOptions) {
+    return `${this.varMut} = ${Deno.inspect(this.expr, opts)}`;
   }
 }
 

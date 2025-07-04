@@ -1,3 +1,5 @@
+import type { DirectlyStringifiable, JSPrimitive } from "./stringify.ts";
+
 export type JS<T> = _JS<T, []>;
 
 type _JS<T, Depth extends unknown[]> =
@@ -6,18 +8,19 @@ type _JS<T, Depth extends unknown[]> =
     : T extends number ? JS<typeof Number["prototype"]>
     : T extends bigint ? JS<typeof BigInt["prototype"]>
     : T extends boolean ? JS<typeof Boolean["prototype"]>
+    : T extends symbol ? JS<typeof Symbol["prototype"]>
     : JSOverride<T> extends never ? (
         & (T extends (...args: infer Args) => infer Ret ? (
             <R = Ret>(...args: { [I in keyof Args]: JSArg<Args[I]> }) => JS<R>
           )
           : T extends unknown[] ? Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
-            : { [I in keyof T]: _JS<T[I], [0, ...Depth]> }
+            : { [I in keyof T]: _JS<T[I], [1, ...Depth]> }
           : unknown)
         & (Depth["length"] extends 8 ? unknown // Prevent TS from infinitely recursing
           : T extends Record<any, any> ? (
               // Only map actual objects to avoid polluting debugging
               Record<any, never> extends T ? unknown
-                : { [K in keyof T]: _JS<T[K], [0, ...Depth]> }
+                : { [K in keyof T]: _JS<T[K], [1, ...Depth]> }
             )
           : unknown)
       )
@@ -27,19 +30,19 @@ export type JSArg<Arg> = _JSArg<Arg, []>;
 
 type _JSArg<Arg, Depth extends unknown[]> =
   | JSable<Arg>
-  | (OnlyJSArg<Arg, JSPrimitive> extends infer P extends JSPrimitive ? P
+  | (OnlyJSArg<Arg, JSNative> extends infer P extends JSNative ? P
     : never)
   | (Depth["length"] extends 8 ? never // Prevent TS from infinitely recursing
     : OnlyJSArg<Arg, JSMapped> extends infer Filtered extends JSMapped
-      ? { [I in keyof Filtered]: _JSArg<Filtered[I], [0, ...Depth]> }
+      ? { [I in keyof Filtered]: _JSArg<Filtered[I], [1, ...Depth]> }
     : never)
   | (OnlyJSArg<Arg, JSFunction> extends ((...args: infer AArgs) => infer AR)
     ? Fn<AArgs, AR>
     : Arg extends JSONable ? Arg
     : never);
 
-type JSArgUnion = JSMapped | JSFunction | JSPrimitive;
-type JSPrimitive = string | number | bigint | boolean | null | undefined;
+type JSArgUnion = JSMapped | JSFunction | JSNative;
+type JSNative = JSPrimitive | DirectlyStringifiable;
 type JSMapped = readonly unknown[] | Record<any, any>;
 type JSFunction = Function | Record<any, any>;
 type OnlyJSArg<T, Filter> = Exclude<T, Exclude<JSArgUnion, Filter>>;

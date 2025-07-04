@@ -156,6 +156,7 @@ const initRoot = (root: EventTarget | null) => {
   }
 };
 
+/** Initialize dynamic routing in current window */
 export const init = (): void => {
   if (needsInit) {
     needsInit = 0;

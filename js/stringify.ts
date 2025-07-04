@@ -4,9 +4,11 @@
  * @module
  */
 
+const $stringify = Symbol.for("classic.stringify");
+
 const safeRecordKeyRegExp = /^(?:[A-z_$][\w_$]*|\d+)$/;
 
-type JSPrimitive =
+export type JSPrimitive =
   | null
   | undefined
   | void
@@ -14,28 +16,21 @@ type JSPrimitive =
   | number
   | bigint
   | string
-  | symbol
-  | RegExp;
+  | symbol;
 
-type JSValue = JSPrimitive | Date | URL | Uint8Array;
+export type DirectlyStringifiable = Date | RegExp | URL | Uint8Array;
 
 /** A value that can be converted to a JavaScript expression */
 export type Stringifiable =
-  | JSValue
+  | JSPrimitive
+  | DirectlyStringifiable
   | readonly Stringifiable[]
-  | Readonly<StringifiableObject>
   | ReadonlySet<Stringifiable>
   | ReadonlyMap<Stringifiable, Stringifiable>
   | StringifiableManually;
 
-/** A plain JavaScript object */
-type StringifiableObject = {
-  [k: string]: Stringifiable;
-  [k: symbol]: unknown;
-};
-
-/** Any object implementing a stringify function */
-type StringifiableManually = { stringify(obj: unknown): string };
+/** Any object implementing a stringify function (`Symbol.for("classic.stringify")`) */
+type StringifiableManually = object;
 
 /**
  * Converts a JavaScript value to a JavaScript expression string
@@ -71,6 +66,7 @@ const walk = (
   if (value === null) return write("null");
 
   switch (typeof value) {
+    case "function":
     case "object": {
       if (Array.isArray(value)) {
         write("[");
@@ -115,8 +111,10 @@ const walk = (
       } else if (value instanceof RegExp) {
         write(value.toString());
       } else {
-        if ("stringify" in value && typeof value.stringify === "function") {
-          return write(value.stringify(value));
+        if ($stringify in value && typeof value[$stringify] === "function") {
+          return write(value[$stringify](value));
+        } else if (typeof value === "function") {
+          throw Error(`Functions can't be stringified`);
         }
 
         write("{");
@@ -159,9 +157,28 @@ const walk = (
       write(")");
       return;
     }
-    case "function":
-      throw Error(`Functions can't be stringified`);
     default:
       return write(JSON.stringify(value));
+  }
+};
+
+const stringifiables = new Set();
+stringifiables.add(Date);
+stringifiables.add(RegExp);
+stringifiables.add(Uint8Array);
+stringifiables.add(URL);
+// stringifiables.add(Set);
+// stringifiables.add(Map);
+
+/** */
+export const isDirectlyStringifiable = (v: unknown): v is Stringifiable => {
+  switch (typeof v) {
+    case "function":
+    case "object":
+      return v === null || stringifiables.has(v.constructor);
+    case "symbol":
+      return Symbol.keyFor(v) != null;
+    default:
+      return true;
   }
 };

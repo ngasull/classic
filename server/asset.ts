@@ -1,6 +1,7 @@
 import { Context } from "@classic/context";
-import { type Stringifiable, stringify } from "@classic/js/stringify";
-import { join } from "@std/path/join";
+import { js, JSable, type JSMeta, jsSymbol } from "@classic/js";
+import type { Stringifiable } from "@classic/js/stringify";
+import type { PrebuildContext, RuntimeServer } from "./runtime.ts";
 
 type Async<T> = T | PromiseLike<T>;
 
@@ -25,12 +26,16 @@ export interface AssetOptions {
  * can be retrieved lated in this same data structure.
  */
 export class Asset<
-  T extends Stringifiable | Uint8Array = Stringifiable | Uint8Array,
+  T extends Stringifiable | Uint8Array | JSable =
+    | Stringifiable
+    | Uint8Array
+    | JSable,
 > {
   /** @ignore */
   readonly [$asset] = true;
   readonly #contents: Async<T> | (() => Async<T>);
   readonly #hint?: string;
+  #jsMeta?: JSMeta;
 
   /**
    * @param data to provide at runtime
@@ -54,15 +59,17 @@ export class Asset<
   }
 
   /** @ignore */
-  stringify(): string {
-    const assetIndices = $assetIndices.use();
-    let assetIndex = assetIndices.get(this);
-    if (assetIndex == null) {
-      assetIndices.set(this, assetIndex = assetIndices.size);
-    }
-    return this.hint == null
-      ? `c.asset(${assetIndex})`
-      : `c.asset(${assetIndex},${JSON.stringify(this.hint)})`;
+  get [jsSymbol](): JSMeta {
+    return this.#jsMeta ??= (() => {
+      const assetIndices = $assetIndices.use();
+      let assetIndex = assetIndices.get(this);
+      if (assetIndex == null) {
+        assetIndices.set(this, assetIndex = assetIndices.size);
+      }
+      return (this.hint == null
+        ? contextJs.asset(assetIndex)
+        : contextJs.asset(assetIndex, this.hint));
+    })()[jsSymbol];
   }
 
   /** @ignore */
@@ -71,67 +78,8 @@ export class Asset<
   }
 }
 
-const $assetIndices = Context.for<Map<Asset, number>>(
+const contextJs = js<PrebuildContext>`c`;
+
+export const $assetIndices = Context.for<Map<Asset, number>>(
   "classic.assetIndices",
 );
-
-export const writeAssets = async (
-  value: Stringifiable,
-  assetsDir: string,
-): Promise<[string, Array<readonly [AssetKind, string]>]> => {
-  const assetIndices = new Map<Asset, number>();
-  const meta = $assetIndices.provide(assetIndices, stringify, value);
-
-  const assetKeys = new Set<string>();
-  const assetsMeta: Array<readonly [AssetKind, string]> = [];
-  let writtenSize = 0;
-  while (assetIndices.size > writtenSize) {
-    assetsMeta.push(
-      ...await Promise.all(
-        [...assetIndices.keys()].slice(writtenSize).map(
-          async (asset, i) => {
-            const contents = await asset.contents();
-
-            const makeKey = (suffix?: string) => {
-              const index = assetsMeta.length + i;
-              const hint = asset.hint?.replaceAll("/", "__") ??
-                index.toString();
-
-              let h = null;
-              let key: string;
-              do {
-                key = h == null ? hint : hint + h++;
-                if (suffix != null) key = key + suffix;
-              } while (assetKeys.has(key));
-
-              assetKeys.add(key);
-              return key;
-            };
-
-            if (contents != null && contents instanceof Uint8Array) {
-              const key = makeKey();
-              await Deno.writeFile(join(assetsDir, key), contents);
-              return [AssetKind.BYTES, key] as const;
-            } else if (typeof contents === "string") {
-              const key = makeKey();
-              await Deno.writeTextFile(join(assetsDir, key), contents);
-              return [AssetKind.STRING, key] as const;
-            } else {
-              const key = makeKey(".js");
-              await Deno.writeTextFile(
-                join(assetsDir, key),
-                `export default (c)=>(${
-                  $assetIndices.provide(assetIndices, stringify, value)
-                });`,
-              );
-              return [AssetKind.JS, key] as const;
-            }
-          },
-        ),
-      ),
-    );
-    writtenSize = assetIndices.size;
-  }
-
-  return [meta, assetsMeta];
-};

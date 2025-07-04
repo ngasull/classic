@@ -1,5 +1,9 @@
-import { type Method, type Middleware, useRequest } from "./request.ts";
-import { Buildable, type HandlerResult } from "./module.ts";
+import { $moduleRequest, type Method } from "./request.ts";
+import {
+  $buildable,
+  type BuildableOptions,
+  type HandlerResult,
+} from "./module.ts";
 
 export type RouteParams<T extends string> = T extends
   `${infer Before}:${infer Body}`
@@ -12,82 +16,91 @@ export type RouteParams<T extends string> = T extends
 
 export type { DeclareMethod };
 
-class DeclareMethod<Params> extends Buildable<void> {
-  readonly #handler: Middleware<Params>;
+class DeclareMethod<Params> {
+  readonly #method: Method;
+  readonly #pattern?: string;
+  readonly #handler: (groups: Params) => HandlerResult;
 
-  constructor(method: Method, handler: Middleware<Params>);
+  constructor(method: Method, handler: (groups: Params) => HandlerResult);
   constructor(
     method: Method,
     segment: string | undefined,
-    handler: Middleware<Params>,
+    handler: (groups: Params) => HandlerResult,
   );
   constructor(
     method: Method,
-    pattern?: string | Middleware<Params>,
-    handler?: Middleware<Params>,
+    pattern?: string | ((groups: Params) => HandlerResult),
+    handler?: (groups: Params) => HandlerResult,
   ) {
     if (handler) {
       pattern = pattern as string;
     } else {
-      handler = pattern as Middleware<unknown>;
+      handler = pattern as (groups: Params) => HandlerResult;
       pattern = undefined;
     }
 
-    super((exported) => exported.route({ method, pattern }));
+    this.#method = method;
+    this.#pattern = pattern;
     this.#handler = handler;
   }
 
-  override handle(): HandlerResult {
-    return this.#handler(useRequest<Params>());
+  [$buildable](): BuildableOptions {
+    return {
+      build: (exported) => {
+        exported.route({ method: this.#method, pattern: this.#pattern });
+      },
+
+      handle: () => this.#handler($moduleRequest.use().groups as Params),
+    };
   }
 }
 
-export const declareMethod: {
+export const httpMethod: {
   <Params = Record<never, string>>(
     method: Method,
-    handler: Middleware<Params>,
+    handler: (groups: Params) => HandlerResult,
   ): DeclareMethod<Params>;
   <Segment extends string, Params = Record<never, string>>(
     method: Method,
     segment: Segment | undefined,
-    handler: Middleware<Params & RouteParams<Segment>>,
+    handler: (groups: Params & RouteParams<Segment>) => HandlerResult,
   ): DeclareMethod<Params & RouteParams<Segment>>;
   <Params extends Record<string, string>>(
     method: Method,
     segment: string | undefined,
-    handler: Middleware<Params>,
+    handler: (groups: Params) => HandlerResult,
   ): DeclareMethod<Params>;
 } = (method: Method, ...args: unknown[]): DeclareMethod<unknown> =>
   // @ts-ignore forward dynamically
   new DeclareMethod(method, ...args);
 
-export const declareGET: {
+export const httpGET: {
   <Params = Record<never, string>>(
-    handler: Middleware<Params>,
+    handler: (groups: Params) => HandlerResult,
   ): DeclareMethod<Params>;
   <Segment extends string, Params = Record<never, string>>(
     segment: Segment | undefined,
-    handler: Middleware<Params & RouteParams<Segment>>,
+    handler: (groups: Params & RouteParams<Segment>) => HandlerResult,
   ): DeclareMethod<Params & RouteParams<Segment>>;
   <Params extends Record<string, string>>(
     segment: string | undefined,
-    handler: Middleware<Params>,
+    handler: (groups: Params) => HandlerResult,
   ): DeclareMethod<Params>;
 } = (...args: unknown[]): DeclareMethod<unknown> =>
   // @ts-ignore forward dynamically
   new DeclareMethod("GET", ...args);
 
-export const declarePOST: {
+export const httpPOST: {
   <Params = Record<never, string>>(
-    handler: Middleware<Params>,
+    handler: (groups: Params) => HandlerResult,
   ): DeclareMethod<Params>;
   <Segment extends string, Params = Record<never, string>>(
     segment: Segment | undefined,
-    handler: Middleware<Params & RouteParams<Segment>>,
+    handler: (groups: Params & RouteParams<Segment>) => HandlerResult,
   ): DeclareMethod<Params & RouteParams<Segment>>;
   <Params extends Record<string, string>>(
     segment: string | undefined,
-    handler: Middleware<Params>,
+    handler: (groups: Params) => HandlerResult,
   ): DeclareMethod<Params>;
 } = (...args: unknown[]): DeclareMethod<unknown> =>
   // @ts-ignore forward dynamically

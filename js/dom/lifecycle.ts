@@ -4,7 +4,7 @@ import {
   eventType,
   forEach,
   listen,
-  reverseForOf,
+  reverseFor,
   stopPropagation,
 } from "@classic/util";
 
@@ -33,7 +33,7 @@ export const trackChildren = (node: Node) => {
       }
     }),
     cleanup = () => {
-      reverseForOf(nodes.values(), (cleanups) => reverseForOf(cleanups, call));
+      reverseFor(nodes.values(), (cleanups) => reverseFor(cleanups, call));
       untrackUnsub();
       trackUnsub();
       nodes.clear();

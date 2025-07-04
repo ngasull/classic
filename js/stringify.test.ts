@@ -150,7 +150,7 @@ Deno.test({
       [Symbol.for("poulet")]: "ninja",
       [Symbol("burger")]: "Hi",
       foo: "bar",
-      stringify: (o: unknown) => {
+      [Symbol.for("classic.stringify")]: (o: unknown) => {
         assertEquals(o, obj);
         return "custom code";
       },

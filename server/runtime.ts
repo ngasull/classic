@@ -6,12 +6,11 @@ import { Asset, AssetKind } from "./asset.ts";
 import {
   $moduleRequest,
   ClassicRequest,
-  type Middleware,
   ModuleRequest,
   runMiddlewares,
   type TypedRequest,
 } from "./request.ts";
-import { type HandlerResult, isBuildable, type Route } from "./module.ts";
+import { getBuildable, type HandlerResult, type Route } from "./module.ts";
 
 /**
  * Fetch a {@linkcode Response} in current server's context
@@ -28,7 +27,7 @@ export const useFetch = (req: Request): Promise<Response> =>
  * @param pathname The from which to send the {@linkcode Response}
  */
 export const useRedirect = async (pathname: string): Promise<Response> => {
-  const req = $moduleRequest.use().request.request;
+  const req = $moduleRequest.use().request.raw;
   const isClassicRoute = req.headers.has("Classic-Route");
   const contentLocation = new URL(pathname, req.url);
 
@@ -75,12 +74,13 @@ export class RuntimeServer implements ClassicServer {
     const middlewares = matches.map(([
       { pattern, module, exportName, params },
       urlParamsIndices,
-    ]): Middleware => {
+    ]): () => HandlerResult => {
       const exported = module.module[exportName];
 
       let handler: (...args: Stringifiable[]) => HandlerResult;
-      if (isBuildable(exported)) {
-        handler = exported.handle.bind(exported);
+      const buildable = getBuildable(exported);
+      if (buildable && buildable.handle) {
+        handler = buildable.handle;
       } else if (typeof exported === "function") {
         handler = exported as typeof handler;
       } else {
@@ -98,13 +98,13 @@ export class RuntimeServer implements ClassicServer {
       );
       return async () =>
         $moduleRequest.provide(
-          new ModuleRequest(this, module, request, urlParams, pattern),
+          new ModuleRequest(request, module, urlParams, pattern),
           handler,
           ...params,
         );
     });
 
-    return runMiddlewares(middlewares, req);
+    return runMiddlewares(middlewares);
   };
 }
 
@@ -117,7 +117,7 @@ export class PrebuildContext {
   readonly #buildDirectory: string;
   readonly #assets: [AssetKind, string][];
 
-  asset(index: number): Asset {
+  asset(index: number, hint?: string): Asset {
     return new Asset(async () => {
       const asset = this.#assets[index];
       if (!asset) throw Error(`Assets have not been prebuilt correctly`);
