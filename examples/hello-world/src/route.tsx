@@ -1,14 +1,17 @@
 import { declareLayout, declarePage } from "@classic/server";
+import { Bundle } from "@classic/server/bundle";
 import { styled } from "@classic/server/css";
 import { dbContext } from "./db.ts";
 
-// deno-fmt-ignore
 export const styles = styled.css`
   body {
     background: #ddd;
     padding: 32px;
   }
 `;
+
+export const bundle = new Bundle("js");
+const router = bundle.add<typeof import("@classic/router")>("@classic/router");
 
 export const layout = declareLayout((children) => {
   return (
@@ -18,7 +21,7 @@ export const layout = declareLayout((children) => {
         <meta charset="utf-8" />
         <link rel="stylesheet" href={styles.path} />
       </head>
-      <body>
+      <body ref={() => router.init()}>
         {children}
       </body>
     </html>

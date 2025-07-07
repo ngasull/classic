@@ -39,7 +39,7 @@ NodeJS support is planned, however we strongly recommend Deno in general.
 
 ```sh
 # Prompts a folder name and creates the template
-deno run -r --allow-write=. --allow-net https://raw.githubusercontent.com/ngasull/classic/main/init.ts
+deno run -r --allow-write=. --allow-net https://raw.githubusercontent.com/ngasull/classic/main/examples/hello-world/init.ts
 ```
 
 ## Code examples

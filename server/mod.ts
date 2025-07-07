@@ -32,7 +32,7 @@
  * With [deno](https://deno.com/) installed:
  * ```bash
  * # Bootstrap your application
- * deno run -W=. init.ts
+ * deno run -r --allow-write=. --allow-net https://raw.githubusercontent.com/ngasull/classic/main/examples/hello-world/init.ts
  *
  * # Run dev server
  * deno task dev
