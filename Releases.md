@@ -1,5 +1,44 @@
 ### 2025.07.07
 
+#### @classic/build 0.1.1 (patch)
+
+- fix(build): support modules that resolve to a non-file URL
+- chore(build): simple warning doc for build
+
+#### @classic/context 0.1.2 (patch)
+
+- chore(context): document @classic/context module
+
+#### @classic/element 0.1.9 (patch)
+
+- chore(element,html): actually bind docs to export
+- chore(element): document and package @element/jsx
+
+#### @classic/html 0.1.3 (patch)
+
+- chore(element,html): actually bind docs to export
+- chore(html): Add minimal docs
+
+#### @classic/js 0.1.14 (patch)
+
+- fix(js): make JS awaits type safe
+- chore(js): document and package stringify
+
+#### @classic/router 0.1.3 (patch)
+
+- chore(router,server): refresh main docs
+
+#### @classic/server 0.1.5 (patch)
+
+- fix(server): pre-encode route patterns (as hono router expects)
+- chore(server): complete server docs
+- chore(router,server): refresh main docs
+- chore(server): sort exports into same sub-folder structure
+- chore(examples,server): fix hello-world init
+- chore(server): dedupe code
+
+### 2025.07.07
+
 #### @classic/build 0.1.0 (minor)
 
 - fix(build): support modules that resolve to a non-file URL
