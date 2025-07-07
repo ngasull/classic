@@ -18,6 +18,8 @@
  *    ]
  * }
  * ```
+ *
+ * @module
  */
 
 import { isJSable } from "@classic/js";
