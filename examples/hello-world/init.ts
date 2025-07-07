@@ -20,7 +20,6 @@ const samples = [
   copySample("prebuild.ts"),
   copySample("src/route.tsx"),
   copySample("src/world.route.tsx"),
-  // copySample("src/bundle.ts"),
   copySample("src/db.ts"),
 ];
 
@@ -36,26 +35,6 @@ await Deno.mkdir(join(projectName, "src"), { recursive: true });
 await Promise.all(samples).then((samples) =>
   samples.map((sample) => sample(projectName))
 );
-
-// const init = await new Deno.Command(Deno.execPath(), {
-//   args: ["init", projectName],
-// }).spawn().status;
-// if (init.code !== 0) Deno.exit(init.code);
-
-// await Promise.all([
-//   (async () => {
-//     const add = await new Deno.Command(Deno.execPath(), {
-//       args: ["add", "jsr:@classic/server"],
-//     }).spawn().status;
-//     if (add.code !== 0) Deno.exit(add.code);
-//   })(),
-//   (async () => {
-//     await Deno.mkdir(join(projectName, "src"), { recursive: true });
-//     await Promise.all(samples).then((samples) =>
-//       samples.map((sample) => sample(projectName))
-//     );
-//   })(),
-// ]);
 
 console.log(
   "Project folder %s initialized. You may now run the commands below:",

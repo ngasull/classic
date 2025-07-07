@@ -1,4 +1,7 @@
-import type { DirectlyStringifiable, JSPrimitive } from "./stringify.ts";
+import type {
+  DirectlyStringifiable,
+  JSPrimitive,
+} from "./stringify/stringify.ts";
 
 export type JS<T> = _JS<T, []>;
 
@@ -9,6 +12,7 @@ type _JS<T, Depth extends unknown[]> =
     : T extends bigint ? JS<typeof BigInt["prototype"]>
     : T extends boolean ? JS<typeof Boolean["prototype"]>
     : T extends symbol ? JS<typeof Symbol["prototype"]>
+    : T extends PromiseLike<infer T> ? PromiseLike<JS<Awaited<T>>>
     : JSOverride<T> extends never ? (
         & (T extends (...args: infer Args) => infer Ret ? (
             <R = Ret>(...args: { [I in keyof Args]: JSArg<Args[I]> }) => JS<R>

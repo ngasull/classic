@@ -10,8 +10,8 @@
  * - [The Web](https://developer.mozilla.org/docs/Web/API)
  * - [@classic/server](https://jsr.io/@classic/server) - Buildable app server without wrapping tool
  * - [@classic/html](https://jsr.io/@classic/html) - Write HTML and JavaScript as JSX
- * - [@classic/js](https://jsr.io/@classic/js) - Manipulate client-side JavaScript from server code
- * - [@classic/router](https://jsr.io/@classic/router) - Client script providing dynamic routing from standard pages
+ * - [@classic/js](https://jsr.io/@classic/js) - Ad hoc (client) JavaScript from typed (server) code
+ * - [@classic/router](https://jsr.io/@classic/router) - Client script providing dynamic routing from regular pages
  * - [@classic/morph](https://jsr.io/@classic/morph) - Simple element replacement, navigate without page reloads
  *
  * ## Highlights
@@ -32,7 +32,7 @@
  * With [deno](https://deno.com/) installed:
  * ```bash
  * # Bootstrap your application
- * deno run -W=. init.ts
+ * deno run -r --allow-write=. --allow-net https://raw.githubusercontent.com/ngasull/classic/main/examples/hello-world/init.ts
  *
  * # Run dev server
  * deno task dev
@@ -184,12 +184,13 @@ export { declareMutation } from "./mutation.ts";
 export { declareLayout, declarePage } from "./page.ts";
 export {
   RequestContext,
+  useFetch,
   useMatchedPattern,
   useNext,
   useParams,
+  useRedirect,
   useRequest,
 } from "./request.ts";
-export type { Method, Next, TypedRequest } from "./request.ts";
-export { useFetch, useRedirect } from "./runtime.ts";
+export type { Method, TypedRequest } from "./request.ts";
 export { httpGET, httpMethod, httpPOST } from "./serve.ts";
 export type { DeclareMethod, RouteParams } from "./serve.ts";

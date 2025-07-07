@@ -1,3 +1,25 @@
+/**
+ * JSX runtime for @classic/html
+ *
+ * See [TypeScript's docs](https://www.typescriptlang.org/docs/handbook/jsx.html) for specifications
+ *
+ * @example deno.json
+ * ```json
+ * {
+ *   "compilerOptions": {
+ *     "jsx": "react-jsx",
+ *     "jsxImportSource": "@classic/html"
+ *   },
+ *    "lib": [
+ *      "deno.ns",
+ *      "DOM",
+ *      "DOM.Iterable",
+ *      "ES2021"
+ *    ]
+ * }
+ * ```
+ */
+
 import { isJSable } from "@classic/js";
 import { mkRef } from "./ref.ts";
 import type {
@@ -12,6 +34,7 @@ import type { VoidElement } from "./void.ts";
 
 export type { JSX };
 
+/** @ignore  */
 const jsx = ((
   tag: keyof JSX.IntrinsicElements | JSX.FC<Record<string, unknown>>,
   props?: Record<string, unknown> | null | undefined,
@@ -75,6 +98,7 @@ type NullableProps<Props> =
     ? null | undefined
     : never);
 
+/** @ignore  */
 const Fragment = (
   { children }: { children?: JSX.Children } = {},
 ): JSXElement => ({

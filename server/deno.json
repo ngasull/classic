@@ -3,7 +3,7 @@
   "version": "0.1.4",
   "exports": {
     ".": "./mod.ts",
-    "./build": "./build.ts",
+    "./build": "./build/mod.ts",
     "./css": "./css/mod.ts",
     "./bundle": "./bundle/mod.ts",
     "./asset-serve": "./asset-serve/mod.ts"

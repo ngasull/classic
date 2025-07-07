@@ -2,9 +2,9 @@ import { type JS, js } from "@classic/js";
 import type { Stringifiable } from "@classic/js/stringify";
 import { SEPARATOR } from "@std/path/constants";
 import { relative } from "@std/path/relative";
-import type { RoutePathContext } from "./build-context.ts";
-import type { Method } from "./request.ts";
 import { toFileUrl } from "@std/path/to-file-url";
+import type { RoutePathContext } from "./build/context.ts";
+import type { Method } from "./request.ts";
 
 type AllOrNone<T> = T | { [k in keyof T]?: never };
 
@@ -120,6 +120,7 @@ class BuildableInternal<T> {
   }
 }
 
+/** Union of acceptable request hanlder return types (async {@linkcode Response} or nothing) */
 export type HandlerResult =
   | Response
   | void

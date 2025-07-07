@@ -5,6 +5,7 @@ import {
   type HandlerResult,
 } from "./module.ts";
 
+/** Statically extract dynamic parameters from an URI */
 export type RouteParams<T extends string> = T extends
   `${infer Before}:${infer Body}`
   ? Before extends "" | `${string}/`
@@ -16,11 +17,13 @@ export type RouteParams<T extends string> = T extends
 
 export type { DeclareMethod };
 
+/** Method declaration as a buildable handler */
 class DeclareMethod<Params> {
   readonly #method: Method;
   readonly #pattern?: string;
   readonly #handler: (groups: Params) => HandlerResult;
 
+  /** @ignore */
   constructor(method: Method, handler: (groups: Params) => HandlerResult);
   constructor(
     method: Method,
@@ -44,6 +47,7 @@ class DeclareMethod<Params> {
     this.#handler = handler;
   }
 
+  /** @ignore */
   [$buildable](): BuildableOptions {
     return {
       build: (exported) => {
@@ -55,6 +59,13 @@ class DeclareMethod<Params> {
   }
 }
 
+/**
+ * Declare an HTTP handler
+ *
+ * @param method HTTP {@linkcode Method}
+ * @param segment Optional route segment to nest the handler into
+ * @param handler Custom request handler
+ */
 export const httpMethod: {
   <Params = Record<never, string>>(
     method: Method,
@@ -74,6 +85,12 @@ export const httpMethod: {
   // @ts-ignore forward dynamically
   new DeclareMethod(method, ...args);
 
+/**
+ * Declare an HTTP GET handler
+ *
+ * @param segment Optional route segment to nest the handler into
+ * @param handler Custom request handler
+ */
 export const httpGET: {
   <Params = Record<never, string>>(
     handler: (groups: Params) => HandlerResult,
@@ -90,6 +107,12 @@ export const httpGET: {
   // @ts-ignore forward dynamically
   new DeclareMethod("GET", ...args);
 
+/**
+ * Declare an HTTP POST handler
+ *
+ * @param segment Optional route segment to nest the handler into
+ * @param handler Custom request handler
+ */
 export const httpPOST: {
   <Params = Record<never, string>>(
     handler: (groups: Params) => HandlerResult,

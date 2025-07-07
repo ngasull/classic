@@ -15,15 +15,15 @@
     ]
   },
   "imports": {
-    "@classic/build": "jsr:@classic/build@0.1",
-    "@classic/context": "jsr:@classic/context@0.1",
-    "@classic/element": "jsr:@classic/element@0.1",
-    "@classic/html": "jsr:@classic/html@0.1",
-    "@classic/js": "jsr:@classic/js@0.1",
-    "@classic/morph": "jsr:@classic/morph@0.1",
-    "@classic/router": "jsr:@classic/router@0.1",
-    "@classic/server": "jsr:@classic/server@^0.1.3",
-    "@classic/util": "jsr:@classic/util@0.1",
+    "@classic/build": "jsr:@classic/build@^0.1.3",
+    "@classic/context": "jsr:@classic/context@^0.1.1",
+    "@classic/element": "jsr:@classic/element@^0.1.8",
+    "@classic/html": "jsr:@classic/html@^0.1.2",
+    "@classic/js": "jsr:@classic/js@^0.1.13",
+    "@classic/morph": "jsr:@classic/morph@^0.1.2",
+    "@classic/router": "jsr:@classic/router@^0.1.2",
+    "@classic/server": "jsr:@classic/server@^0.1.5",
+    "@classic/util": "jsr:@classic/util@^0.1.3",
     "@hono/hono": "jsr:@hono/hono@^4.6.20"
   }
 }

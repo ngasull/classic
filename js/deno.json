@@ -3,7 +3,6 @@
   "version": "0.1.13",
   "exports": {
     ".": "./mod.ts",
-    "./dom": "./dom.ts",
-    "./stringify": "./stringify.ts"
+    "./stringify": "./stringify/mod.ts"
   }
 }

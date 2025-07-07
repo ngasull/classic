@@ -69,14 +69,17 @@ const mkContext = async ({
   );
 
   const moduleByItsPath = Object.fromEntries(
-    modules.flatMap((m, i) =>
-      m.includes("*") ? [] : [[
-        m[0] === "/"
-          ? entryPoints[i]
-          : posixFromFileUrl(import.meta.resolve(m)),
-        m,
-      ]]
-    ),
+    modules.flatMap((m, i) => {
+      if (m.includes("*")) return [];
+
+      let path: string;
+      if (m[0] === "/") path = entryPoints[i];
+      else {
+        const url = new URL(import.meta.resolve(m));
+        path = url.protocol === "file:" ? posixFromFileUrl(url) : url.href;
+      }
+      return [[path, m]];
+    }),
   );
 
   const buildContext = await esbuild.context({

@@ -16,7 +16,7 @@ import type {
   typeSymbol,
 } from "./types.ts";
 import { isJSable, jsSymbol } from "./types.ts";
-import { isDirectlyStringifiable, stringify } from "./stringify.ts";
+import { isDirectlyStringifiable, stringify } from "./stringify/mod.ts";
 
 // https://graphemica.com/categories/letter-number/page/2
 export const argn = (n: number) => `𐏒${n}`;

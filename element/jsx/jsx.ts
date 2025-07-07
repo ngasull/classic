@@ -6,9 +6,9 @@ import {
   NULL,
   UNDEFINED,
 } from "@classic/util";
-import { $extends, type Children, type CustomElement } from "./element.ts";
+import { $extends, type Children, type CustomElement } from "../element.ts";
+import { callOrReturn, onChange, track } from "../signal.ts";
 import type { JSXInternal } from "./jsx-dom.d.ts";
-import { callOrReturn, onChange, track } from "./signal.ts";
 
 const doc = document;
 

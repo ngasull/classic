@@ -6,6 +6,12 @@ import {
   useRedirect,
 } from "@classic/server";
 
+/**
+ * Declare a mutation
+ *
+ * @param segment Optional route segment to nest the mutation into
+ * @param handler Custom request handler
+ */
 export const declareMutation: {
   <Params = Record<never, string>>(
     handler: (groups: Params) => HandlerResult,

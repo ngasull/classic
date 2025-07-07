@@ -2,13 +2,14 @@ import { Context } from "@classic/context";
 import type { HandlerResult, RouteModule } from "./module.ts";
 import type { ClassicServer } from "./runtime.ts";
 
+/** Known HTTP methods */
 export type Method = "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
 
 export const $moduleRequest = Context.for<ModuleRequest<unknown>>(
   "classic.request",
 );
 
-export type Next = () => Promise<Response>;
+type Next = () => Promise<Response>;
 
 const $next = Context.for<Next>("classic.next");
 

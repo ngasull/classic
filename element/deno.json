@@ -3,8 +3,8 @@
   "version": "0.1.8",
   "exports": {
     ".": "./mod.ts",
-    "./jsx": "./jsx.ts",
-    "./jsx-runtime": "./jsx-runtime.ts"
+    "./jsx": "./jsx/jsx.ts",
+    "./jsx-runtime": "./jsx/jsx-runtime.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
