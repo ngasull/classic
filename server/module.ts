@@ -120,6 +120,7 @@ class BuildableInternal<T> {
   }
 }
 
+/** Union of acceptable request hanlder return types (async {@linkcode Response} or nothing) */
 export type HandlerResult =
   | Response
   | void

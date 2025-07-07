@@ -191,6 +191,6 @@ export {
   useRedirect,
   useRequest,
 } from "./request.ts";
-export type { Method, Next, TypedRequest } from "./request.ts";
+export type { Method, TypedRequest } from "./request.ts";
 export { httpGET, httpMethod, httpPOST } from "./serve.ts";
 export type { DeclareMethod, RouteParams } from "./serve.ts";
