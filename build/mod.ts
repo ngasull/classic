@@ -1,3 +1,11 @@
+/**
+ * Simplified module bundling
+ *
+ * _Only internal use in classic at the moment_
+ *
+ * @module
+ */
+
 /** A generic type where `T` could have to be awaited */
 export type Async<T> = T | PromiseLike<T>;
 
