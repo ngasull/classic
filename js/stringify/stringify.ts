@@ -1,9 +1,3 @@
-/**
- * Convert serializable value to JavaScript
- *
- * @module
- */
-
 const $stringify = Symbol.for("classic.stringify");
 
 const safeRecordKeyRegExp = /^(?:[A-z_$][\w_$]*|\d+)$/;
@@ -18,6 +12,7 @@ export type JSPrimitive =
   | string
   | symbol;
 
+/** A non-primitive native object value that is stringifiable */
 export type DirectlyStringifiable = Date | RegExp | URL | Uint8Array;
 
 /** A value that can be converted to a JavaScript expression */

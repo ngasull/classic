@@ -1,4 +1,7 @@
-import type { DirectlyStringifiable, JSPrimitive } from "./stringify.ts";
+import type {
+  DirectlyStringifiable,
+  JSPrimitive,
+} from "./stringify/stringify.ts";
 
 export type JS<T> = _JS<T, []>;
 
