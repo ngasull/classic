@@ -3,7 +3,7 @@
   "version": "0.1.8",
   "exports": {
     ".": "./mod.ts",
-    "./jsx": "./jsx/jsx.ts",
+    "./jsx": "./jsx/mod.ts",
     "./jsx-runtime": "./jsx/jsx-runtime.ts"
   },
   "compilerOptions": {
