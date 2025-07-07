@@ -220,9 +220,11 @@ Deno.test("js.string escapes backticks and dollars", () => {
 });
 
 Deno.test("await-ing a JS should not block", async () => {
-  const expr = js`a`;
+  const expr = js<
+    Promise<42>
+  >`new Promise(resolve => setTimeout(() => resolve(42), 1))`;
   const res = await expr;
   assertEquals(typeof res, "function");
-  assertEquals((res as JS<PromiseLike<never>>).then, undefined);
-  assertEquals(toJs([res]), "await a;");
+  assertEquals((res as any).then, undefined);
+  assertEquals(await js.eval(res), 42);
 });
