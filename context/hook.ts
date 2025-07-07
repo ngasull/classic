@@ -1,3 +1,69 @@
+/**
+ * Type-safe dynamic runtime state API.
+ *
+ * 1. Declare a key for a specific runtime type
+ * 2. Provide the typed data in an async closure
+ * 3. Retrieve data directly in user modules
+ *
+ * @example End-to-end declare, provide & use summary
+ * ```ts
+ * import { Context } from "@classic/context";
+ * import { assert } from "@std/assert";
+ *
+ * type User = {
+ *   id: bigint;
+ *   name: string;
+ * };
+ *
+ * // Shared code - export this key to provider and consumers
+ * export const $user = Context.for<User>("user");
+ *
+ * // Provider code
+ * const john = {
+ *   id: 42n,
+ *   name: "John",
+ * };
+ *
+ * $user.provide(john, () => {
+ *   // Consumer code - `user` is correctly typed as `User`
+ *   assert($user.use() === john);
+ * });
+ * ```
+ *
+ * @example Use functions: expect context transparently in custom logic
+ * ```ts
+ * import { Context } from "@classic/context";
+ * import { assert } from "@std/assert";
+ *
+ * type User = {
+ *   id: bigint;
+ *   name: string;
+ * };
+ *
+ * export const $user = Context.for<User>("user");
+ * export const getUserId = () => $user.use().id;
+ *
+ * // Provider code
+ * $user.provide({ id: 42n, name: "John" }, () => {
+ *   // Looks the same, but only exposes read access
+ *   assert(getUserId() === 42n);
+ * });
+ * ```
+ *
+ * @example Safe or optional context access
+ * ```ts
+ * import { Context } from "@classic/context";
+ * import { assert, assertThrows } from "@std/assert";
+ *
+ * export const $sessionId = Context.for<string>("sessionId");
+ *
+ * assertThrows(() => $sessionId.use());
+ * assert($sessionId.get() === undefined);
+ * ```
+ *
+ * @module
+ */
+
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
