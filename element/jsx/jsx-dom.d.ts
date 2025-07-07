@@ -1,6 +1,6 @@
 // Modified from source: https://github.com/preactjs/preact/blob/main/src/jsx.d.ts
 
-import type { Children } from "./element.ts";
+import type { Children } from "../element.ts";
 
 type Parent = { children?: Children };
 

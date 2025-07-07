@@ -1,17 +1,28 @@
 /**
  * Thinnest layer over custom elements (Web Components)
  *
- * @example Self-incrementing counter
+ * @example Red date
  * ```tsx ignore
- * import { css, onDisconnect, define, element, signal } from "@classic/element";
- * import { render } from "@classic/element/jsx";
+ * import { css, define, element } from "@classic/element";
  *
- * define("x-counter", element({
+ * define("x-now", element({
  *   css: css`
  *     :host {
  *       color: "red";
  *     }
  *   `,
+ *   js(host) {
+ *     host.textContent = new Date().toLocaleString();
+ *   },
+ * }));
+ * ```
+ *
+ * @example Self-incrementing counter
+ * ```tsx ignore
+ * import { onDisconnect, define, element, signal } from "@classic/element";
+ * import { render } from "@classic/element/jsx";
+ *
+ * define("x-counter", element({
  *   js(host) {
  *     const [count, setCount] = signal(0);
  *
@@ -78,8 +89,5 @@ export type * from "./props.ts";
 
 export type { CustomElement, ElementOptions, ElementProps } from "./element.ts";
 
-export type { CustomElements } from "./jsx.ts";
-
 export { onChange, signal, track } from "./signal.ts";
-
 export type { Signal } from "./signal.ts";
