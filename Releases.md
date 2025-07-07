@@ -1,3 +1,58 @@
+### 2025.07.07
+
+#### @classic/build 0.1.0 (minor)
+
+- fix(build): support modules that resolve to a non-file URL
+- chore(build): simple warning doc for build
+- chore(build): Remain in @classic/build
+
+#### @classic/context 0.1.2 (patch)
+
+- chore(context): document @classic/context module
+
+#### @classic/element 0.1.8 (patch)
+
+- chore(element): document and package @element/jsx
+- chore(element): Document element
+
+#### @classic/html 0.1.2 (patch)
+
+- fix(html,js): make js more simple and straightforward and document it
+- chore(html): Add minimal docs
+
+#### @classic/js 0.1.13 (patch)
+
+- fix(js): make JS awaits type safe
+- fix(html,js): make js more simple and straightforward and document it
+- fix(js): make stringify non invasive through Symbol.for
+- chore(js): document and package stringify
+- chore(js,util): Document util
+
+#### @classic/morph 0.1.2 (patch)
+
+- chore(morph): Document morph
+
+#### @classic/router 0.1.2 (patch)
+
+- chore(router,server): refresh main docs
+- chore(router): Document router client
+
+#### @classic/server 0.1.4 (patch)
+
+- feat(server): upgrade server to modules API
+- fix(server): pre-encode route patterns (as hono router expects)
+- chore(server): complete server docs
+- chore(router,server): refresh main docs
+- chore(server): sort exports into same sub-folder structure
+- chore(examples,server): fix hello-world init
+- chore(server): dedupe code
+- chore(server): Use relative path for package self-reference to let JSR access
+  the right path
+
+#### @classic/util 0.1.3 (patch)
+
+- chore(js,util): Document util
+
 ### 2025.07.04
 
 #### @classic/build 0.1.0 (minor)
