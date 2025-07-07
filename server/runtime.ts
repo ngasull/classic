@@ -33,7 +33,7 @@ export class RuntimeServer implements ClassicServer {
       );
       this.#router.add(
         method === "*" ? "ALL" : method,
-        pattern || "/",
+        encodeURI(pattern || "/"),
         mapping,
       );
     }
