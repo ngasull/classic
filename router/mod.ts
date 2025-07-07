@@ -2,6 +2,7 @@
  * Minimal routing script to enable dynamic navigation in any standard website.
  *
  * Features :
+ * - Intercept links and forms navigation
  * - Differential morphing between pages
  * - Morph shadow DOM when possible
  * - Execute scripts from received pages

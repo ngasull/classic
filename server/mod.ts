@@ -10,8 +10,8 @@
  * - [The Web](https://developer.mozilla.org/docs/Web/API)
  * - [@classic/server](https://jsr.io/@classic/server) - Buildable app server without wrapping tool
  * - [@classic/html](https://jsr.io/@classic/html) - Write HTML and JavaScript as JSX
- * - [@classic/js](https://jsr.io/@classic/js) - Manipulate client-side JavaScript from server code
- * - [@classic/router](https://jsr.io/@classic/router) - Client script providing dynamic routing from standard pages
+ * - [@classic/js](https://jsr.io/@classic/js) - Ad hoc (client) JavaScript from typed (server) code
+ * - [@classic/router](https://jsr.io/@classic/router) - Client script providing dynamic routing from regular pages
  * - [@classic/morph](https://jsr.io/@classic/morph) - Simple element replacement, navigate without page reloads
  *
  * ## Highlights
