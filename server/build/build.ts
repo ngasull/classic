@@ -1,18 +1,10 @@
-/**
- * # Build server
- *
- * Instantiate a {@linkcode BuildServer} to develop a server defined with {@link https://jsr.io/@classic/server|@classic/server}
- *
- * @module
- */
-
 import { js, type JSable, toJs, unsafe } from "@classic/js";
 import { exists } from "@std/fs/exists";
 import { join, resolve, toFileUrl } from "@std/path";
-import { $assetIndices, type Asset, AssetKind } from "./asset.ts";
-import { $buildContext, Build, RoutePathContext } from "./build-context.ts";
-import { type Route, RouteModule, routeRegExp } from "./module.ts";
-import { type ClassicServer, RuntimeServer } from "./runtime.ts";
+import { $assetIndices, type Asset, AssetKind } from "../asset.ts";
+import { type Route, RouteModule, routeRegExp } from "../module.ts";
+import { type ClassicServer, RuntimeServer } from "../runtime.ts";
+import { $buildContext, Build, RoutePathContext } from "./context.ts";
 
 /**
  * File routing system from provivded base path
@@ -154,8 +146,8 @@ export class BuildServer implements ClassicServer {
   }
 }
 
-const runtimeJs = js.module<typeof import("./runtime.ts")>(
-  import.meta.resolve("./runtime.ts"),
+const runtimeJs = js.module<typeof import("../runtime.ts")>(
+  import.meta.resolve("../runtime.ts"),
 );
 
 const scanDir = async (
