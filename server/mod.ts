@@ -184,12 +184,13 @@ export { declareMutation } from "./mutation.ts";
 export { declareLayout, declarePage } from "./page.ts";
 export {
   RequestContext,
+  useFetch,
   useMatchedPattern,
   useNext,
   useParams,
+  useRedirect,
   useRequest,
 } from "./request.ts";
 export type { Method, Next, TypedRequest } from "./request.ts";
-export { useFetch, useRedirect } from "./runtime.ts";
 export { httpGET, httpMethod, httpPOST } from "./serve.ts";
 export type { DeclareMethod, RouteParams } from "./serve.ts";

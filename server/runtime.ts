@@ -12,30 +12,6 @@ import {
 } from "./request.ts";
 import { getBuildable, type HandlerResult, type Route } from "./module.ts";
 
-/**
- * Fetch a {@linkcode Response} in current server's context
- *
- * @param req The {@linkcode Request} to send
- */
-export const useFetch = (req: Request): Promise<Response> =>
-  $moduleRequest.use().request.server.fetch(req);
-
-/**
- * Redirects to requested path, preferrably softly when
- * current request comes from classic router.
- *
- * @param pathname The from which to send the {@linkcode Response}
- */
-export const useRedirect = async (pathname: string): Promise<Response> => {
-  const req = $moduleRequest.use().request.raw;
-  const isClassicRoute = req.headers.has("Classic-Route");
-  const contentLocation = new URL(pathname, req.url);
-
-  return isClassicRoute
-    ? useFetch(new Request(contentLocation))
-    : Response.redirect(contentLocation);
-};
-
 export interface ClassicServer {
   fetch(req: Request): Promise<Response>;
 }
