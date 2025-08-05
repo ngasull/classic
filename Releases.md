@@ -1,3 +1,13 @@
+### 2025.08.05
+
+#### @classic/element 0.1.10 (patch)
+
+- chore(element,js): add missing docs
+
+#### @classic/js 0.1.15 (patch)
+
+- chore(element,js): add missing docs
+
 ### 2025.07.07
 
 #### @classic/build 0.1.1 (patch)
