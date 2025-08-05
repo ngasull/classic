@@ -26,13 +26,16 @@ export type ClassicElementJSXProps<T> = T extends
 
 type NativeElement = Element;
 
+/** Standard JSX namespace */
 declare namespace JSX {
+  /** JSX elements available as string (ex: `<a />`) */
   type IntrinsicElements =
     & JSXInternal.IntrinsicElements
     & {
       [K in keyof CustomElements]: ClassicElementJSXProps<CustomElements[K]>;
     };
 
+  /** JSX element */
   type Element = NativeElement;
 }
 

@@ -783,6 +783,7 @@ export const jsResources = (expr: JSable): string[] =>
     return [...r];
   });
 
+/** Userland modules */
 export interface Module {}
 
 const AsyncFunction = async function () {}.constructor as typeof Function;
