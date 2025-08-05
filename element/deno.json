@@ -1,6 +1,6 @@
 {
   "name": "@classic/element",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "exports": {
     ".": "./mod.ts",
     "./jsx": "./jsx/mod.ts",
