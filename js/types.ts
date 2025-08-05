@@ -3,6 +3,10 @@ import type {
   JSPrimitive,
 } from "./stringify/stringify.ts";
 
+/**
+ * A {@linkcode JSable} proxy that reflects property access
+ * and function calls into intuitively related {@linkcode JS}
+ */
 export type JS<T> = _JS<T, []>;
 
 type _JS<T, Depth extends unknown[]> =
@@ -30,6 +34,14 @@ type _JS<T, Depth extends unknown[]> =
       )
     : JSOverride<T>);
 
+/**
+ * What can be passed as {@linkcode JS} call argument.
+ *
+ * For example, given `a: JS<number>` in `a.toFixed(arg)`,
+ * `arg` has to have type `JSArg<number>` (because
+ * {@linkcode Number.prototype.toFixed} expects a number).
+ * Basically, `arg` can be `number | JSable<number>`
+ */
 export type JSArg<Arg> = _JSArg<Arg, []>;
 
 type _JSArg<Arg, Depth extends unknown[]> =
@@ -51,7 +63,9 @@ type JSMapped = readonly unknown[] | Record<any, any>;
 type JSFunction = Function | Record<any, any>;
 type OnlyJSArg<T, Filter> = Exclude<T, Exclude<JSArgUnion, Filter>>;
 
+/** Userland configuration */
 declare namespace JSOverrides {
+  /** Specific overrides for global JS */
   interface JS<T> {
     // Promise: T extends Promise<infer G> ? JSPromise<G> : never;
   }
@@ -61,10 +75,12 @@ export type { JSOverrides };
 
 type JSOverride<T> = JSOverrides.JS<T>[keyof JSOverrides.JS<any>];
 
+/** Object that can be generated to JS */
 export type JSable<T = unknown> =
   & { readonly [jsSymbol]: JSMeta }
   & JSableType<T, boolean>;
 
+/** Internal {@linkcode JSable} configuration */
 export type JSMeta<T = unknown, R = false> = Readonly<JSableType<T, R>> & {
   readonly [jsSymbol]: JSMeta<T, R>;
   scope: JSMeta | null;
@@ -157,8 +173,15 @@ type ExtractFlat<T> = T extends JSable<infer T> ? T
 
 type Exact<A, B> = A extends B ? B extends A ? true : false : false;
 
+/** @ignore */
 export const jsSymbol = Symbol.for("classic.js");
 
+/**
+ * Checks whether an object is {@linkcode JSable}
+ *
+ * @param v Object to check
+ * @returns `true` if `v` is `JSable` and refine its type
+ */
 export const isJSable = <T>(v: unknown): v is JSable<T> =>
   v != null && (typeof v === "object" || typeof v === "function") &&
   jsSymbol in v;

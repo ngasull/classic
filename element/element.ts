@@ -22,6 +22,7 @@ export const $extends: unique symbol = Symbol_() as never;
 const $signals: unique symbol = Symbol_() as never;
 const $setUp: unique symbol = Symbol_() as never;
 
+/** Represents a classic custom element */
 export type CustomElement<
   Props extends Record<string, unknown> = Record<never, never>,
   Ref extends HTMLElement = HTMLElement,
@@ -42,6 +43,7 @@ type TypedHost<Public> =
     readonly [$setUp]: boolean;
   };
 
+/** Allows inferring props from a {@linkcode CustomElement} */
 export type ElementProps<T> = T extends CustomElement<infer Props, infer Ref>
   ? Partial<Props> & { readonly ref?: (el: Ref) => void }
   : never;

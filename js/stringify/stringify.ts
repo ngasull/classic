@@ -165,7 +165,12 @@ stringifiables.add(URL);
 // stringifiables.add(Set);
 // stringifiables.add(Map);
 
-/** */
+/**
+ * Check wheteher an object is a plain stringifiable object without needing to recurse
+ *
+ * @param v Object to check
+ * @returns `true` if `v` is directly stringifiable and refine its type
+ */
 export const isDirectlyStringifiable = (v: unknown): v is Stringifiable => {
   switch (typeof v) {
     case "function":
