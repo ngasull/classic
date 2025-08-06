@@ -8,8 +8,6 @@ import { $buildContext, Build, RoutePathContext } from "./context.ts";
 
 /**
  * File routing system from provivded base path
- *
- * @param base Base path to scan routes from
  */
 export class BuildServer implements ClassicServer {
   readonly #addedModules = new Set<RouteModule>();
@@ -56,6 +54,12 @@ export class BuildServer implements ClassicServer {
     return server.fetch(req);
   };
 
+  /**
+   * Generate assets and a `server.js` containing a {@linkcode RuntimeServer} a configured like current build.
+   *
+   * @param buildDirectory Directory to write metadata to. Will contain the `server.js` entry point. Default: `<cwd>/.build`
+   * @returns A promise that resolves when finished writing
+   */
   async write(
     buildDirectory: string = join(Deno.cwd(), ".build"),
   ): Promise<void> {
@@ -141,6 +145,11 @@ export class BuildServer implements ClassicServer {
     );
   }
 
+  /**
+   * Stop the build process
+   *
+   * @returns A promise that resolves when actually stopped
+   */
   async stop(): Promise<void> {
     await Promise.all(this.#addedModules.values().map((m) => m.stop()));
   }

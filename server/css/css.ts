@@ -79,9 +79,22 @@ class ServedCss {
   }
 }
 
-/** @see {@linkcode styled.css} */
+/** Create inline styles using {@linkcode styled.css} template */
 export const styled = {
-  /** Generate a style sheet from a template literal */
+  /**
+   * Generate a stylesheet from a template literal
+   *
+   * @example Declare a stylesheet styling hovered links
+   * ```ts
+   * const styles = styled.css`
+   *   a:hover {
+   *     color: aliceblue;
+   *   }
+   * `;
+   *
+   * // Use `styles.path` public path to retrieve generated stylesheet from client
+   * ```
+   */
   css: (
     tpl: TemplateStringsArray,
     ...values: Array<string | (() => Async<Uint8Array>)>

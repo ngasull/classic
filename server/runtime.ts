@@ -12,13 +12,25 @@ import {
 } from "./request.ts";
 import { getBuildable, type HandlerResult, type Route } from "./module.ts";
 
+/** Server able to handle incoming requests */
 export interface ClassicServer {
+  /**
+   * Handle an incoming request (external or internal)
+   *
+   * @param req Incoming request
+   * @returns Generated response
+   */
   fetch(req: Request): Promise<Response>;
 }
 
+/** Server to instantiate from pre-built routes */
 export class RuntimeServer implements ClassicServer {
   readonly #router: RegExpRouter<Route>;
 
+  /**
+   * @constructor
+   * @param mappings Pre-configured routes
+   */
   constructor(mappings: readonly Route[]) {
     this.#router = new RegExpRouter();
     for (const mapping of mappings) {
