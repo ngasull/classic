@@ -108,7 +108,7 @@ export type JSXElement =
   }
   | {
     readonly kind: ElementKind.HTMLNode;
-    readonly html: ReadableStream<Uint8Array>;
+    readonly html: Uint8Array | ReadableStream<Uint8Array>;
     readonly ref: JS<Node>;
   };
 
@@ -177,7 +177,7 @@ export type DOMNodeText = {
 
 export type DOMNodeHTMLNode = {
   readonly kind: DOMNodeKind.HTMLNode;
-  readonly html: ReadableStream<Uint8Array>;
+  readonly html: Uint8Array | ReadableStream<Uint8Array>;
   readonly ref: JSable<EventTarget>;
 };
 

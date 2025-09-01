@@ -121,21 +121,10 @@ const flatten = (children: JSX.Children): JSXElement[] => {
         isJSable<DOMLiteral>(child)
           ? { kind: ElementKind.JS, js: child, ref: mkRef() }
           : typeof child === "object"
-          ? child instanceof ReadableStream
+          ? child instanceof ReadableStream || child instanceof Uint8Array
             ? {
               kind: ElementKind.HTMLNode,
               html: child,
-              ref: mkRef(),
-            }
-            : child instanceof Uint8Array
-            ? {
-              kind: ElementKind.HTMLNode,
-              html: new ReadableStream<Uint8Array>({
-                start(controller) {
-                  controller.enqueue(child);
-                  controller.close();
-                },
-              }),
               ref: mkRef(),
             }
             : (child as JSXElement)

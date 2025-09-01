@@ -240,11 +240,15 @@ const writeDOMTree = async (
       }
 
       case DOMNodeKind.HTMLNode: {
-        const reader = node.html.getReader();
-        while (true) {
-          const res = await reader.read();
-          if (res.done) break;
-          write(res.value);
+        if (node.html instanceof Uint8Array) {
+          write(node.html);
+        } else {
+          const reader = node.html.getReader();
+          while (true) {
+            const res = await reader.read();
+            if (res.done) break;
+            write(res.value);
+          }
         }
         break;
       }
