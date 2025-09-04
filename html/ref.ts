@@ -72,7 +72,7 @@ class JSMetaRefStore extends JSMetaBase<number[]> {
       });
     return [
       // Recursively remap filtered refs activation to node tree
-      `(()=>{let i=0,w=(n,a)=>a.flatMap(([c,s])=>{for(;i<c;i++)n=n.nextSibling;return s?w(n.firstChild,s):n});return w(`,
+      `(()=>{let w=(n,a)=>a.flatMap(([c,s])=>{for(let i=0;i<c;i++)n=n.nextSibling;return s?w(n.firstChild,s):n});return w(`,
       this.#entry,
       `,`,
       JSON.stringify(filterRefs(this.#refs)),
