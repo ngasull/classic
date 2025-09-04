@@ -45,11 +45,12 @@ const zeroWidthSpaceHTML = "&#8203;";
 
 const escapeTextNode = (text: string) =>
   escapeEscapes(text)
-    .replaceAll("<", "&lt;")
-    // Consecutive and first/last white spaces are ignored anyways and can mess with HTML streaming
-    // ... But they mess with inline element spacing!
-    // .replaceAll(/^\s+|\s+$/g, "")
-    .replaceAll(/\s+/g, " ") ||
+    .replaceAll("<", "&lt;") ||
+  // Consecutive and first/last white spaces are ignored anyways and can mess with HTML streaming
+  // ... But they mess with inline element spacing!
+  // .replaceAll(/^\s+|\s+$/g, "")
+  // ... But <pre>formatted blocks use those trimmed spaces!
+  // .replaceAll(/\s+/g, " ")
   zeroWidthSpaceHTML; // Empty would not be parsed as a text node
 
 const commentEscapeRegExp = /--(#|>)/g;
