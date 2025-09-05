@@ -63,6 +63,7 @@ export abstract class JSMetaBase<T = unknown, R = false>
 
 type JSMetaContext = {
   asyncScopes: Set<JSMetaFunction | null>;
+  scanning: boolean;
   scopedDeclarations: Map<JSFnBody, JSMetaBase[]>;
   declaredNames: Map<JSMetaBase, string>;
   implicitRefs: Map<unknown, JSMetaBase>;
@@ -571,6 +572,15 @@ class JSMetaAwait extends JSMetaBase {
 const $context = Context<JSMetaContext>("classic.js.context");
 
 /**
+ * Retrieve current JS rendering context for use in custom meta
+ *
+ * @returns Context-related data
+ */
+export const useJsContext = (): { scanning: boolean } => ({
+  scanning: $context.use().scanning,
+});
+
+/**
  * Generate JavaScript from `JSable` instructions or from a `JSable` expression
  *
  * @param body `JSable` instructions or expression
@@ -644,6 +654,8 @@ export const toJs = (body: JSable | readonly JSable[]): string => {
         }
       }
     }
+
+    context.scanning = false;
 
     const visitedRefs = new Set<JSMetaBase>();
     const declaredRefs = new Set<JSMetaBase>();
@@ -731,6 +743,7 @@ export const toJs = (body: JSable | readonly JSable[]): string => {
 const mkMetaContext = (): JSMetaContext => ({
   argn: -1,
   args: new Map(),
+  scanning: true,
   scopedDeclarations: new Map(),
   declaredNames: new Map(),
   implicitRefs: new Map(),

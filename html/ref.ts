@@ -5,6 +5,7 @@ import {
   JSMetaBase,
   jsSymbol,
   mkJS,
+  useJsContext,
 } from "@classic/js";
 
 export type RefTree =
@@ -35,8 +36,6 @@ export const initRefs = <Args extends unknown[], T>(
 ): T => $refs.provide(new JSMetaRefStore(refs, entry), cb, ...args);
 
 class JSMetaRefStore extends JSMetaBase<number[]> {
-  override readonly isntAssignable = true;
-
   readonly #refs: RefTree;
   readonly #entry: string;
   readonly #refsGlobalIndex = new Map<JSMeta, number>();
@@ -58,12 +57,12 @@ class JSMetaRefStore extends JSMetaBase<number[]> {
   }
 
   override template(): (string | JSMeta)[] {
-    if (!this.#retainedRefs) return ["[]"];
+    if (useJsContext().scanning) return ["[]"];
 
     const filterRefs = (refs: RefTree): Activation =>
       refs.flatMap(([r, subRefs], i) => {
         const activation: Activation = [];
-        if (this.#retainedRefs!.has(r[jsSymbol])) activation.push([i]);
+        if (this.#getRetained().has(r[jsSymbol])) activation.push([i]);
         if (subRefs) {
           const subActivation = filterRefs(subRefs);
           if (subActivation.length) activation.push([i, subActivation]);
@@ -72,7 +71,7 @@ class JSMetaRefStore extends JSMetaBase<number[]> {
       });
     return [
       // Recursively remap filtered refs activation to node tree
-      `(()=>{let w=(n,a)=>a.flatMap(([c,s])=>{for(let i=0;i<c;i++)n=n.nextSibling;return s?w(n.firstChild,s):n});return w(`,
+      `(()=>{let w=(n,a)=>a.flatMap(([c,s])=>{let m=n,i=0;for(;i<c;i++)m=m.nextSibling;return s?w(m.firstChild,s):m});return w(`,
       this.#entry,
       `,`,
       JSON.stringify(filterRefs(this.#refs)),
@@ -81,24 +80,21 @@ class JSMetaRefStore extends JSMetaBase<number[]> {
   }
 
   get(ref: JSMetaRef): number {
-    if (!this.#retainedRefs) {
-      if (!this.#usedRefs.has(ref)) {
-        if (!this.#refsGlobalIndex.has(ref)) {
-          throw Error(`A ref used in JS isn't rendered at the same time`);
-        }
-        this.#usedRefs.add(ref);
-        return -1;
-      } else {
-        this.#retainedRefs = new Map(
-          [...this.#usedRefs]
-            .sort((a, b) =>
-              this.#refsGlobalIndex.get(a)! - this.#refsGlobalIndex.get(b)!
-            )
-            .map((r, i) => [r, i]),
-        );
-      }
+    if (!this.#refsGlobalIndex.has(ref)) {
+      throw Error(`A ref used in JS isn't rendered at the same time`);
     }
+    this.#usedRefs.add(ref);
 
-    return this.#retainedRefs.get(ref)!;
+    return useJsContext().scanning ? -1 : this.#getRetained().get(ref)!;
+  }
+
+  #getRetained(): Map<JSMeta, number> {
+    return this.#retainedRefs ??= new Map(
+      [...this.#usedRefs]
+        .sort((a, b) =>
+          this.#refsGlobalIndex.get(a)! - this.#refsGlobalIndex.get(b)!
+        )
+        .map((r, i) => [r, i]),
+    );
   }
 }

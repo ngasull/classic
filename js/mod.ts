@@ -52,6 +52,7 @@ export {
   store,
   toJs,
   unsafe,
+  useJsContext,
 } from "./js.ts";
 export { isJSable, jsSymbol } from "./types.ts";
 export type { Fn, JS, JSable, JSMeta, JSOverrides } from "./types.ts";

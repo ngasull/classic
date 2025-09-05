@@ -104,12 +104,13 @@ const activate = async (
   },
 ): Promise<DOMNode | void> => {
   const effectsContext = $effects.use();
-  const effects = effectsContext.splice(0, effectsContext.length);
+  const effects = effectsContext
+    .splice(0, effectsContext.length)
+    .map((e) => js<void>`()=>${e}`);
 
   if (effects.length) {
-    const effectsFn = js`_=>{${
-      effects.length > 1 ? effects.reduce((a, b) => js`${a};${b}`) : effects[0]
-    }}`;
+    const effectsFn =
+      js`()=>${effects}.forEach(e=>{try{e()}catch(e){console.error(e)}})`;
 
     const activationScript = initRefs(
       refs,
