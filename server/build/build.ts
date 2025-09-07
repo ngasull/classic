@@ -1,5 +1,6 @@
 import { js, type JSable, toJs, unsafe } from "@classic/js";
 import { exists } from "@std/fs/exists";
+import { parseMediaType } from "@std/media-types/parse-media-type";
 import { join, resolve, toFileUrl } from "@std/path";
 import { $assetIndices, type Asset, AssetKind } from "../asset.ts";
 import { type Route, RouteModule, routeRegExp } from "../module.ts";
@@ -143,6 +144,70 @@ export class BuildServer implements ClassicServer {
         })`,
       ]),
     );
+  }
+
+  /**
+   * Generate server as static pages if possible
+   *
+   * @param staticDirectory Directory to write static web site to. Default: `<cwd>/.static`
+   * @returns A promise that resolves when finished writing
+   */
+  async writeStatic(
+    staticDirectory: string = join(Deno.cwd(), ".static"),
+  ): Promise<void> {
+    if (await exists(staticDirectory)) {
+      throw Error(
+        `Static directory already exists, specify another or remove first: ${staticDirectory}`,
+      );
+    }
+
+    let dir = staticDirectory + ".temp";
+    for (let i = 0; await exists(dir); i++) {
+      dir = `${staticDirectory}.temp${i}`;
+    }
+
+    const routes = await this.#routes;
+    const server = await this.#server;
+
+    try {
+      await Promise.all(routes.map(async (r) => {
+        if (/[():]/.test(r.pattern)) {
+          throw Error(`Can't generate dynamic pattern ${r.pattern} statically`);
+        }
+
+        const res = await server.fetch(
+          new Request(new URL(r.pattern, "http://localhost")),
+        );
+
+        if (!res.ok && res.status !== 404) {
+          const text = await res.text();
+          throw Error(
+            `Couldn't generate page at ${r.pattern} (${res.status})\n${text}`,
+          );
+        }
+
+        const pattern = r.pattern || "/";
+        const parts = pattern === "/" ? ["", "index.html"] : pattern.split("/");
+        const fileDir = join(dir, parts.slice(1, -1).join("/"));
+
+        let fileName = parts[parts.length - 1];
+        if (
+          parseMediaType(res.headers.get("content-type") ?? "")[0] ===
+            "text/html" &&
+          !(fileName.endsWith(".html"))
+        ) {
+          fileName = `${fileName}.html`;
+        }
+
+        await Deno.mkdir(fileDir, { recursive: true });
+        await Deno.writeFile(join(fileDir, fileName), await res.bytes());
+      }));
+
+      return Deno.rename(dir, staticDirectory);
+    } catch (e) {
+      Deno.remove(dir, { recursive: true });
+      throw e;
+    }
   }
 
   /**
