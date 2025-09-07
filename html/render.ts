@@ -24,14 +24,6 @@ import {
 } from "./types.ts";
 import { voidElements } from "./void.ts";
 
-const camelRegExp = /[A-Z]/g;
-
-const hyphenize = (camel: string) =>
-  camel.replace(
-    camelRegExp,
-    (l: string) => "-" + l.toLowerCase(),
-  );
-
 const eventPropRegExp = /^on([A-Z]\w+)$/;
 
 // Only escape when necessary ; avoids inline JS like "a && b" to become "a &amp;&amp; b"
@@ -313,8 +305,7 @@ const domNodes = async function* (
       const propEntries = Object.entries(props);
       let entry;
       while ((entry = propEntries.shift())) {
-        const [prop, value] = entry;
-        const name = hyphenize(prop);
+        const [name, value] = entry;
         await (async function recordAttr(
           name: string,
           value:
@@ -326,7 +317,7 @@ const domNodes = async function* (
             | JSable<string | number | boolean | null>,
         ) {
           if (value != null) {
-            const eventMatch = prop.match(eventPropRegExp);
+            const eventMatch = name.match(eventPropRegExp);
             if (eventMatch) {
               effects.push(
                 onEvent(node.ref, eventMatch[1].toLowerCase(), value),
