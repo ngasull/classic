@@ -96,25 +96,22 @@ const activate = async (
   },
 ): Promise<DOMNode | void> => {
   const effectsContext = $effects.use();
-  const effects = effectsContext
-    .splice(0, effectsContext.length)
-    .map((e) => js<void>`()=>${e}`);
+  const effects = effectsContext.splice(0, effectsContext.length);
 
   if (effects.length) {
-    const effectsFn =
-      js`()=>${effects}.forEach(e=>{try{e()}catch(e){console.error(e)}})`;
-
     const activationScript = initRefs(
       refs,
       "$",
       toJs,
-      [js`$.ownerDocument==d?setTimeout(${effectsFn}):d.addEventListener("patch",${effectsFn})`],
+      [js`await Promise.all(${
+        effects.map((e) => js<() => void>`()=>${e}`)
+      }.map(e=>{try{return e()}catch(e){console.error(e)}}))`],
     );
 
     const s = new TextEncoderStream();
     const writer = s.writable.getWriter();
     // Find refs tree entry node
-    writer.write(`{let d=document,$=d.currentScript;for(let i=0;i<`);
+    writer.write(`{let $=document.currentScript;for(let i=0;i<`);
     writer.write(refs.length.toString());
     writer.write(`;i++)$=$.previousSibling;`);
     // Open an async closure to launch effecs into

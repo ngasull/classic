@@ -1,12 +1,5 @@
 import { morph } from "@classic/morph";
-import {
-  domParse,
-  listen,
-  preventDefault,
-  remove,
-  replaceWith,
-  timeout,
-} from "@classic/util";
+import { domParse, listen, timeout } from "@classic/util";
 
 const { document, history, location, Promise } = globalThis;
 
@@ -16,37 +9,39 @@ let needsInit = 1;
 let submitting = 0;
 let currentNavigateQ: Promise<unknown> | 0;
 
-const fetchingClass = "cc-fetching";
+const fetchingClass = "fetching";
+const submittingClass = "submitting";
 
 const navigate = async (href: string) => {
   let url = new URL(href, location.origin),
+    hasChanged = location.href != url.href,
     navigateQ: Promise<void | Document>,
     receivedDocQ: Promise<Document>,
     rootClassList = document.documentElement.classList;
 
-  if (location.href != href) {
+  if (hasChanged) {
     history.pushState(0, "", href);
   }
 
   navigateQ = currentNavigateQ = Promise.race([
     timeout(suspenseDelay),
-    receivedDocQ = Promise.resolve(
-      fetch(url).then((res): Promise<Document> =>
+    receivedDocQ = fetch(url)
+      .then((res): Promise<Document> =>
         res.redirected
           ? Promise.reject(navigate(res.url))
           : res.text().then((html) =>
             currentNavigateQ == navigateQ ? domParse(html) : Promise.reject()
           )
-      ),
-    ).finally(() => {
-      currentNavigateQ = 0;
-      remove(rootClassList, fetchingClass);
-    }),
+      )
+      .finally(() => {
+        currentNavigateQ = 0;
+        rootClassList.remove(fetchingClass);
+      }),
   ]);
 
   if (!await navigateQ) rootClassList.add(fetchingClass);
 
-  patchDocument(await receivedDocQ);
+  patchDocument(await receivedDocQ, hasChanged);
 };
 
 const isLocal = (href: string) => {
@@ -60,6 +55,7 @@ const submit = async (
   body: FormData,
 ) => {
   let url = new URL(action, location.origin),
+    hasChanged: boolean = location.href != url.href,
     resQ: Promise<Document | void>,
     receivedDoc: Document | void,
     formClassList = form.classList,
@@ -80,42 +76,25 @@ const submit = async (
               if (contentLocation) {
                 if (contentLocation != location.pathname) {
                   history.pushState(0, "", contentLocation);
+                  hasChanged = true;
                 }
                 return domParse(html);
               }
             })
         ),
-      ).finally(() => remove(formClassList, fetchingClass)),
+      ).finally(() => formClassList.remove(fetchingClass, submittingClass)),
     ]);
 
-  if (res === 0) formClassList.add(fetchingClass);
+  if (res === 0) formClassList.add(fetchingClass, submittingClass);
   if ((receivedDoc = await resQ)) {
-    patchDocument(receivedDoc);
+    patchDocument(receivedDoc, hasChanged);
   }
 };
 
-const patchDocument = (receivedDoc: Document) =>
-  requestAnimationFrame(() => {
-    let div = document.createElement("div"),
-      body = receivedDoc.body;
-    div.append(...body.childNodes);
-
-    for (let script of div.querySelectorAll<HTMLScriptElement>("script")) {
-      let copy = document.createElement("script");
-      copy.text = script.text;
-      replaceWith(script, copy);
-    }
-
-    // Execute scripts
-    document.body.append(div);
-    div.remove();
-
-    // Take body nodes back
-    body.append(...div.childNodes);
-
-    morph(document, receivedDoc);
-    document.dispatchEvent(new Event("patch"));
-  });
+const patchDocument = (receivedDoc: Document, resetScroll: boolean) => {
+  morph(document, receivedDoc);
+  if (resetScroll) document.children[0].scrollTo(0, 0);
+};
 
 const initRoot = (root: EventTarget | null) => {
   if (root) {
@@ -127,7 +106,7 @@ const initRoot = (root: EventTarget | null) => {
         !e.ctrlKey &&
         !e.shiftKey &&
         (t = e.composedPath()[0]) instanceof HTMLAnchorElement &&
-        isLocal(t.href) && (preventDefault(e), navigate(t.href)),
+        isLocal(t.href) && (e.preventDefault(), navigate(t.href)),
     );
 
     listen(
@@ -139,7 +118,7 @@ const initRoot = (root: EventTarget | null) => {
           action = submitter?.getAttribute("formaction") ?? form.action,
           data = new FormData(form, submitter);
         if (isLocal(action)) {
-          preventDefault(e);
+          e.preventDefault();
           if (form.method == "get") {
             navigate(
               // @ts-ignore TS bug: URLSearchParams accepts an Iterable<[string, string]> as per https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams/URLSearchParams#options and FormData is one.

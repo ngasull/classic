@@ -1,7 +1,11 @@
+import { doCleanup } from "./lifecycle.ts";
+
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 const COMMENT_NODE = 8;
 const DOCUMENT_FRAGMENT_NODE = 11;
+
+const SCRIPT = "SCRIPT";
 
 const { entries, keys } = Object;
 
@@ -12,11 +16,19 @@ const { entries, keys } = Object;
  * @param patch Patch element
  */
 export const morph = (
-  src: Element | HTMLDocument,
-  patch: Element | HTMLDocument,
+  src: Element | Document,
+  patch: Element | Document,
 ): void => {
   src = skipDocument(src);
   patch = skipDocument(patch);
+  doCleanup(src);
+  morphElement(src, patch);
+};
+
+const morphElement = (
+  src: Element,
+  patch: Element,
+): void => {
   let srcAttrs = attributesMap(src);
   let patchAttrs = attributesMap(patch);
   keys(srcAttrs).forEach((k) => k in patchAttrs || src.removeAttribute(k));
@@ -33,85 +45,85 @@ export const morph = (
  * @param patch Patch parent root
  */
 export const morphChildren = (
-  srcRoot: ParentNode,
-  patchRoot: ParentNode,
+  srcParent: ParentNode,
+  patchParent: ParentNode,
+): void => morphChildrenInternal(srcParent, patchParent, 1);
+
+const morphChildrenInternal = (
+  srcParent: ParentNode,
+  patchParent: ParentNode,
+  clean?: 1,
 ): void => {
   let srcIndices: Map<Node, number> = new Map();
   let srcElements: Record<string, Element[] | undefined> = {};
   for (
-    let next = iterateChildren(srcRoot), srcChild, i = 0;
+    let next = iterateChildren(srcParent), srcChild, i = 0;
     (srcChild = next());
   ) {
+    if (clean) doCleanup(srcChild);
+
     srcIndices.set(srcChild, i++);
-    if (
-      srcChild.nodeType == ELEMENT_NODE &&
-      !(srcChild as Element).id
-    ) {
-      (srcElements[(srcChild as Element).tagName] ??= [])
-        .push(srcChild as Element);
+    if (hasNodeType(srcChild, ELEMENT_NODE) && !srcChild.id) {
+      (srcElements[srcChild.tagName] ??= []).push(srcChild);
     }
   }
 
-  let nextSrcChild: ChildNode | null = srcRoot.firstChild;
+  let nextSrcChild: ChildNode | null = srcParent.firstChild;
   for (
-    let next = iterateChildren(patchRoot), patchChild;
+    let next = iterateChildren(patchParent), patchChild;
     (patchChild = next());
   ) {
     let nextType = nextSrcChild?.nodeType;
     let patchType = patchChild.nodeType;
 
-    if (
-      (patchChild.nodeType == TEXT_NODE || patchChild.nodeType == COMMENT_NODE)
-    ) {
+    if (hasNodeType(patchChild, TEXT_NODE, COMMENT_NODE)) {
       if (patchType == nextType) {
-        if (
-          (nextSrcChild as CharacterData).data !==
-            (patchChild as CharacterData).data
-        ) {
-          (nextSrcChild as CharacterData).data =
-            (patchChild as CharacterData).data;
+        if ((nextSrcChild as CharacterData).data !== patchChild.data) {
+          (nextSrcChild as CharacterData).data = patchChild.data;
         }
         nextSrcChild = nextSrcChild!.nextSibling;
       } else {
-        srcRoot.insertBefore(patchChild, nextSrcChild);
+        srcParent.insertBefore(patchChild, nextSrcChild);
       }
     } else if (
       patchType == nextType &&
-      patchType == DOCUMENT_FRAGMENT_NODE
+      hasNodeType(patchChild, DOCUMENT_FRAGMENT_NODE)
     ) {
-      morphChildren(
-        nextSrcChild! as Node as ParentNode,
-        patchChild as Node as ParentNode,
-      );
+      morphChildrenInternal(nextSrcChild! as Node as ParentNode, patchChild);
       nextSrcChild = nextSrcChild!.nextSibling;
-    } else if (patchChild.nodeType == ELEMENT_NODE) {
-      if (
-        (patchChild as Element).tagName == "TEMPLATE" &&
-        (patchChild as Element).getAttribute("shadowrootmode") == "open"
-      ) {
-        morphChildren(
-          (srcRoot as Element).shadowRoot ??
-            (srcRoot as Element).attachShadow({ mode: "open" }),
-          (patchChild as HTMLTemplateElement).content,
+    } else if (hasNodeType(patchChild, ELEMENT_NODE)) {
+      let tag = patchChild.tagName;
+      if (isOpenShadowTemplate(patchChild)) {
+        morphChildrenInternal(
+          (srcParent as Element).shadowRoot ??
+            (srcParent as Element).attachShadow({ mode: "open" }),
+          patchChild.content,
         );
         nextSrcChild = nextSrcChild?.nextSibling as ChildNode | null;
       } else {
-        let tag = (patchChild as Element).tagName;
-        let srcChild = idSrcChild(srcRoot, patchChild as Element) ??
+        let srcChild = idSrcChild(srcParent, patchChild) ??
           srcElements[tag]?.shift() ?? patchChild;
 
+        if (
+          tag == SCRIPT &&
+          (!(patchChild as HTMLScriptElement).type ||
+            (patchChild as HTMLScriptElement).type == "text/javascript")
+        ) {
+          srcChild = srcParent.ownerDocument!.createElement(SCRIPT);
+        }
+
         if (srcChild != patchChild) {
-          morph(srcChild as Element, patchChild as Element);
+          morphElement(srcChild as Element, patchChild);
         }
 
         if (srcChild != nextSrcChild) {
-          srcRoot.insertBefore(srcChild, nextSrcChild);
+          srcParent.insertBefore(srcChild, nextSrcChild);
         }
         nextSrcChild = srcChild.nextSibling;
       }
     } else {
       // Insert unmatched by default
-      srcRoot.insertBefore(patchChild, nextSrcChild);
+      srcParent.insertBefore(patchChild, nextSrcChild);
     }
   }
 
@@ -123,8 +135,7 @@ export const morphChildren = (
   }
 };
 
-const skipDocument = (root: Node) =>
-  (root as HTMLDocument).documentElement ?? root;
+const skipDocument = (root: Node) => (root as Document).documentElement ?? root;
 
 const iterateChildren = (node: ParentNode) => {
   let child: ChildNode | null | undefined;
@@ -138,13 +149,26 @@ const attributesMap = (el: Element) => {
   return map;
 };
 
-const ancestors = (node?: Node | null, set = new Set<Node>()): Set<Node> => {
-  let parent = node?.parentElement;
-  return parent ? ancestors(parent, set.add(parent)) : set;
+// Find an src node matching a patch node
+const idSrcChild = (srcParent: Node, patchChild: Element) => {
+  let candidate = patchChild.id == ""
+    ? null
+    : srcParent.ownerDocument!.getElementById(patchChild.id);
+  if (srcParent.contains(candidate)) return candidate;
 };
 
-const idSrcChild = (srcRoot: Node, patchChild: Element) => {
-  let candidate = (srcRoot.getRootNode() as Document)
-    .getElementById(patchChild.id);
-  if (ancestors(candidate).has(srcRoot)) return candidate;
-};
+const hasNodeType = <T extends number[]>(
+  el: Node,
+  ...type: T
+): el is {
+  [I in keyof T]: T[I] extends typeof ELEMENT_NODE ? Element
+    : T[I] extends typeof TEXT_NODE ? Text
+    : T[I] extends typeof COMMENT_NODE ? Comment
+    : T[I] extends typeof DOCUMENT_FRAGMENT_NODE ? DocumentFragment
+    : Node;
+}[number] => type.includes(el.nodeType);
+
+const isOpenShadowTemplate = (el: ChildNode): el is HTMLTemplateElement =>
+  (el as Element).tagName == "TEMPLATE" &&
+  // Prefer getAttribute for compatibility
+  (el as Element).getAttribute("shadowrootmode") == "open";

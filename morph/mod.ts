@@ -1,6 +1,8 @@
 /**
  * Update DOM trees preserving as much content as possible
  *
+ * `<script>` are evaluated when morphed
+ *
  * @example Simple morphing navigation
  * ```ts
  * import { morph } from "@classic/morph";
@@ -19,4 +21,5 @@
  * @module
  */
 
+export { onCleanup } from "./lifecycle.ts";
 export { morph, morphChildren } from "./morph.ts";
