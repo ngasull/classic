@@ -587,157 +587,163 @@ export const useJsContext = (): { scanning: boolean } => ({
  * @returns JavaScript instructions or expression according to `body`
  */
 export const toJs = (body: JSable | readonly JSable[]): string => {
-  const context = mkMetaContext();
-  return $context.provide(context, () => {
-    const isExpression = !Array.isArray(body);
-    const globalFn = new JSMetaFunction(
-      (() => isExpression ? [jsTpl`return ${body}`] : body) as Fn<
-        readonly never[],
-        unknown
-      >,
-      false,
-    );
-    const globalBody = globalFn.body;
+  try {
+    const context = mkMetaContext();
+    return $context.provide(context, () => {
+      const isExpression = !Array.isArray(body);
+      const globalFn = new JSMetaFunction(
+        (() => isExpression ? [jsTpl`return ${body}`] : body) as Fn<
+          readonly never[],
+          unknown
+        >,
+        false,
+      );
+      const globalBody = globalFn.body;
 
-    let lastVarId = -1;
+      let lastVarId = -1;
 
-    const scopeToRefs = new Map<JSMetaBase | null, Set<JSMetaBase>>();
-    const refToParentReuse = new Map<
-      JSMetaBase,
-      Map<JSMetaBase | undefined, { reused?: boolean; outOfScope: boolean }>
-    >();
-    const refToChildren = new Map<JSMetaBase, readonly JSMetaBase[]>();
-    {
-      type Job = readonly [
+      const scopeToRefs = new Map<JSMetaBase | null, Set<JSMetaBase>>();
+      const refToParentReuse = new Map<
         JSMetaBase,
-        JSMetaBase | undefined,
-        JSMetaFunction | null,
-      ];
-      const jobs: Job[] = [[globalBody, undefined, null]];
-      for (let job; (job = jobs.shift());) {
-        const [meta, parent, enclosing] = job;
+        Map<JSMetaBase | undefined, { reused?: boolean; outOfScope: boolean }>
+      >();
+      const refToChildren = new Map<JSMetaBase, readonly JSMetaBase[]>();
+      {
+        type Job = readonly [
+          JSMetaBase,
+          JSMetaBase | undefined,
+          JSMetaFunction | null,
+        ];
+        const jobs: Job[] = [[globalBody, undefined, null]];
+        for (let job; (job = jobs.shift());) {
+          const [meta, parent, enclosing] = job;
 
-        const refParentReuse = refToParentReuse.get(meta) ??
-          new Map<
-            JSMetaBase | undefined,
-            { reused?: boolean; outOfScope: boolean }
-          >();
-        refToParentReuse.set(meta, refParentReuse);
+          const refParentReuse = refToParentReuse.get(meta) ??
+            new Map<
+              JSMetaBase | undefined,
+              { reused?: boolean; outOfScope: boolean }
+            >();
+          refToParentReuse.set(meta, refParentReuse);
 
-        const def = refParentReuse.get(parent) ?? { outOfScope: false };
-        def.reused = def.reused != null;
-        def.outOfScope ||= enclosing !== meta.scope;
-        refParentReuse.set(parent, def);
+          const def = refParentReuse.get(parent) ?? { outOfScope: false };
+          def.reused = def.reused != null;
+          def.outOfScope ||= enclosing !== meta.scope;
+          refParentReuse.set(parent, def);
 
-        scopeToRefs.set(
-          meta.scope,
-          (scopeToRefs.get(meta.scope) ?? new Set()).add(meta),
-        );
-
-        if (meta.isAwaited) {
-          context.asyncScopes.add(meta.scope as JSMetaFunction);
-        }
-
-        if (!refToChildren.has(meta)) {
-          const children: JSMetaBase[] = [];
-          for (const c of meta.template()) {
-            if (typeof c !== "string") children.push(c);
-          }
-          refToChildren.set(meta, children);
-
-          const subEnclosing = meta.isFunction
-            ? (meta as JSMetaFunction)
-            : enclosing;
-          jobs.unshift(
-            ...children.map((c) => [c, meta, subEnclosing] as const),
+          scopeToRefs.set(
+            meta.scope,
+            (scopeToRefs.get(meta.scope) ?? new Set()).add(meta),
           );
-        }
-      }
-    }
 
-    context.scanning = false;
+          if (meta.isAwaited) {
+            context.asyncScopes.add(meta.scope as JSMetaFunction);
+          }
 
-    const visitedRefs = new Set<JSMetaBase>();
-    const declaredRefs = new Set<JSMetaBase>();
-    const shouldDeclare = (meta: JSMetaBase): boolean => {
-      let used = false;
-      if (meta.mustDeclare) return true;
-      if (meta.isntAssignable) return false;
+          if (!refToChildren.has(meta)) {
+            const children: JSMetaBase[] = [];
+            for (const c of meta.template()) {
+              if (typeof c !== "string") children.push(c);
+            }
+            refToChildren.set(meta, children);
 
-      for (
-        const [parent, { reused, outOfScope }] of refToParentReuse.get(meta)!
-      ) {
-        if (reused) return true;
-        if (!(parent && declaredRefs.has(parent))) {
-          if (
-            used ||
-            (outOfScope && (!parent || !hasAssignedParentInScope(parent)))
-          ) return true;
-          used = true;
-        }
-      }
-
-      return false;
-    };
-    const hasAssignedParentInScope = (meta: JSMetaBase): boolean => {
-      for (const parent of refToParentReuse.get(meta)!.keys()) {
-        if (parent && parent.scope === meta.scope) {
-          if (declaredRefs.has(parent) || hasAssignedParentInScope(parent)) {
-            return true;
+            const subEnclosing = meta.isFunction
+              ? (meta as JSMetaFunction)
+              : enclosing;
+            jobs.unshift(
+              ...children.map((c) => [c, meta, subEnclosing] as const),
+            );
           }
         }
       }
-      return false;
-    };
 
-    const declareIfNeeded = (meta: JSMetaBase): boolean => {
-      if (visitedRefs.has(meta)) return false;
-      visitedRefs.add(meta);
+      context.scanning = false;
 
-      if (shouldDeclare(meta)) {
-        declaredRefs.add(meta);
-      }
-      let assignedChildren = false;
+      const visitedRefs = new Set<JSMetaBase>();
+      const declaredRefs = new Set<JSMetaBase>();
+      const shouldDeclare = (meta: JSMetaBase): boolean => {
+        let used = false;
+        if (meta.mustDeclare) return true;
+        if (meta.isntAssignable) return false;
 
-      // Try declare contained expressions, pretending current is declared
-      for (const c of refToChildren.get(meta)!) {
-        if (!visitedRefs.has(c) && declareIfNeeded(c)) assignedChildren = true;
-      }
+        for (
+          const [parent, { reused, outOfScope }] of refToParentReuse.get(meta)!
+        ) {
+          if (reused) return true;
+          if (!(parent && declaredRefs.has(parent))) {
+            if (
+              used ||
+              (outOfScope && (!parent || !hasAssignedParentInScope(parent)))
+            ) return true;
+            used = true;
+          }
+        }
 
-      // Ensure current should still be declared
-      if (
-        declaredRefs.has(meta) && (!assignedChildren || shouldDeclare(meta))
-      ) {
-        context.declaredNames.set(meta, `${varArg}${++lastVarId}`);
-        const ds = context.scopedDeclarations.get(
-          (meta.scope as JSMetaFunction ?? globalFn).body.fnBody,
-        );
-        if (ds) ds.push(meta);
-        else {
-          context.scopedDeclarations.set(
+        return false;
+      };
+      const hasAssignedParentInScope = (meta: JSMetaBase): boolean => {
+        for (const parent of refToParentReuse.get(meta)!.keys()) {
+          if (parent && parent.scope === meta.scope) {
+            if (declaredRefs.has(parent) || hasAssignedParentInScope(parent)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      const declareIfNeeded = (meta: JSMetaBase): boolean => {
+        if (visitedRefs.has(meta)) return false;
+        visitedRefs.add(meta);
+
+        if (shouldDeclare(meta)) {
+          declaredRefs.add(meta);
+        }
+        let assignedChildren = false;
+
+        // Try declare contained expressions, pretending current is declared
+        for (const c of refToChildren.get(meta)!) {
+          if (!visitedRefs.has(c) && declareIfNeeded(c)) {
+            assignedChildren = true;
+          }
+        }
+
+        // Ensure current should still be declared
+        if (
+          declaredRefs.has(meta) && (!assignedChildren || shouldDeclare(meta))
+        ) {
+          context.declaredNames.set(meta, `${varArg}${++lastVarId}`);
+          const ds = context.scopedDeclarations.get(
             (meta.scope as JSMetaFunction ?? globalFn).body.fnBody,
-            [meta],
           );
+          if (ds) ds.push(meta);
+          else {
+            context.scopedDeclarations.set(
+              (meta.scope as JSMetaFunction ?? globalFn).body.fnBody,
+              [meta],
+            );
+          }
+          return true;
+        } else {
+          declaredRefs.delete(meta);
         }
-        return true;
+        return false;
+      };
+
+      for (const refs of scopeToRefs.values()) {
+        for (const meta of refs) {
+          declareIfNeeded(meta);
+        }
+      }
+
+      if (isExpression) {
+        return `(async()=>${metaToJS(globalBody)})()`;
       } else {
-        declaredRefs.delete(meta);
+        return metaToJS(globalBody).slice(1, -1) + ";";
       }
-      return false;
-    };
-
-    for (const refs of scopeToRefs.values()) {
-      for (const meta of refs) {
-        declareIfNeeded(meta);
-      }
-    }
-
-    if (isExpression) {
-      return `(async()=>${metaToJS(globalBody)})()`;
-    } else {
-      return metaToJS(globalBody).slice(1, -1) + ";";
-    }
-  });
+    });
+  } catch (e) {
+    throw Error(`Failed generating JS`, { cause: e });
+  }
 };
 
 const mkMetaContext = (): JSMetaContext => ({
@@ -803,6 +809,14 @@ const AsyncFunction = async function () {}.constructor as typeof Function;
 const $eval = Context.for<boolean>("classic.js.eval");
 
 const jsUtils = {
+  /**
+   * Flag an expression as optional. Accessing properties will be transcribed as `.?` accesses
+   *
+   * @param expr Expression to make optional
+   * @returns Optional expression
+   */
+  await: <T>(expr: JSable<T>): JS<Awaited<T>> => js<Awaited<T>>`await(${expr})`,
+
   comma: <T>(...exprs: [...JSable<unknown>[], JSable<T>]): JS<T> => {
     const parts = Array(exprs.length + 1);
     parts[0] = `(`;
@@ -816,10 +830,10 @@ const jsUtils = {
   eval: async <T>(expr: JSable<T>): Promise<T> => {
     const rawJs = $eval.provide(true, toJs, [jsUtils.return(expr)]);
     try {
+      const rawJs = $eval.provide(true, toJs, expr);
       return new AsyncFunction("document", "window", rawJs)();
-    } catch (e) {
-      console.error("Failed evaluating function with the following JS", rawJs);
-      throw e;
+    } catch (e: any) {
+      throw Error(`Failed evaluating JS`, { cause: e?.cause ?? e });
     }
   },
 
