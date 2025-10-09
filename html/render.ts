@@ -1,16 +1,13 @@
 import { Context } from "@classic/context";
 import {
+  asJs,
+  evalJs,
   type Fn,
-  indexedUris,
-  inline,
-  isJSable,
+  isJs,
   type JS,
   js,
-  type JSable,
-  jsResources,
-  store,
+  type JSArg,
   toJs,
-  unsafe,
 } from "@classic/js";
 import { initRefs, mkRef, type RefTree } from "./ref.ts";
 import {
@@ -87,7 +84,7 @@ export const render = (
     },
   });
 
-const $effects = Context<JSable<void>[]>("classic.effects");
+const $effects = Context<JSArg<() => void>[]>("classic.effects");
 
 const activate = async (
   refs: RefTree,
@@ -103,9 +100,9 @@ const activate = async (
       refs,
       "$",
       toJs,
-      [js`await Promise.all(${
-        effects.map((e) => js<() => void>`()=>${e}`)
-      }.map(e=>{try{return e()}catch(e){console.error(e)}}))`],
+      () => {
+        js`${effects}.map(e=>{try{return e()}catch(e){console.error(e)}})`;
+      },
     );
 
     const s = new TextEncoderStream();
@@ -289,14 +286,11 @@ const domNodes = async function* (
       const attributes = new Map<string, string | number | boolean>();
       const reactiveAttributes: [
         string,
-        JSable<string | number | boolean | null>,
+        JS<string | number | boolean | null>,
       ][] = [];
 
-      if (ref) {
-        const refHook = (ref as unknown as JSXRef<Element>)(node.ref);
-        if (refHook !== node.ref && isJSable<void>(refHook)) {
-          effects.unshift(refHook);
-        }
+      if (ref != null) {
+        effects.unshift(() => (ref as unknown as JSXRef<Element>)(node.ref));
       }
 
       const propEntries = Object.entries(props);
@@ -311,16 +305,16 @@ const domNodes = async function* (
             | boolean
             | null
             | undefined
-            | JSable<string | number | boolean | null>,
+            | JS<string | number | boolean | null>,
         ) {
           if (value != null) {
             const eventMatch = name.match(eventPropRegExp);
             if (eventMatch) {
-              effects.push(
-                onEvent(node.ref, eventMatch[1].toLowerCase(), value),
+              effects.push(() =>
+                onEvent(node.ref, eventMatch[1].toLowerCase(), value)
               );
-            } else if (isJSable<string | number | boolean | null>(value)) {
-              await recordAttr(name, await js.eval(value));
+            } else if (isJs<string | number | boolean | null>(value)) {
+              await recordAttr(name, await evalJs(value));
               reactiveAttributes.push([name, value]);
             } else {
               attributes.set(name, value);
@@ -329,39 +323,19 @@ const domNodes = async function* (
         })(name, value);
       }
 
-      for (const [name, expr] of reactiveAttributes) {
-        const uris = jsResources(expr);
-        if (uris.length) {
-          effects.push(subAttribute(uris, node.ref, name, () => inline(expr)));
-        }
-      }
-
       return yield {
         kind: DOMNodeKind.Tag,
         tag,
         attributes,
         children: disambiguateText(node.children),
-        ref: node.ref,
+        ref: node.ref as JS<EventTarget>,
       };
     }
 
     case ElementKind.JS: {
-      const uris = jsResources(node.js);
-      if (uris.length) {
-        effects.push(
-          js.fn(() =>
-            subText(
-              node.ref,
-              () => inline(node.js),
-              // js.comma(js.reassign(node.element, node.element), node.element),
-              indexedUris(uris),
-            )
-          )(),
-        );
-      }
       return yield {
         kind: DOMNodeKind.Text,
-        text: String(await js.eval(node.js) ?? ""),
+        text: String(await evalJs(node.js) ?? ""),
         ref: node.ref,
       };
     }
@@ -409,69 +383,20 @@ async function* disambiguateText(
   }
 }
 
-const subEl = js.fn((
-  node: JS<EventTarget>,
-  cb: JS<() => unknown>,
-  uris: JS<string[]>,
-) => store.sub(uris, cb));
-
-const onEvent = js.fn((
+const onEvent = asJs((
   target: JS<EventTarget>,
   type: JS<string>,
   cb: JS<(e: Event) => void>,
-) => [
-  js`let c=${cb}`,
-  target.addEventListener(type, unsafe("c")),
-  js`return ()=>${target.removeEventListener(type, unsafe("c"))}`,
-]);
-
-const subAttribute = js.fn((
-  uris: JS<string[]>,
-  target: JS<Element>,
-  k: JS<string>,
-  expr: JS<() => unknown>,
-): JS<void> =>
-  subEl(
-    target,
-    () => {
-      const v = expr();
-      return js`!${v}&&${v}!==""?${target.removeAttribute(k)}:${
-        target.setAttribute(k, js`${v}===true?"":String(${v})`)
-      }`;
-    },
-    indexedUris(uris),
-  )
-);
-
-const subText = js.fn((
-  node: JS<Text>,
-  value: JS<() => DOMLiteral>,
-  uris: JS<readonly string[]>,
-) =>
-  js<
-    () => void
-  >`${subEl}(${node},_=>${node}.textContent=${value}(),${uris})`
-);
+) => {
+  target.addEventListener(type, cb);
+  return () => target.removeEventListener(type, cb);
+});
 
 export const Effect: JSX.FC<{
   js: Fn<[], void | (() => void)>;
-  uris?:
-    | readonly string[]
-    | JSable<readonly string[]>
-    | readonly JSable<string>[];
-}> = ({ js: cb, uris }) => {
+}> = ({ js: cb }) => {
   const ref = mkRef<Comment>();
-  $effects.use().push(cb() as JSable<void>);
-  // context.use($effects).push(
-  //   js.fn(() => {
-  //     const effectJs = js.fn(cb);
-  //     return client.sub(
-  //       ref,
-  //       effectJs,
-  //       uris ? indexedUris(uris) : [],
-  //     );
-  //   })(),
-  // );
+  $effects.use().push(cb);
   return {
     kind: ElementKind.Comment,
     text: "",

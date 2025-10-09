@@ -22,7 +22,7 @@
  * @module
  */
 
-import { isJSable } from "@classic/js";
+import { isJs } from "@classic/js";
 import { mkRef } from "./ref.ts";
 import type {
   ComponentProps,
@@ -118,7 +118,7 @@ const flatten = (children: JSX.Children): JSXElement[] => {
       fragment.push(...flatten(child));
     } else if (child != null) {
       fragment.push(
-        isJSable<DOMLiteral>(child)
+        isJs<DOMLiteral>(child)
           ? { kind: ElementKind.JS, js: child, ref: mkRef() }
           : typeof child === "object"
           ? child instanceof ReadableStream || child instanceof Uint8Array

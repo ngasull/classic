@@ -1,4 +1,4 @@
-import { isJSable, type JS, type JSable } from "@classic/js";
+import { isJs, type JS } from "@classic/js";
 import type { JSXInternal } from "./dom.d.ts";
 import type { VoidElement } from "./void.ts";
 
@@ -7,7 +7,7 @@ type IntrinsicServerElement<
   Ref extends EventTarget,
   Children = JSX.Children,
 > =
-  & { [P in keyof T]: T[P] | JSable<T[P]> }
+  & { [P in keyof T]: T[P] | JS<T[P]> }
   & {
     readonly children?: Children;
     readonly ref?: JSXRef<Ref>;
@@ -56,7 +56,7 @@ declare namespace JSX {
     | ReadableStream<Uint8Array>
     | null
     | undefined
-    | JSable<DOMLiteral | null | undefined>
+    | JS<DOMLiteral | null | undefined>
     | JSX.Children[];
 
   /** Functional component */
@@ -98,7 +98,7 @@ export type JSXElement =
   }
   | {
     readonly kind: ElementKind.JS;
-    readonly js: JSable<DOMLiteral>;
+    readonly js: JS<DOMLiteral>;
     readonly ref: JS<Text>;
   }
   | {
@@ -123,12 +123,12 @@ export enum ElementKind {
 }
 
 export const isJsx = (v: unknown): v is JSXElement =>
-  typeof v === "object" && !!v && isJSable((v as any).ref);
+  typeof v === "object" && !!v && isJs((v as any).ref);
 
 export type IntrinsicElementProps = Readonly<
   Record<
     string,
-    | JSable<string | number | boolean | null>
+    | JS<string | number | boolean | null>
     | string
     | number
     | boolean
@@ -166,25 +166,25 @@ export type DOMNodeTag = {
   readonly tag: string;
   readonly attributes: ReadonlyMap<string, string | number | boolean>;
   readonly children: Iterable<DOMNode> | AsyncIterable<DOMNode>;
-  readonly ref: JSable<EventTarget>;
+  readonly ref: JS<EventTarget>;
 };
 
 export type DOMNodeText = {
   readonly kind: DOMNodeKind.Text;
   readonly text: string;
-  readonly ref: JSable<EventTarget>;
+  readonly ref: JS<EventTarget>;
 };
 
 export type DOMNodeHTMLNode = {
   readonly kind: DOMNodeKind.HTMLNode;
   readonly html: Uint8Array | ReadableStream<Uint8Array>;
-  readonly ref: JSable<EventTarget>;
+  readonly ref: JS<EventTarget>;
 };
 
 export type DOMNodeComment = {
   readonly kind: DOMNodeKind.Comment;
   readonly text: string;
-  readonly ref: JSable<EventTarget>;
+  readonly ref: JS<EventTarget>;
 };
 
 export enum DOMNodeKind {

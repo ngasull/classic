@@ -1,46 +1,60 @@
-import { assertEquals } from "jsr:@std/assert";
-import { argn, js, resource, toJs, varArg } from "./js.ts";
-import type { JS, JSable } from "./types.ts";
+import { assertEquals, assertStrictEquals } from "jsr:@std/assert";
+import { $js, argn, type JSWrite, varPrefix } from "./entity.ts";
+import { evalJs, js, toJs } from "./js.ts";
+import { asJs } from "./proxy.ts";
+import type { JS } from "./types.ts";
 
 Deno.test("toJs variable ref mapping", () => {
   const a = js<{ a: 1 }>`{a:1}`.a;
-  const rawJS = toJs([js`${a} + ${a}`]);
+  const rawJS = toJs(() => js`${a} + ${a}`);
   assertEquals(
     rawJS,
-    `let ${varArg}0={a:1}.a;${varArg}0 + ${varArg}0;`,
+    `let ${varPrefix}0={a:1}.a;return ${varPrefix}0 + ${varPrefix}0;`,
   );
 });
 
 Deno.test("toJs declares variables in the same scope as current runtime", () => {
   const a = js`a`;
-  const var0 = js.fn(() => js<number>`${a} + 1`)();
-  const rawJS = toJs([js.fn(() => js`${var0} + ${var0}`)()]);
+  const var0 = asJs(() => js<number>`${a} + 1`)();
+  const rawJS = toJs(() => {
+    asJs(() => js`${var0} + ${var0}`)();
+  });
   assertEquals(
     rawJS,
-    `let ${varArg}0=a,${varArg}1=(()=>${varArg}0 + 1)();(()=>${varArg}1 + ${varArg}1)();`,
+    `let ${varPrefix}0=a,${varPrefix}1=(()=>${varPrefix}0 + 1)();(()=>${varPrefix}1 + ${varPrefix}1)();`,
   );
 });
 
 Deno.test("toJs declares variables across multiple statements", () => {
   {
-    const var0 = js.fn(() => [js<number>`return a`])();
-    const rawJS = toJs([js.fn(() => [js`return ${var0}+${var0}`])()]);
+    const var0 = asJs(() => js<number>`a`)();
+    const rawJS = toJs(() => {
+      asJs(() => js`${var0}+${var0}`)();
+    });
     assertEquals(
       rawJS,
-      `let ${varArg}0=(()=>{return a})();(()=>{return ${varArg}0+${varArg}0})();`,
+      `let ${varPrefix}0=(()=>a)();(()=>${varPrefix}0+${varPrefix}0)();`,
     );
   }
   {
-    const id = js.fn(() => js`1`);
-    const rawJS = toJs([id(), id()]);
-    assertEquals(rawJS, `let ${varArg}0=()=>1;${varArg}0();${varArg}0();`);
+    const id = asJs(() => js`1`);
+    const rawJS = toJs(() => {
+      id();
+      id();
+    });
+    assertEquals(
+      rawJS,
+      `let ${varPrefix}0=()=>1;${varPrefix}0();${varPrefix}0();`,
+    );
   }
   {
     const a = js`1`;
     const r = js`${a} + ${a}`;
     assertEquals(
-      toJs([js.fn(() => r)]),
-      `let ${varArg}0=1,${varArg}1=${varArg}0 + ${varArg}0;()=>${varArg}1;`,
+      toJs(() => {
+        asJs(() => r);
+      }),
+      `let ${varPrefix}0=1,${varPrefix}1=${varPrefix}0 + ${varPrefix}0;()=>${varPrefix}1;`,
     );
   }
 });
@@ -48,84 +62,78 @@ Deno.test("toJs declares variables across multiple statements", () => {
 Deno.test("toJs declares variables across cleanup-type instance", () => {
   {
     const a = js`setTimeout()`;
-    const rawJS = toJs([js.fn(() => js`clearTimeout(${a})`)]);
+    const rawJS = toJs(() => {
+      asJs(() => js`clearTimeout(${a})`);
+    });
     assertEquals(
       rawJS,
-      `let ${varArg}0=setTimeout();()=>clearTimeout(${varArg}0);`,
+      `let ${varPrefix}0=setTimeout();()=>clearTimeout(${varPrefix}0);`,
     );
   }
   {
-    const timeoutEffect = js.fn(() => {
+    const timeoutEffect = asJs(() => {
       const t = js`setTimeout(()=>{},20)`;
-      return js.fn(() => js`clearTimeout(${t})`);
+      return asJs(() => js`clearTimeout(${t})`);
     });
 
-    const rawJS = toJs([timeoutEffect()]);
+    const rawJS = toJs(() => timeoutEffect());
     assertEquals(
       rawJS,
-      `(()=>{let ${varArg}0=setTimeout(()=>{},20);return ()=>clearTimeout(${varArg}0)})();`,
+      `return (()=>{let ${varPrefix}0=setTimeout(()=>{},20);return ()=>clearTimeout(${varPrefix}0)})();`,
     );
   }
 });
 
 Deno.test("toJs returns expressions as a return statement", () => {
-  const rawJS = toJs([js`1 + 1`]);
-  assertEquals(rawJS, `1 + 1;`);
+  const rawJS = toJs(() => js`1 + 1`);
+  assertEquals(rawJS, `return 1 + 1;`);
 });
 
 Deno.test("toJs reuses functions across global uses", () => {
-  const addd = js.fn((a: JS<number>) => js<number>`${a}+${a}`);
+  const addd = asJs((a: JS<number>) => js<number>`${a}+${a}`);
   const addd1 = addd(1);
   const addd2 = addd(2);
-  const rawJS = toJs([js.fn(() => [addd1, addd2])]);
+  const rawJS = toJs(() => asJs(() => js`${addd1} < ${addd2}`));
   assertEquals(
     rawJS,
-    `let ${varArg}0=${argn(0)}=>${argn(0)}+${
+    `let ${varPrefix}0=${argn(0)}=>${argn(0)}+${
       argn(0)
-    },${varArg}1=${varArg}0(1),${varArg}2=${varArg}0(2);()=>{${varArg}1;${varArg}2};`,
+    },${varPrefix}1=${varPrefix}0(1),${varPrefix}2=${varPrefix}0(2);return ()=>${varPrefix}1 < ${varPrefix}2;`,
   );
 });
 
 Deno.test("toJs scope arguments independently than passed value", () => {
   const value = js<number>`a`;
-  const addd = js.fn((a: JS<number>) => js<number>`${a}+${a}`);
+  const addd = asJs((a: JS<number>) => js<number>`${a}+${a}`);
   const addd1 = addd(value);
   const addd2 = addd(value);
   assertEquals(
-    toJs([js.fn(() => [addd1, addd2])]),
-    `let ${varArg}0=${argn(0)}=>${argn(0)}+${
+    toJs(() => asJs(() => js`${addd1} < ${addd2}`)),
+    `let ${varPrefix}0=${argn(0)}=>${argn(0)}+${
       argn(0)
-    },${varArg}1=a,${varArg}2=${varArg}0(${varArg}1),${varArg}3=${varArg}0(${varArg}1);()=>{${varArg}2;${varArg}3};`,
+    },${varPrefix}1=a,${varPrefix}2=${varPrefix}0(${varPrefix}1),${varPrefix}3=${varPrefix}0(${varPrefix}1);return ()=>${varPrefix}2 < ${varPrefix}3;`,
   );
   assertEquals(
-    toJs([js.fn(() => [addd(value), addd(value)])]),
-    `let ${varArg}0=${argn(0)}=>${argn(0)}+${
+    toJs(() => asJs(() => js`${addd(value)} > ${addd(value)}`)),
+    `let ${varPrefix}0=${argn(0)}=>${argn(0)}+${
       argn(0)
-    },${varArg}1=a;()=>{${varArg}0(${varArg}1);${varArg}0(${varArg}1)};`,
+    },${varPrefix}1=a;return ()=>${varPrefix}0(${varPrefix}1) > ${varPrefix}0(${varPrefix}1);`,
   );
-});
-
-Deno.test("toJs won't broken-assign inner js.comma", () => {
-  const a = js`a`;
-  const b = js`b`;
-  const r = js.comma(js`${a}.foo`, b);
-  const rawJS = toJs([js.fn(() => r)]);
-  assertEquals(rawJS, `let ${varArg}0=(a.foo,b);()=>${varArg}0;`);
 });
 
 Deno.test("toJs won't broken-assign inner js.string interpolation", () => {
   const a = js`a`;
   const r = js.string`/foo/${a}`;
-  const rawJS = toJs([js.fn(() => r)]);
+  const rawJS = toJs(() => asJs(() => r));
   assertEquals(
     rawJS,
-    `let ${varArg}0=\`/foo/\${a}\`;()=>${varArg}0;`,
+    `let ${varPrefix}0=\`/foo/\${a}\`;return ()=>${varPrefix}0;`,
   );
 });
 
-// Deno.test("toJs resists to max call stack exceeded", () => {
+// Deno.test("toJs resists to max call stack exceeded", async () => {
 //   assertEquals(
-//     js.eval(
+//     await evalJs(
 //       Array(5000).fill(0).reduce((a) => js`${a} + 1`, js<number>`0`),
 //     ),
 //     5000,
@@ -133,62 +141,157 @@ Deno.test("toJs won't broken-assign inner js.string interpolation", () => {
 // });
 
 Deno.test("toJs can generate functions that return an object", () => {
-  const rawJS = toJs([js.fn(() => js`${{ foo: "bar" }}`)]);
-  assertEquals(rawJS, `()=>({foo:"bar"});`);
+  const rawJS = toJs(() => asJs(() => asJs({ foo: "bar" })));
+  assertEquals(rawJS, `return ()=>({foo:"bar"});`);
 });
 
 Deno.test("toJs correctly assigns out-of-scope method calls", () => {
   const c = js<number>`1`;
   const res = c.toPrecision();
-  const rawJS = toJs([js.fn(() => res)]);
+  const rawJS = toJs(() => asJs(() => res));
   assertEquals(
     rawJS,
-    `let ${varArg}0=1.toPrecision();()=>${varArg}0;`,
+    `let ${varPrefix}0=1.toPrecision();return ()=>${varPrefix}0;`,
+  );
+});
+
+Deno.test("toJs properly writes chained function calls (sub-call owners are assigned to avoid ambiguity)", () => {
+  const rawJS = toJs(() => (c: JS<number>) => c.toPrecision().charAt(0));
+  assertEquals(
+    rawJS,
+    `return ${argn(0)}=>{let ${varPrefix}0=${
+      argn(0)
+    }.toPrecision();return ${varPrefix}0.charAt(0)};`,
+  );
+
+  const mod = js.module<{ fn(el: Element): void }>("foo");
+  // const mod = js<{ fn: any }>`mod`;
+  assertEquals(
+    toJs(() => (ref: JS<HTMLElement>) =>
+      ref.querySelectorAll("p").forEach(mod.fn)
+    ),
+    `let ${varPrefix}1=await Promise.all([import("foo")]);return ${
+      argn(0)
+    }=>{let ${varPrefix}0=${
+      argn(0)
+    }.querySelectorAll("p");return ${varPrefix}0.forEach(${varPrefix}1[0].fn)};`,
+  );
+});
+
+Deno.test("toJs uses `.call` on assigned methods", () => {
+  const toPrecision = js<number>`1`.toPrecision;
+  const rawJS = toJs(() => () => toPrecision());
+  assertEquals(
+    rawJS,
+    `let ${varPrefix}0=1,${varPrefix}1=${varPrefix}0.toPrecision;return ()=>${varPrefix}1.call(${varPrefix}0);`,
   );
 });
 
 Deno.test("toJs doesn't assign sub-references of out-of-scope variables", () => {
-  const arr = js`${[1, [2, [3]]]}`;
-  const rawJS = toJs([js.fn(() => arr)]);
-  assertEquals(rawJS, `let ${varArg}0=[1,[2,[3]]];()=>${varArg}0;`);
+  const arr = asJs([1, [2, [3]]]);
+  const rawJS = toJs(() => asJs(() => arr));
+  assertEquals(
+    rawJS,
+    `let ${varPrefix}0=[1,[2,[3]]];return ()=>${varPrefix}0;`,
+  );
 });
 
 Deno.test("toJs assigns circular dependency correctly when possible", () => {
-  const f = js.fn((): JS<void> => g());
-  const g = js.fn((): JS<void> => f());
+  const f = asJs((): JS<void> => g());
+  const g = asJs((): JS<void> => f());
   const r = f();
-  const rawJS = toJs([js.fn(() => r)]);
+  const rawJS = toJs(() => asJs(() => r));
   assertEquals(
     rawJS,
-    `let ${varArg}0=()=>${varArg}1(),${varArg}1=()=>${varArg}0(),${varArg}2=${varArg}1();()=>${varArg}2;`,
+    `let ${varPrefix}0=()=>${varPrefix}1(),${varPrefix}1=()=>${varPrefix}0(),${varPrefix}2=${varPrefix}1();return ()=>${varPrefix}2;`,
   );
 });
 
-Deno.test("toJs generates correct nested prameter use", () => {
-  const f = js.fn((a: JS<unknown>): JSable<void> =>
+Deno.test("toJs properly scopes callbacks", () => {
+  const f = asJs((): JS<void> => js<(a: never) => void>`g`(() => {}));
+  assertEquals(toJs(() => f), `return ()=>g(()=>{});`);
+});
+
+Deno.test("toJs generates correct nested parameter use", () => {
+  const f = asJs((a: JS<unknown>): JS<void> =>
     js<(a: never) => void>`g`((b) => f(js<unknown>`${a}[${b}]`))
   );
-  const rawJS = toJs([f]);
+  const rawJS = toJs(() => f);
   assertEquals(
     rawJS,
-    `let ${varArg}0=${argn(0)}=>g(${argn(1)}=>${varArg}0(${argn(0)}[${
+    `let ${varPrefix}0=${argn(0)}=>g(${argn(1)}=>${varPrefix}0(${argn(0)}[${
       argn(1)
-    }]));${varArg}0;`,
+    }]));return ${varPrefix}0;`,
   );
 });
 
-Deno.test("js interpolation with replacements", async () => {
-  const r = resource("r", () => ({ i: 1 }));
-  assertEquals(await js.eval(js`1 + ${js`1+${r.i}+1`} + 1`), 5);
+Deno.test("toJs preserves operation order even in between assignments", () => {
+  assertEquals(
+    toJs(() => {
+      const a = js`a`;
+      js`arbitrary(${a})`;
+      const b = js`b`;
+      return js`${a} * ${b} + ${b}`;
+    }),
+    `let ${varPrefix}0=a;arbitrary(${varPrefix}0);let ${varPrefix}1=b;return ${varPrefix}0 * ${varPrefix}1 + ${varPrefix}1;`,
+  );
+});
+
+Deno.test("toJs preserves runtime object references", () => {
+  assertEquals(
+    toJs(() => {
+      const obj = {};
+      return js`${obj} ?? ${obj}`;
+    }),
+    `let ${varPrefix}0={};return ${varPrefix}0 ?? ${varPrefix}0;`,
+  );
+});
+
+Deno.test("toJs assigns correctly even when returning directly out of scope content", () => {
+  const a = js<(a: unknown, b: unknown) => unknown>`a`;
+  assertEquals(
+    toJs(() =>
+      asJs(() => {
+        js`b`;
+        return a;
+      })
+    ),
+    `let ${varPrefix}0=a;return ()=>{b;return ${varPrefix}0};`,
+  );
+});
+
+Deno.test("toJs allows setting properties", () => {
+  const obj = asJs({ foo: "bar" });
+  assertEquals(
+    toJs(() => () => {
+      obj.foo = asJs("baz");
+    }),
+    `let ${varPrefix}0={foo:"bar"};return ()=>{${varPrefix}0.foo="baz"};`,
+  );
+});
+
+Deno.test("toJs writes custom user JS in 2 passes", () => {
+  assertEquals(
+    toJs(() =>
+      asJs({
+        [$js](write: JSWrite) {
+          write("a[");
+          write(() => write("42"));
+          write("]");
+        },
+      })
+    ),
+    `return a[42];`,
+  );
 });
 
 Deno.test("js array interpolation", async () => {
-  assertEquals(await js.eval(js`${["a", "b", "c"]}.join("")`), "abc");
+  assertEquals(await evalJs(js`${["a", "b", "c"]}.join("")`), "abc");
 });
 
 Deno.test("js object interpolation", async () => {
   assertEquals(
-    await js.eval(
+    await evalJs(
       js`Object.entries(${{
         a: 1,
         b: 2,
@@ -199,32 +302,57 @@ Deno.test("js object interpolation", async () => {
   );
 });
 
-Deno.test("js.comma evaluates and types based of last expression", async () => {
-  const chained: JS<2> = js.comma(js<1>`1`, js<2>`2`);
-  assertEquals(await js.eval(chained), 2);
-});
-
 Deno.test("js.string works without interpolation", () => {
-  const rawJS = toJs([js.string`/foo`]);
-  assertEquals(rawJS, `\`/foo\`;`);
+  const rawJS = toJs(() => js.string`/foo`);
+  assertEquals(rawJS, `return \`/foo\`;`);
 });
 
 Deno.test("js.string escapes backticks and dollars", () => {
   const a = js`a`;
   const b = js`b`;
-  const rawJS = toJs([js.string`/\`\$/${a}/\`\$/${b}/\$\`/`]);
+  const rawJS = toJs(() => js.string`/\`\$/${a}/\`\$/${b}/\$\`/`);
   assertEquals(
     rawJS,
-    `\`/\\\`\\\$/\${a}/\\\`\\\$/\${b}/\\\$\\\`/\`;`,
+    `return \`/\\\`\\\$/\${a}/\\\`\\\$/\${b}/\\\$\\\`/\`;`,
   );
 });
 
-Deno.test("await-ing a JS should not block", async () => {
-  const expr = js<
-    Promise<42>
-  >`new Promise(resolve => setTimeout(() => resolve(42), 1))`;
-  const res = await expr;
-  assertEquals(typeof res, "function");
-  assertEquals((res as any).then, undefined);
-  assertEquals(await js.eval(res), 42);
+Deno.test("js.new instantiates correctly with given arguments", async () => {
+  const d = new Date();
+  assertEquals(
+    await evalJs(js.new(Date, d.toISOString()).toISOString()),
+    d.toISOString(),
+  );
+});
+
+export { varPrefix };
+
+Deno.test("js modules are used and reused correctly", () => {
+  const jsModule = js.module<typeof import("./entity.ts")>(
+    import.meta.resolve("./entity.ts"),
+  );
+  const jsTestModule = js.module<typeof import("./js.test.ts")>(
+    import.meta.url,
+  );
+
+  assertEquals(evalJs(jsModule.varPrefix), evalJs(jsTestModule.varPrefix));
+  assertEquals(evalJs(jsTestModule.varPrefix), evalJs(jsModule.varPrefix));
+});
+
+Deno.test("eval properly converts implicit JS to check for inner JS conversions", async () => {
+  assertEquals(await evalJs({ a: asJs(42) }), { a: 42 });
+});
+
+Deno.test("eval keeps custom JS-writable object references without writing", async () => {
+  const obj = {
+    [$js]() {
+      throw "Fail";
+    },
+  };
+  assertStrictEquals((await evalJs({ foo: obj })).foo, obj);
+});
+
+Deno.test("eval forwards runtime references for exactly same objects", async () => {
+  const obj = { foo: { bar: "baz" } };
+  assertStrictEquals(await evalJs(obj), obj);
 });
